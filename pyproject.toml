@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "graph-swarm"
+version = "0.1.0"
+description = "Research prototype for Verified Failure Memory in agentic software-engineering workflows."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "neo4j>=5",
+  "pydantic>=2",
+  "pydantic-ai",
+  "pydantic-settings>=2",
+  "PyYAML>=6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pyright",
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "ruff",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graph_swarm"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src", "tests"]

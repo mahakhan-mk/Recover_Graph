@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Experiment output
+artifacts/runs/*
+artifacts/results/*
+artifacts/reports/*
+!artifacts/runs/.gitkeep
+!artifacts/results/.gitkeep
+!artifacts/reports/.gitkeep
+
+# Neo4j local data
+.neo4j/

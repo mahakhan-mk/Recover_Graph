@@ -1,0 +1,5 @@
+provider: groq
+model: TBD
+settings:
+  temperature: 0
+prompt_version: v1

@@ -1,0 +1,9 @@
+experiment_id: GS-E001
+rollout: observe_and_remember
+model_config: configs/models/groq.yaml
+limits:
+  max_actions: 15
+  timeout_seconds: 300
+memory:
+  enabled: true
+  advisory_enabled: false

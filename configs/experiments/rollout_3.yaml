@@ -1,0 +1,9 @@
+experiment_id: GS-E004
+rollout: evaluate_and_generalize
+model_config: configs/models/groq.yaml
+conditions:
+  - no_persistent_memory
+  - graph_swarm
+limits:
+  max_actions: 15
+  timeout_seconds: 300

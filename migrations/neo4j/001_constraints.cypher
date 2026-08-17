@@ -1,0 +1,14 @@
+CREATE CONSTRAINT run_id_unique IF NOT EXISTS
+FOR (n:Run) REQUIRE n.id IS UNIQUE;
+
+CREATE CONSTRAINT task_id_unique IF NOT EXISTS
+FOR (n:Task) REQUIRE n.id IS UNIQUE;
+
+CREATE CONSTRAINT action_id_unique IF NOT EXISTS
+FOR (n:Action) REQUIRE n.id IS UNIQUE;
+
+CREATE CONSTRAINT failure_id_unique IF NOT EXISTS
+FOR (n:FailureEpisode) REQUIRE n.id IS UNIQUE;
+
+CREATE CONSTRAINT resolution_id_unique IF NOT EXISTS
+FOR (n:Resolution) REQUIRE n.id IS UNIQUE;
