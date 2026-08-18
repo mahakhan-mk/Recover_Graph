@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from graph_swarm.domain.action import ActionResult
+
 
 class PlannedAction(BaseModel):
     """A tool action proposed by the experimental agent."""
@@ -17,12 +19,4 @@ class PlannedAction(BaseModel):
     planned_at: datetime
 
 
-class ActionResult(BaseModel):
-    """Normalized result of a tool action."""
-
-    action_id: str
-    status: str
-    exit_code: int | None = None
-    http_status: int | None = None
-    exception_class: str | None = None
-    error: str | None = None
+__all__ = ["ActionResult", "PlannedAction"]
