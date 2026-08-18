@@ -42,7 +42,8 @@ graph-swarm/
 ```bash
 cp .env.example .env
 python -m venv .venv
-source .venv/bin/activate
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.venv\Scripts\Activate.ps1
 pip install -e '.[dev]'
 docker compose up -d
 pytest

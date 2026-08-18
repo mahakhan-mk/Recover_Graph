@@ -1,7 +1,5 @@
 """Neo4j connectivity wrapper for the operational memory repository."""
-import truststore
 
-truststore.inject_into_ssl()
 from types import TracebackType
 
 from neo4j import Driver, EagerResult, GraphDatabase

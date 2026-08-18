@@ -1,7 +1,11 @@
 """Smoke test Neo4j AuraDB connectivity."""
 
-from graph_swarm.graph.neo4j_repository import Neo4jRepository
-from graph_swarm.settings import get_settings
+import truststore
+
+truststore.inject_into_ssl()
+
+from graph_swarm.graph.neo4j_repository import Neo4jRepository  # noqa: E402
+from graph_swarm.settings import get_settings  # noqa: E402
 
 
 def main() -> None:

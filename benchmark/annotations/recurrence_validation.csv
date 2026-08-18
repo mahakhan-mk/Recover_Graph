@@ -1,0 +1,1089 @@
+review_id,instance_id,mutation_family,repository,image_name,fail_to_pass_count,pass_to_pass_count,problem_statement,keep,transferable,recovery_pattern,transfer_rationale,chronological_index,notes
+GS-R001,getmoto__moto.694ce1f4.func_pm_op_swap__vboqiizk,func_pm_op_swap,swesmith/getmoto__moto.694ce1f4,swebench/swesmith.x86_64.getmoto_1776_moto.694ce1f4,1,8,"Parameter parsing broken for nested list structures
+
+#### Description
+
+When parsing query parameters with nested list structures, the parameter parsing logic incorrectly assigns values to the wrong parent keys, causing malformed data structures.
+
+#### Steps/Code to Reproduce
+
+```python
+from collections import OrderedDict
+from moto.core.responses import BaseResponse
+
+subject = BaseResponse()
+subject.querystring = OrderedDict([
+    ('Action', ['CreateRule']), 
+    ('Version', ['2015-12-01']), 
+    ('ListenerArn', ['arn:aws:elasticloadbalancing:us-east-1:1:listener/my-lb/50dc6c495c0c9188/80139731473870416']), 
+    ('Priority', ['100']), 
+    ('Conditions.member.1.Field', ['http-header']), 
+    ('Conditions.member.1.HttpHeaderConfig.HttpHeaderName', ['User-Agent']), 
+    ('Conditions.member.1.HttpHeaderConfig.Values.member.2', ['curl']), 
+    ('Conditions.member.1.HttpHeaderConfig.Values.member.1', ['Mozilla']), 
+    ('Actions.member.1.FixedResponseConfig.StatusCode', ['200']), 
+    ('Actions.member.1.FixedResponseConfig.ContentType', ['text/plain']), 
+    ('Actions.member.1.Type', ['fixed-response'])
+])
+
+result = subject._get_params()
+print(result)
+```
+
+The parsed result has incorrect structure where nested list values are not properly organized under their parent keys. The `Values` list under `HttpHeaderConfig` should contain `['Mozilla', 'curl']` but the current parsing logic assigns them incorrectly.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R002,tobymao__sqlglot.036601ba.func_pm_op_swap__sjuhf6dv,func_pm_op_swap,swesmith/tobymao__sqlglot.036601ba,swebench/swesmith.x86_64.tobymao_1776_sqlglot.036601ba,1,52,"STR_POSITION with position parameter generates incorrect SQL for some dialects
+
+When using `STR_POSITION` with a position parameter, the generated SQL for certain dialects produces incorrect results due to improper arithmetic operation ordering.
+
+#### Steps/Code to Reproduce
+
+```python
+import sqlglot
+
+# Test case that demonstrates the issue
+sql = ""STR_POSITION(haystack, needle, position)""
+
+# Generate SQL for postgres dialect
+result = sqlglot.transpile(sql, write=""postgres"")[0]
+print(""Generated:"", result)
+print(""Expected: CASE WHEN POSITION(needle IN SUBSTRING(haystack FROM position)) = 0 THEN 0 ELSE POSITION(needle IN SUBSTRING(haystack FROM position)) + position - 1 END"")
+```
+
+The generated SQL has incorrect operator precedence in the arithmetic expression, causing the position offset calculation to be wrong.
+
+This affects multiple dialects including postgres, redshift, materialize, risingwave, duckdb, and others that use the ANSI POSITION syntax with substring operations when a position parameter is provided.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R003,burnash__gspread.a8be3b96.func_pm_op_swap__sd1l3qgr,func_pm_op_swap,swesmith/burnash__gspread.a8be3b96,swebench/swesmith.x86_64.burnash_1776_gspread.a8be3b96,1,148,"get_all_records returns wrong data when head parameter is used
+
+#### Description
+
+When using `get_all_records()` with a custom `head` parameter, the method returns incorrect data. The header row extraction appears to be using the wrong index calculation.
+
+#### Steps/Code to Reproduce
+
+```python
+import gspread
+
+# Assuming you have a worksheet with data like:
+# Row 1: ['', '', '', '']
+# Row 2: ['', '', '', ''] 
+# Row 3: ['A1', 'B1', '', 'D1']  # This should be the header row
+# Row 4: [1, 'b2', 1.45, '']
+# Row 5: ['', '', '', '']
+# Row 6: ['A4', 0.4, '', 4]
+
+# When trying to use row 3 as headers:
+records = worksheet.get_all_records(head=3)
+print(records)
+# Expected: Records using row 3 as headers
+# Actual: Records using wrong row as headers
+```
+
+The issue occurs when specifying a custom header row position with the `head` parameter. Instead of using the specified row as headers, the method appears to be calculating the header row index incorrectly, leading to unexpected results in the returned records.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R004,Cog-Creators__Red-DiscordBot.33e0eac7.func_pm_op_swap__qe8oa7ae,func_pm_op_swap,swesmith/Cog-Creators__Red-DiscordBot.33e0eac7,swebench/swesmith.x86_64.cog-creators_1776_red-discordbot.33e0eac7,1,267,"pagify iterator returns empty results and incorrect length hints
+
+#### Description
+
+The `pagify` function in `redbot.core.utils.chat_formatting` is not working correctly. When trying to paginate text, it returns empty results instead of properly splitting the text into pages.
+
+#### Steps/Code to Reproduce
+
+```python
+from redbot.core.utils.chat_formatting import pagify
+import operator
+
+# Simple pagination test
+text = ""Line 1\nA longer line 2\n'tis a veeeeery long line numero tres\nand the last line""
+pages = list(pagify(text, page_length=15))
+print(f""Expected pages, got: {pages}"")
+
+# Length hint test
+it = pagify('A' * 100, shorten_by=0, page_length=10)
+print(f""Length hint: {operator.length_hint(it)}"")
+for i, page in enumerate(it):
+    print(f""Page {i}: '{page}' (length hint: {operator.length_hint(it)})"")
+```
+
+Expected behavior: The text should be split into multiple pages of the specified length, and the length hint should correctly indicate remaining pages.
+
+Actual behavior: The pagify iterator doesn't produce any pages and length hints are incorrect.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R005,pydantic__pydantic.acb0f10f.func_pm_op_swap__5q3hvt05,func_pm_op_swap,swesmith/pydantic__pydantic.acb0f10f,swebench/swesmith.x86_64.pydantic_1776_pydantic.acb0f10f,1,5437,"Union type annotation order causes syntax error in Python < 3.10
+
+#### Description
+
+When using union type annotations with `None | Type` syntax, the code fails on Python versions prior to 3.10 due to the newer union syntax not being supported.
+
+#### Steps/Code to Reproduce
+
+```python
+from pydantic import BaseModel
+
+class MyModel(BaseModel):
+    name: str
+
+# This will fail on Python < 3.10
+MyModel.model_rebuild()
+```
+
+The issue occurs because the `model_rebuild` method uses `None | MappingNamespace` syntax in its type annotation, which is only supported in Python 3.10+. On earlier Python versions, this causes a syntax error during import.
+
+#### Expected Behavior
+
+The code should work on all supported Python versions by using the older `Union[None, MappingNamespace]` or `Optional[MappingNamespace]` syntax for type annotations.
+
+#### Environment
+
+This affects Python versions < 3.10 where the new union syntax (`|`) is not available.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R006,pylint-dev__astroid.b114f6b5.func_pm_ctrl_invert_if__ih3yhdtw,func_pm_ctrl_invert_if,swesmith/pylint-dev__astroid.b114f6b5,swebench/swesmith.x86_64.pylint-dev_1776_astroid.b114f6b5,1,1592,"Slice node igetattr returns wrong attribute for 'step'
+
+#### Description
+
+When accessing the 'step' attribute of a Slice node using `igetattr`, it returns the wrong value. The method seems to be returning attributes in an incorrect order.
+
+#### Steps/Code to Reproduce
+
+```python
+import astroid
+
+# Create a slice node
+code = ""slice(2, 3, 4)""
+node = astroid.extract_node(code)
+inferred = next(node.infer())
+
+# Try to get the step attribute
+step_value = next(inferred.igetattr('step'))
+print(f""Expected step value: 4"")
+print(f""Actual step value: {step_value.value}"")
+
+# Also check other attributes
+start_value = next(inferred.igetattr('start'))
+stop_value = next(inferred.igetattr('stop'))
+print(f""Start: {start_value.value}, Stop: {stop_value.value}, Step: {step_value.value}"")
+```
+
+Expected output:
+```
+Expected step value: 4
+Actual step value: 4
+Start: 2, Stop: 3, Step: 4
+```
+
+Actual output shows incorrect step value being returned.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R007,arrow-py__arrow.1d70d009.func_pm_ctrl_invert_if__3qv25kyc,func_pm_ctrl_invert_if,swesmith/arrow-py__arrow.1d70d009,swebench/swesmith.x86_64.arrow-py_1776_arrow.1d70d009,1,1851,"Icelandic locale humanize raises ValueError for future time deltas
+
+#### Description
+
+When using the Icelandic locale to format future time deltas, a ValueError is raised instead of returning the proper future form. The error message indicates that zero deltas are not supported, but this occurs even for positive (future) deltas.
+
+#### Steps/Code to Reproduce
+
+```python
+import arrow
+
+# Set locale to Icelandic
+arrow.locales.IcelandicLocale()._format_timeframe('minutes', 2)
+```
+
+This should return the future form ""2 mínútur"" but instead raises:
+
+```
+ValueError: Icelandic Locale does not support units with a delta of zero. Please consider making a contribution to fix this issue.
+```
+
+The issue affects all positive delta values when trying to format future timeframes in Icelandic locale. Past deltas (negative values) work correctly, and zero deltas are expected to raise this error, but positive deltas should return the future form instead of raising an exception.",yes,yes,"When behavior is reversed around a boolean branch or guard, inspect condition polarity and restore the intended true/false branch mapping before changing downstream logic.",Across repositories the failure is produced by an inverted decision boundary. A previously verified recovery that checks branch polarity is plausibly reusable without depending on repository-specific names or implementation details.,1,"Selected for pilot as GS-F001 (conditional_polarity_error), occurrence 1 of 3."
+GS-R008,davidhalter__parso.338a5760.func_pm_ctrl_invert_if__9znzdouk,func_pm_ctrl_invert_if,swesmith/davidhalter__parso.338a5760,swebench/swesmith.x86_64.davidhalter_1776_parso.338a5760,2,798,"dump() method raises TypeError for BaseNode instances
+
+#### Description
+
+The `dump()` method in `NodeOrLeaf` is raising a `TypeError` when encountering `BaseNode` instances during tree traversal. This breaks the ability to generate string representations of parse trees.
+
+#### Steps/Code to Reproduce
+
+```python
+from parso import parse
+
+# Parse a simple lambda expression
+module = parse('lambda x, y: x + y')
+
+# Try to dump the tree - this should work but raises TypeError
+print(module.dump())
+```
+
+The error occurs when the dump method encounters BaseNode instances in the parse tree. The method should be able to handle all node types properly to generate a complete string representation.
+
+#### Expected Behavior
+
+The `dump()` method should successfully generate a string representation of the entire parse tree without raising exceptions for valid node types.
+
+#### Actual Behavior
+
+A `TypeError` is raised with the message ""unsupported node encountered"" when the method processes BaseNode instances that are part of the normal parse tree structure.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R009,tornadoweb__tornado.d5ac65c1.func_pm_ctrl_invert_if__q4lii0db,func_pm_ctrl_invert_if,swesmith/tornadoweb__tornado.d5ac65c1,swebench/swesmith.x86_64.tornadoweb_1776_tornado.d5ac65c1,2,1155,"CSV translation files with UTF-8 BOM incorrectly detected as UTF-16
+
+#### Description
+
+When loading CSV translation files that contain a UTF-8 BOM (Byte Order Mark), the encoding detection logic incorrectly identifies them as UTF-16 files, causing a UnicodeError when trying to read the file.
+
+#### Steps/Code to Reproduce
+
+```python
+import tempfile
+import os
+import tornado.locale
+
+# Create a temporary directory for translations
+tmpdir = tempfile.mkdtemp()
+
+# Create a CSV file with UTF-8 BOM
+csv_path = os.path.join(tmpdir, ""en_US.csv"")
+with open(csv_path, ""wb"") as f:
+    # Write UTF-8 BOM followed by CSV content
+    f.write(b'\xef\xbb\xbf')  # UTF-8 BOM
+    f.write(b'""hello"",""Hello""\n')
+
+# Try to load translations - this will fail
+tornado.locale.load_translations(tmpdir)
+```
+
+This raises:
+```
+UnicodeError: UTF-16 stream does not start with BOM
+```
+
+The issue occurs because the BOM detection logic is reversed - files with UTF-16 BOMs are being treated as UTF-8, while files with UTF-8 BOMs (or no BOM) are being treated as UTF-16.",yes,yes,"When behavior is reversed around a boolean branch or guard, inspect condition polarity and restore the intended true/false branch mapping before changing downstream logic.",Across repositories the failure is produced by an inverted decision boundary. A previously verified recovery that checks branch polarity is plausibly reusable without depending on repository-specific names or implementation details.,6,"Selected for pilot as GS-F001 (conditional_polarity_error), occurrence 2 of 3."
+GS-R010,tox-dev__pipdeptree.c31b6418.func_pm_ctrl_invert_if__raha3m74,func_pm_ctrl_invert_if,swesmith/tox-dev__pipdeptree.c31b6418,swebench/swesmith.x86_64.tox-dev_1776_pipdeptree.c31b6418,7,118,"Text rendering produces incorrect indentation for Unicode tree branches
+
+#### Description
+
+When rendering dependency trees with Unicode characters enabled, the indentation logic for tree branches appears to be swapped, causing incorrect visual alignment of the tree structure. This affects the readability of the dependency tree output when using Unicode box-drawing characters.
+
+#### Steps/Code to Reproduce
+
+```python
+from pipdeptree._render.text import render_text
+from pipdeptree._models import PackageDAG
+
+# Create a simple dependency tree and render with Unicode
+dag = PackageDAG.from_pkgs(packages)  # assume some package data
+render_text(dag, max_depth=float('inf'), encoding='utf-8', list_all=True)
+```
+
+The issue manifests when rendering trees with Unicode characters where the branch indentation logic appears reversed - spaces are added when vertical lines should continue, and vertical lines are drawn when spaces should appear.
+
+#### Expected vs Actual Output
+
+Expected tree structure should show proper Unicode box-drawing alignment:
+```
+a==3.4.0
+├── b [required: >=2.0.0, installed: 2.3.1]
+│   └── d [required: >=2.30,<2.42, installed: 2.35]
+└── c [required: >=5.7.1, installed: 5.10.0]
+    ├── d [required: >=2.30, installed: 2.35]
+    └── e [required: >=0.12.1, installed: 0.12.1]
+```
+
+But the actual output shows misaligned indentation where the vertical continuation lines and spaces are incorrectly positioned.",yes,yes,"When behavior is reversed around a boolean branch or guard, inspect condition polarity and restore the intended true/false branch mapping before changing downstream logic.",Across repositories the failure is produced by an inverted decision boundary. A previously verified recovery that checks branch polarity is plausibly reusable without depending on repository-specific names or implementation details.,11,"Selected for pilot as GS-F001 (conditional_polarity_error), occurrence 3 of 3."
+GS-R011,pyca__pyopenssl.04766a49.func_pm_remove_assign__2j27akkq,func_pm_remove_assign,swesmith/pyca__pyopenssl.04766a49,swebench/swesmith.x86_64.pyca_1776_pyopenssl.04766a49,1,448,"X509Extension ignores issuer parameter when creating authorityKeyIdentifier extension
+
+I am trying to create an X509 certificate with an authorityKeyIdentifier extension that includes the issuer information. According to the documentation, I should be able to pass an issuer parameter to the X509Extension constructor, but it seems to be ignored.
+
+Here's a minimal example to reproduce the issue:
+
+```python
+from OpenSSL import crypto
+
+# Create a root CA certificate
+ca_key = crypto.PKey()
+ca_key.generate_key(crypto.TYPE_RSA, 2048)
+ca_cert = crypto.X509()
+ca_cert.get_subject().CN = ""Yoda root CA""
+ca_cert.set_serial_number(1)
+ca_cert.gmtime_adj_notBefore(0)
+ca_cert.gmtime_adj_notAfter(365*24*60*60)  # 1 year
+ca_cert.set_issuer(ca_cert.get_subject())
+ca_cert.set_pubkey(ca_key)
+ca_cert.sign(ca_key, ""sha256"")
+
+# Create a certificate with authorityKeyIdentifier extension
+key = crypto.PKey()
+key.generate_key(crypto.TYPE_RSA, 2048)
+cert = crypto.X509()
+cert.get_subject().CN = ""Luke Skywalker""
+cert.set_serial_number(2)
+cert.gmtime_adj_notBefore(0)
+cert.gmtime_adj_notAfter(365*24*60*60)  # 1 year
+cert.set_issuer(ca_cert.get_subject())
+cert.set_pubkey(key)
+
+# This extension should include the issuer information
+ext = crypto.X509Extension(b'authorityKeyIdentifier', False, b'issuer:always', issuer=ca_cert)
+cert.add_extensions([ext])
+cert.sign(ca_key, ""sha256"")
+
+# Dump the certificate to check if the issuer information is included
+text = crypto.dump_certificate(crypto.FILETYPE_TEXT, cert)
+print(text.decode())
+```
+
+When I run this code, the authorityKeyIdentifier extension is created, but it doesn't include the issuer information that I would expect to see. The output should include something like ""DirName:/CN=Yoda root CA"" in the Authority Key Identifier section, but it's missing.
+
+Is this a bug in the X509Extension implementation, or am I using it incorrectly?",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R012,pygments__pygments.27649ebb.func_pm_remove_assign__g523kgcx,func_pm_remove_assign,swesmith/pygments__pygments.27649ebb,swebench/swesmith.x86_64.pygments_1776_pygments.27649ebb,1,5059,"UcodeLexer analyse_text method returns undefined variable
+
+#### Description
+
+The UcodeLexer's analyse_text method is trying to return a variable `result` that is not defined in all code paths, causing a NameError when the lexer is used for language detection.
+
+#### Steps/Code to Reproduce
+
+```python
+from pygments.lexers import guess_lexer
+
+# Try to guess lexer for Unicon code
+code = """"""
+procedure main()
+    write(""Hello World"")
+    endsuspend
+end
+""""""
+
+lexer = guess_lexer(code)
+print(lexer.__class__.__name__)
+```
+
+This will raise a NameError because the `result` variable is referenced but not initialized in the analyse_text method.
+
+The issue occurs when the UcodeLexer.analyse_text() method tries to analyze text but the `result` variable is not properly initialized before being used in the return statement.",yes,yes,"When a required value or state is undefined or missing, inspect its dataflow for a removed initialization or assignment and restore the required assignment before first use.",Across repositories the failure occurs because required state is no longer assigned before later use. The reusable recovery is to trace initialization and dataflow and restore the missing assignment.,2,"Selected for pilot as GS-F002 (missing_initialization_or_assignment), occurrence 1 of 3."
+GS-R013,davidhalter__parso.338a5760.func_pm_remove_assign__k4s3exdv,func_pm_remove_assign,swesmith/davidhalter__parso.338a5760,swebench/swesmith.x86_64.davidhalter_1776_parso.338a5760,2,798,"dump() method produces broken output for nodes with children
+
+#### Description
+
+The `dump()` method on parser nodes is not working correctly when nodes have children. It appears to be missing the node type information and not properly iterating through child nodes.
+
+#### Steps/Code to Reproduce
+
+```python
+from parso import parse
+
+# Parse a simple lambda expression
+module = parse('lambda x, y: x + y')
+
+# Try to dump the tree structure
+print(module.dump())
+```
+
+The output is malformed and missing critical information. When trying to evaluate the dumped output, it fails with a `NameError` because the node type variable is not defined.
+
+Additionally, trying to use `eval()` on the dump output to reconstruct the tree fails:
+
+```python
+from parso import parse
+
+module = parse('lambda x, y: x + y')
+dumped = module.dump()
+module2 = eval(dumped)  # This should work but fails
+```
+
+The dump method should produce a string representation that can be evaluated to reconstruct the original tree structure with proper parent-child relationships.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R014,pallets__jinja.ada0a9a6.func_pm_remove_assign__da6pmq2q,func_pm_remove_assign,swesmith/pallets__jinja.ada0a9a6,swebench/swesmith.x86_64.pallets_1776_jinja.ada0a9a6,3,752,"Variable aliasing broken in conditional assignments
+
+#### Description
+
+When using conditional variable assignments in templates, variables that should reference outer scope values are not being properly aliased, causing incorrect template rendering behavior.
+
+#### Steps/Code to Reproduce
+
+```python
+from jinja2 import Environment
+
+env = Environment()
+tmpl = env.from_string('{% if b %}{% set a = 42 %}{% endif %}{{ a }}')
+
+# This should render '23' but renders something else
+result1 = tmpl.render(a=23)
+print(f""Expected: '23', Got: '{result1}'"")
+
+# This should render '42' 
+result2 = tmpl.render(b=True)
+print(f""Expected: '42', Got: '{result2}'"")
+```
+
+The issue appears when a variable is conditionally assigned within an if block but should fall back to an outer scope value when the condition is false. The template should use the outer scope variable `a=23` when `b` is not provided, but instead produces unexpected behavior.
+
+This affects template compilation and variable resolution in conditional contexts where variables may or may not be assigned depending on runtime conditions.",yes,yes,"When a required value or state is undefined or missing, inspect its dataflow for a removed initialization or assignment and restore the required assignment before first use.",Across repositories the failure occurs because required state is no longer assigned before later use. The reusable recovery is to trace initialization and dataflow and restore the missing assignment.,7,"Selected for pilot as GS-F002 (missing_initialization_or_assignment), occurrence 2 of 3."
+GS-R015,stanfordnlp__dspy.651a4c71.func_pm_remove_assign__5hir3c4c,func_pm_remove_assign,swesmith/stanfordnlp__dspy.651a4c71,swebench/swesmith.x86_64.stanfordnlp_1776_dspy.651a4c71,4,305,"# DatabricksRM retriever fails when using string queries
+
+## Description
+
+I've encountered an issue with the DatabricksRM retriever when using string queries. The retriever fails to properly process the results and throws an error.
+
+When I try to use the DatabricksRM retriever with a string query, I get an error because some variables are not properly initialized. This happens specifically when using a string query (not a vector query).
+
+## Steps to reproduce
+
+Here's a minimal example that reproduces the issue:
+
+```python
+import dspy
+from dspy.retrieve import DatabricksRM
+
+# Configure the retriever
+retriever = DatabricksRM(
+    databricks_index_name=""my_index"",
+    databricks_token=""my_token"",
+    databricks_endpoint=""https://my-endpoint.cloud.databricks.com"",
+    text_column_name=""content"",
+    k=3
+)
+
+# This fails
+results = retriever(""What is machine learning?"")
+```
+
+## Expected behavior
+
+The retriever should properly process string queries and return the relevant documents.
+
+## Actual behavior
+
+The retriever fails with an error because some variables are not properly initialized. The issue appears to be in the handling of string queries where some variables are not defined before they're used.
+
+Specifically, when using a string query:
+1. `query_vector` is not initialized
+2. `items` list is not initialized before being used
+3. `item` dictionary is not initialized in the loop processing results
+
+This only happens with string queries, as vector queries seem to be handled correctly.
+
+## Environment information
+
+- Python version: 3.11
+- DSPy version: latest
+
+## Additional context
+
+The issue seems to be in the `__call__` method of the `DatabricksRM` class where some variables are not properly initialized when processing string queries.",yes,yes,"When a required value or state is undefined or missing, inspect its dataflow for a removed initialization or assignment and restore the required assignment before first use.",Across repositories the failure occurs because required state is no longer assigned before later use. The reusable recovery is to trace initialization and dataflow and restore the missing assignment.,12,"Selected for pilot as GS-F002 (missing_initialization_or_assignment), occurrence 3 of 3."
+GS-R016,pandas-dev__pandas.95280573.func_pm_remove_cond__0z5ngjcc,func_pm_remove_cond,swesmith/pandas-dev__pandas.95280573,swebench/swesmith.x86_64.pandas-dev_1776_pandas.95280573,1,229,"DataFrame construction fails with categorical data
+
+#### Description
+
+When creating a DataFrame with categorical data, the construction process fails due to missing logic in the ndarray_to_mgr function. The function appears to be missing essential code paths for handling different data types including categorical data.
+
+#### Steps/Code to Reproduce
+
+```python
+import pandas as pd
+from pandas import Categorical, DataFrame
+
+# Create categorical data
+cat = Categorical(['A', 'B', 'C'])
+
+# Try to create DataFrame - this should work but fails
+df = DataFrame(cat)
+```
+
+The issue seems to affect the internal block manager construction when dealing with categorical data types. The DataFrame creation process doesn't properly handle the categorical data conversion and block creation.
+
+#### Expected Behavior
+
+Creating a DataFrame from categorical data should work without errors and properly store the categorical information in the resulting DataFrame's internal structure.
+
+#### Actual Behavior
+
+The DataFrame construction process fails to properly handle categorical data, leading to issues in the internal block manager's ability to store and manage categorical data types.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R017,pygments__pygments.27649ebb.func_pm_remove_cond__ai6vpsek,func_pm_remove_cond,swesmith/pygments__pygments.27649ebb,swebench/swesmith.x86_64.pygments_1776_pygments.27649ebb,2,5058,"LassoLexer not highlighting built-in functions and members
+
+#### Description
+
+The LassoLexer is no longer properly highlighting built-in functions and member variables. Built-in keywords that should be highlighted as `Name.Builtin` are instead being treated as regular `Name.Other` tokens.
+
+#### Steps/Code to Reproduce
+
+```python
+from pygments import highlight
+from pygments.lexers import LassoLexer
+from pygments.formatters import TerminalFormatter
+
+code = """"""
+<?lasso
+var('myvar') = 'hello';
+string_uppercase(myvar);
+?>
+""""""
+
+lexer = LassoLexer()
+result = highlight(code, lexer, TerminalFormatter())
+print(result)
+```
+
+Expected: `string_uppercase` should be highlighted as a built-in function
+Actual: `string_uppercase` appears as regular text without built-in highlighting
+
+The issue affects both built-in functions from `self._builtins` and member functions from `self._members` that should receive special token classification.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R018,pydicom__pydicom.7d361b3d.func_pm_remove_cond__u65uqexc,func_pm_remove_cond,swesmith/pydicom__pydicom.7d361b3d,swebench/swesmith.x86_64.pydicom_1776_pydicom.7d361b3d,3,2326,"DT value parsing broken for datetime strings with microseconds
+
+#### Description
+
+When creating a DT object from a datetime string that includes microseconds, the parsing fails with an AttributeError. The DT class seems to have issues handling fractional seconds properly.
+
+#### Steps/Code to Reproduce
+
+```python
+import pydicom.valuerep
+
+# This should work but raises AttributeError
+dt = pydicom.valuerep.DT('19610804192430.123')
+print(dt)
+```
+
+The error occurs when trying to parse datetime strings that contain fractional seconds. The DT class should be able to handle these according to the DICOM standard, but currently fails during the parsing process.
+
+#### Expected Behavior
+
+The DT object should successfully parse datetime strings with microseconds and create a proper datetime object with the fractional seconds converted to microseconds.
+
+#### Actual Behavior
+
+An AttributeError is raised during the parsing process, preventing the creation of DT objects from datetime strings containing fractional seconds.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R019,iterative__dvc.1d6ea681.func_pm_remove_cond__5ld2j2lc,func_pm_remove_cond,swesmith/iterative__dvc.1d6ea681,swebench/swesmith.x86_64.iterative_1776_dvc.1d6ea681,4,69,"Repo initialization fails with AttributeError on lock and state attributes
+
+#### Description
+
+When initializing a Repo instance, the code fails with AttributeError because the `lock` and `state` attributes are not being set properly. This affects both local filesystem and non-local filesystem scenarios.
+
+#### Steps/Code to Reproduce
+
+```python
+from dvc.repo import Repo
+import tempfile
+import os
+
+# Create a temporary directory and initialize a DVC repo
+with tempfile.TemporaryDirectory() as tmp_dir:
+    os.chdir(tmp_dir)
+    
+    # Initialize git repo first
+    os.system('git init')
+    
+    # Try to initialize DVC repo
+    dvc = Repo.init()
+    
+    # This should work but fails with AttributeError
+    dvc.close()
+```
+
+The error occurs when trying to access `repo.lock` or `repo.state` attributes that are expected to exist but are not being initialized.
+
+#### Expected Behavior
+
+The Repo should initialize properly with all required attributes (lock, state, etc.) set correctly, allowing normal DVC operations to proceed.
+
+#### Actual Behavior
+
+AttributeError is raised when trying to access the `lock` or `state` attributes because they are not being set during repository initialization.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R020,mozilla__bleach.73871d76.func_pm_remove_cond__kcyz9gdr,func_pm_remove_cond,swesmith/mozilla__bleach.73871d76,swebench/swesmith.x86_64.mozilla_1776_bleach.73871d76,5,216,"# HTML tree walker breaks when traversing nested elements
+
+## Description
+
+When using bleach to clean or linkify HTML content that contains nested elements, the tree walker fails to properly traverse the element tree. This causes issues with nested elements inside links and other complex HTML structures.
+
+## Reproduction
+
+I'm trying to clean HTML that contains nested elements inside links, but the output is incorrect:
+
+```python
+from bleach import linkify, clean
+
+# Example 1: Elements inside links
+html = '<a href=""#"">hello<br></a>'
+result = linkify(html)
+# Expected: '<a href=""#"" rel=""nofollow"">hello<br></a>'
+# Actual: Incorrect output
+
+# Example 2: Dropping link tags should preserve content
+html = 'first <a href=""http://example.com/"">second</a> third'
+result = linkify(html, callbacks=[lambda attrs, new: None])
+# Expected: 'first second third'
+# Actual: Content is not preserved correctly
+
+# Example 3: Cleaning with specific tags
+from bleach.sanitizer import Cleaner
+cleaner = Cleaner(tags={'span', 'br'}, attributes={'span': ['style']})
+result = cleaner.clean('a <br/><span style=""color:red"">test</span>')
+# Expected: 'a <br><span style="""">test</span>'
+# Actual: Incorrect output
+```
+
+The issue seems to be in the tree walker implementation that doesn't properly handle traversal of nested elements. This affects multiple use cases including linkify and clean operations.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R021,sunpy__sunpy.f8edfd5c.func_pm_ctrl_shuffle__slfv78i3,func_pm_ctrl_shuffle,swesmith/sunpy__sunpy.f8edfd5c,swebench/swesmith.x86_64.sunpy_1776_sunpy.f8edfd5c,1,1,"prime_meridian function raises UnboundLocalError when axes frame lacks observer
+
+#### Description
+
+The `prime_meridian` function in `sunpy.visualization.drawing` raises an `UnboundLocalError` instead of the expected `ValueError` when the coordinate frame of the WCSAxes does not have an observer.
+
+#### Steps/Code to Reproduce
+
+```python
+import sunpy.visualization.drawing as drawing
+from matplotlib.figure import Figure
+from astropy.wcs import WCS
+
+axes = Figure().add_subplot(projection=WCS())
+drawing.prime_meridian(axes)
+```
+
+#### Expected behavior
+Should raise a `ValueError` with message about the coordinate frame not having an observer.
+
+#### Actual behavior
+Raises `UnboundLocalError: cannot access local variable 'axes_frame' where it is not associated with a value`
+
+The function appears to be checking for the observer attribute before `axes_frame` is defined, causing the variable to be referenced before assignment.",yes,yes,"When execution references values, state, or checks before they are established, restore dependency order so prerequisite computation or validation occurs before use or return.",Across repositories statements are reordered so a prerequisite occurs after the operation that depends on it. A recovery based on prerequisite-before-use ordering can plausibly transfer across implementations.,3,"Selected for pilot as GS-F003 (prerequisite_ordering_error), occurrence 1 of 3."
+GS-R022,tobymao__sqlglot.036601ba.func_pm_ctrl_shuffle__cgh8hlrv,func_pm_ctrl_shuffle,swesmith/tobymao__sqlglot.036601ba,swebench/swesmith.x86_64.tobymao_1776_sqlglot.036601ba,1,14,"DATE_ADD function with 3 arguments causes UnboundLocalError
+
+#### Description
+
+When using the DATE_ADD function with 3 arguments (unit, value, expression) in Spark dialect, an UnboundLocalError is raised due to a variable being referenced before assignment.
+
+#### Steps/Code to Reproduce
+
+```python
+import sqlglot
+
+# This should work but raises UnboundLocalError
+sql = ""SELECT DATE_ADD(MONTH, 20, col)""
+result = sqlglot.transpile(sql, read=""spark"", write=""spark"")
+print(result)
+```
+
+The error occurs when parsing DATE_ADD/DATEADD/TIMESTAMPADD functions with the signature `(unit, value integer, expr)` as documented in the Databricks SQL reference.
+
+#### Expected Behavior
+
+The function should parse correctly and return the expected SQL output without errors.
+
+#### Actual Behavior
+
+```
+UnboundLocalError: cannot access local variable 'expression' where it is not defined
+```
+
+This happens because the variable `expression` is being used before it's assigned when processing the 3-argument form of DATE_ADD.",yes,yes,"When execution references values, state, or checks before they are established, restore dependency order so prerequisite computation or validation occurs before use or return.",Across repositories statements are reordered so a prerequisite occurs after the operation that depends on it. A recovery based on prerequisite-before-use ordering can plausibly transfer across implementations.,8,"Selected for pilot as GS-F003 (prerequisite_ordering_error), occurrence 2 of 3."
+GS-R023,Cog-Creators__Red-DiscordBot.33e0eac7.func_pm_ctrl_shuffle__cbmk35lk,func_pm_ctrl_shuffle,swesmith/Cog-Creators__Red-DiscordBot.33e0eac7,swebench/swesmith.x86_64.cog-creators_1776_red-discordbot.33e0eac7,1,259,"NameError in ensure_python_version_info function when processing version information
+
+#### Description
+
+When processing Python version information in JSON files, the `ensure_python_version_info` function throws a `NameError` because it references undefined variables in the wrong order.
+
+#### Steps/Code to Reproduce
+
+```python
+from pathlib import Path
+from redbot.cogs.downloader.info_schemas import ensure_python_version_info
+
+# This will fail when trying to process a version list
+info_file = Path(""test_info.json"")
+result = ensure_python_version_info(info_file, ""min_python_version"", [3, 8, 0])
+```
+
+The function tries to use `count` and `default` variables before they are defined, causing the validation logic to fail completely.
+
+#### Expected Behavior
+
+The function should properly validate Python version information and return a tuple of three integers representing the version, or fall back to the default version (3, 5, 1) when validation fails.
+
+#### Actual Behavior
+
+The function raises a `NameError` because variables are referenced before being defined, making it impossible to process any Python version information from JSON files.",yes,yes,"When execution references values, state, or checks before they are established, restore dependency order so prerequisite computation or validation occurs before use or return.",Across repositories statements are reordered so a prerequisite occurs after the operation that depends on it. A recovery based on prerequisite-before-use ordering can plausibly transfer across implementations.,13,"Selected for pilot as GS-F003 (prerequisite_ordering_error), occurrence 3 of 3."
+GS-R024,marshmallow-code__marshmallow.9716fc62.func_pm_ctrl_shuffle__qjvhw51u,func_pm_ctrl_shuffle,swesmith/marshmallow-code__marshmallow.9716fc62,swebench/swesmith.x86_64.marshmallow-code_1776_marshmallow.9716fc62,1,1187,"# Integer field validation broken in strict mode
+
+## Description
+
+I found a bug in the Integer field validation when using strict mode. The validation for non-integral values is not working properly.
+
+## To Reproduce
+
+Here's a simple example that demonstrates the issue:
+
+```python
+from marshmallow import Schema, fields
+
+class MySchema(Schema):
+    number = fields.Integer(strict=True)
+
+schema = MySchema()
+
+# This should raise a ValidationError but doesn't
+result = schema.load({""number"": 1.5})
+print(result)  # Outputs: {'number': 1}
+```
+
+## Expected behavior
+When using `strict=True` with an Integer field, non-integral values like 1.5 should raise a ValidationError.
+
+## Actual behavior
+Non-integral values are being accepted and silently converted to integers instead of raising a ValidationError.
+
+This seems to be related to the validation logic in the Integer field class. The strict validation check is not being executed properly.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R025,scanny__python-pptx.278b47b1.func_pm_ctrl_shuffle__kcmpqsfk,func_pm_ctrl_shuffle,swesmith/scanny__python-pptx.278b47b1,swebench/swesmith.x86_64.scanny_1776_python-pptx.278b47b1,1,2653,"Binary search tree insert method broken after code reorganization
+
+#### Description
+
+The `_BinarySearchTree.insert()` method in `src/pptx/text/layout.py` appears to have been accidentally reorganized, causing the method to fail when inserting values. The method logic seems to be out of order.
+
+#### Steps/Code to Reproduce
+
+```python
+from pptx.text.layout import _BinarySearchTree
+
+# Try to create a binary search tree from a sequence
+bst = _BinarySearchTree.from_ordered_sequence(range(10))
+
+# This should work but fails due to insert method issues
+```
+
+The `from_ordered_sequence` method relies on the `insert` method internally, so when insert is broken, tree construction fails.
+
+You can also try direct insertion:
+
+```python
+from pptx.text.layout import _BinarySearchTree
+
+# Create a simple tree and try to insert
+bst = _BinarySearchTree(5)
+bst.insert(3)  # This should work but may fail
+bst.insert(7)  # This should work but may fail
+```
+
+The insert method should maintain the binary search tree property where lesser values go to the left child and greater values go to the right child.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R026,Project-MONAI__MONAI.a09c1f08.func_pm_op_change__508sq64p,func_pm_op_change,swesmith/Project-MONAI__MONAI.a09c1f08,swebench/swesmith.x86_64.project-monai_1776_monai.a09c1f08,1,13,"# Anchor boxes are incorrectly positioned when using AnchorGenerator
+
+Description
+
+I found a bug in the AnchorGenerator class where the anchor boxes are incorrectly positioned. The anchors are being offset in the wrong direction, causing detection models to fail.
+
+Here is a test case to reproduce the issue:
+
+```python
+import torch
+from monai.apps.detection.utils.anchor_utils import AnchorGenerator
+
+# Create a simple 2D anchor generator
+anchor_generator = AnchorGenerator(
+    feature_map_scales=[8],
+    base_sizes=[32],
+    aspect_ratios=[[1.0]],
+    spatial_dims=2
+)
+
+# Create dummy inputs
+image = torch.zeros(1, 3, 64, 64)
+feature_maps = [torch.zeros(1, 16, 8, 8)]
+
+# Generate anchors
+anchors = anchor_generator(image, feature_maps)
+
+# Print the first few anchors
+print(anchors[0][:5])
+```
+
+When running this code, you'll notice that the anchor boxes are positioned incorrectly. The anchors should be centered at specific locations based on the feature map, but they appear to be offset in the wrong direction.
+
+This issue affects all object detection models that use the AnchorGenerator class, causing incorrect bounding box predictions.",yes,yes,"When arithmetic, comparison, string, or other operator semantics become incorrect after a code change, verify the operator against the intended behavior and restore the semantically correct operator.",Across repositories the mutation replaces an operator with one that changes program semantics. A previously verified recovery that inspects operator intent and failing behavior is plausibly reusable.,4,"Selected for pilot as GS-F004 (operator_semantics_error), occurrence 1 of 3."
+GS-R027,pydata__patsy.a5d16484.func_pm_op_change__4db50rfv,func_pm_op_change,swesmith/pydata__patsy.a5d16484,swebench/swesmith.x86_64.pydata_1776_patsy.a5d16484,1,146,"Cubic spline df calculation incorrect when adjust_df is applied
+
+#### Description
+
+When using cubic splines with certain configurations, the degrees of freedom calculation produces incorrect results. The issue occurs when `adjust_df` is applied to the `df` parameter - it's being added instead of subtracted, leading to splines with too many degrees of freedom.
+
+#### Steps/Code to Reproduce
+
+```python
+import numpy as np
+from patsy.mgcv_cubic_splines import CR, CC
+
+# Example data
+x = np.linspace(0, 1, 100)
+
+# Create a cubic spline with constraints that should adjust df
+spline = CR(df=5, constraints='center')
+result = spline.transform(x)
+
+# The resulting spline will have incorrect dimensions due to wrong df calculation
+print(f""Expected fewer columns due to df adjustment, got: {result.shape[1]}"")
+```
+
+The problem manifests when spline types like 'cc' (cyclic cubic) or when `absorb_cons='TRUE'` is used, where `adjust_df` should reduce the effective degrees of freedom but instead increases them.",yes,yes,"When arithmetic, comparison, string, or other operator semantics become incorrect after a code change, verify the operator against the intended behavior and restore the semantically correct operator.",Across repositories the mutation replaces an operator with one that changes program semantics. A previously verified recovery that inspects operator intent and failing behavior is plausibly reusable.,9,"Selected for pilot as GS-F004 (operator_semantics_error), occurrence 2 of 3."
+GS-R028,davidhalter__parso.338a5760.func_pm_op_change__snniox4m,func_pm_op_change,swesmith/davidhalter__parso.338a5760,swebench/swesmith.x86_64.davidhalter_1776_parso.338a5760,1,799,"# Incorrect handling of Byte Order Mark (BOM) in Python files
+
+### Description
+
+I've discovered an issue with how parso handles files that contain a Byte Order Mark (BOM) at the beginning. When a file starts with a BOM and then content is added to it, the position calculation becomes incorrect.
+
+### Expected behavior
+
+When a file starts with a BOM and content is added, the position calculation should correctly account for the BOM.
+
+### How to Reproduce
+
+This can be reproduced with a simple Python file that contains a BOM:
+
+```python
+# Create a file with BOM
+with open('test_file.py', 'wb') as f:
+    f.write(b'\xef\xbb\xbf# foo')
+
+# Read the file
+with open('test_file.py', 'r', encoding='utf-8') as f:
+    content = f.read()
+
+# Try to parse the file with added content
+from parso import parse
+tree1 = parse(content)
+tree2 = parse(content + 'x')  # This fails with position calculation error
+```
+
+The issue occurs because when content is added to a file that starts with a BOM, the position calculation is off by 1 character. The BOM should be properly accounted for when calculating positions.
+
+### Additional context
+
+This issue only affects files that start with a UTF-8 BOM (`\ufeff`). Regular Python files without a BOM work fine. The problem is specifically in how the position is adjusted when the BOM is present and content is modified.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R029,pydantic__pydantic.acb0f10f.func_pm_op_change__4w8jfjuf,func_pm_op_change,swesmith/pydantic__pydantic.acb0f10f,swebench/swesmith.x86_64.pydantic_1776_pydantic.acb0f10f,1,5437,"Type annotation syntax error in apply_known_metadata function
+
+#### Description
+
+The `apply_known_metadata` function in `_known_annotated_metadata.py` has an invalid type annotation that causes syntax issues. The return type annotation uses `&` instead of `|` for union types.
+
+#### Steps/Code to Reproduce
+
+```python
+from pydantic._internal._known_annotated_metadata import apply_known_metadata
+from pydantic_core import CoreSchema
+
+# This will fail due to the invalid type annotation syntax
+schema = {'type': 'str'}
+result = apply_known_metadata(None, schema)
+```
+
+The function signature currently has:
+```python
+def apply_known_metadata(annotation: Any, schema: CoreSchema) -> CoreSchema & None:
+```
+
+But `&` is not valid syntax for union types in Python type annotations. This should use `|` for union types or `Union` from typing.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R030,stanfordnlp__string2string.c4a72f59.func_pm_op_change__jkircbwq,func_pm_op_change,swesmith/stanfordnlp__string2string.c4a72f59,swebench/swesmith.x86_64.stanfordnlp_1776_string2string.c4a72f59,2,13,"### TypeError in String Alignment Padding
+
+#### Description
+A `TypeError` is raised when attempting to align two strings of different lengths using the `StringAlignment` class. The error occurs during the padding process, where the shorter string is supposed to be padded with spaces to match the length of the longer string.
+
+#### Steps/Code to Reproduce
+```python
+from string2string.alignment.classical import StringAlignment
+
+aligner = StringAlignment()
+str1, str2 = ""short"", ""longerstring""
+aligned_str1, aligned_str2 = aligner.align(str1, str2)
+print(aligned_str1)
+print(aligned_str2)
+```
+
+#### Actual Results
+```
+TypeError: not all arguments converted during string formatting
+```
+
+#### Expected Results
+The shorter string should be padded with spaces to match the length of the longer string without raising an error.
+
+#### Additional Information
+This issue seems to be related to the string padding operation in the `align` method. The error suggests that there might be an incorrect use of string formatting operators.",yes,yes,"When arithmetic, comparison, string, or other operator semantics become incorrect after a code change, verify the operator against the intended behavior and restore the semantically correct operator.",Across repositories the mutation replaces an operator with one that changes program semantics. A previously verified recovery that inspects operator intent and failing behavior is plausibly reusable.,14,"Selected for pilot as GS-F004 (operator_semantics_error), occurrence 3 of 3."
+GS-R031,getmoto__moto.694ce1f4.func_pm_remove_loop__4p34bslm,func_pm_remove_loop,swesmith/getmoto__moto.694ce1f4,swebench/swesmith.x86_64.getmoto_1776_moto.694ce1f4,1,155,"S3 delete_object missing delete-marker header for versioned objects
+
+When deleting versioned objects in S3, the delete-marker response header is not being returned in the response metadata. This affects the behavior when working with versioned buckets where delete markers are created.
+
+#### Steps/Code to Reproduce
+
+```python
+import boto3
+from moto import mock_s3
+
+@mock_s3
+def test_delete_marker_header():
+    client = boto3.client('s3', region_name='us-east-1')
+    bucket_name = 'test-bucket'
+    
+    # Create bucket and enable versioning
+    client.create_bucket(Bucket=bucket_name)
+    client.put_bucket_versioning(
+        Bucket=bucket_name,
+        VersioningConfiguration={'Status': 'Enabled'}
+    )
+    
+    # Put an object
+    client.put_object(Bucket=bucket_name, Key='test-key', Body=b'test content')
+    
+    # Delete the object (should create delete marker)
+    response = client.delete_object(Bucket=bucket_name, Key='test-key')
+    
+    # This should be True but is missing
+    print(""DeleteMarker in response:"", response.get('DeleteMarker'))
+    print(""Response keys:"", list(response.keys()))
+
+if __name__ == ""__main__"":
+    test_delete_marker_header()
+```
+
+Expected output:
+```
+DeleteMarker in response: True
+Response keys: ['DeleteMarker', 'VersionId', 'ResponseMetadata']
+```
+
+Actual output:
+```
+DeleteMarker in response: None
+Response keys: ['VersionId', 'ResponseMetadata']
+```
+
+The delete-marker metadata is not being properly set in the response when deleting objects from versioned buckets, which breaks compatibility with AWS S3 behavior.",no,,,,,Not selected for the frozen 15-task pilot.
+GS-R032,cknd__stackprinter.219fcc52.func_pm_remove_loop__ny292fqp,func_pm_remove_loop,swesmith/cknd__stackprinter.219fcc52,swebench/swesmith.x86_64.cknd_1776_stackprinter.219fcc52,2,5,"# Source code syntax highlighting broken in stackprinter
+
+When using stackprinter to format stack traces, the syntax highlighting for source code is completely missing. This makes the output much harder to read as all code appears as plain text without any color or formatting.
+
+## Steps to Reproduce
+
+```python
+import stackprinter
+
+# Set up stackprinter
+stackprinter.set_excepthook()
+
+# Trigger an exception to see the formatted output
+def problematic_function():
+    return 1/0
+
+problematic_function()
+```
+
+## Expected Behavior
+
+The source code in the stack trace should be syntax highlighted, with different colors for keywords, variables, strings, etc. making it easier to read the code context.
+
+## Actual Behavior
+
+All source code appears as plain text without any syntax highlighting. The output is just raw text without any formatting applied to different code elements.
+
+This seems to be related to the source annotation functionality which should be parsing the source code into tokens and applying appropriate formatting, but it's not working correctly.
+
+I noticed this issue after updating to the latest version. The previous version had proper syntax highlighting that made stack traces much more readable.",yes,yes,"When a collection or candidate sequence is only partially processed or produces empty/incomplete output, inspect for removed iteration and restore traversal over all required elements.","Across repositories required iteration has been removed, producing incomplete processing. A recovery that checks collection traversal and restores iteration is plausibly reusable across implementations.",5,"Selected for pilot as GS-F005 (missing_iteration), occurrence 1 of 3."
+GS-R033,tobymao__sqlglot.036601ba.func_pm_remove_loop__qyh2en2k,func_pm_remove_loop,swesmith/tobymao__sqlglot.036601ba,swebench/swesmith.x86_64.tobymao_1776_sqlglot.036601ba,3,53,"ORDER BY and DISTINCT ON expansion not working properly
+
+#### Description
+
+When using ORDER BY or DISTINCT ON clauses in SQL queries, the column qualification and expansion logic is not functioning correctly. This affects queries that rely on positional references, aggregate functions, and proper column resolution in these clauses.
+
+#### Steps/Code to Reproduce
+
+```python
+import sqlglot
+from sqlglot import optimizer
+
+# Example with ORDER BY positional reference
+sql = """"""
+SELECT name, count(*) 
+FROM users 
+GROUP BY name 
+ORDER BY 1
+""""""
+
+# Parse and optimize
+parsed = sqlglot.parse_one(sql)
+optimized = optimizer.optimize(parsed)
+print(optimized.sql())
+
+# Example with DISTINCT ON
+sql2 = """"""
+SELECT DISTINCT ON (user_id) user_id, log_date 
+FROM logs 
+ORDER BY user_id, log_date DESC
+""""""
+
+parsed2 = sqlglot.parse_one(sql2, dialect='postgres')
+optimized2 = optimizer.optimize(parsed2, dialect='postgres')
+print(optimized2.sql())
+```
+
+The optimizer should properly expand positional references in ORDER BY clauses and handle column qualification in DISTINCT ON clauses, but currently these operations are not being performed.",yes,yes,"When a collection or candidate sequence is only partially processed or produces empty/incomplete output, inspect for removed iteration and restore traversal over all required elements.","Across repositories required iteration has been removed, producing incomplete processing. A recovery that checks collection traversal and restores iteration is plausibly reusable across implementations.",10,"Selected for pilot as GS-F005 (missing_iteration), occurrence 2 of 3."
+GS-R034,stanfordnlp__dspy.651a4c71.func_pm_remove_loop__70erfa43,func_pm_remove_loop,swesmith/stanfordnlp__dspy.651a4c71,swebench/swesmith.x86_64.stanfordnlp_1776_dspy.651a4c71,4,305,"# DatabricksRM retriever returns empty documents
+
+When using the DatabricksRM retriever, it returns empty documents even though the query is successful. The retriever seems to be connecting to the Databricks index correctly, but the returned documents don't contain any content.
+
+## Description
+
+I'm using the DatabricksRM retriever to query a Databricks index, but the returned documents are empty dictionaries. The retriever seems to be connecting to the index and getting results back, but the documents don't have any content in them.
+
+## How to Reproduce
+
+Here's a simple example that demonstrates the issue:
+
+```python
+import dspy
+from dspy.retrieve import DatabricksRM
+
+# Configure the retriever
+retriever = DatabricksRM(
+    index_name=""my_index"",
+    host=""my-databricks-host"",
+    api_token=""my-token"",
+    top_k=3
+)
+
+# Query the index
+results = retriever(""What is machine learning?"")
+
+# The results have the correct structure but empty content
+print(results)
+# Output shows documents with empty dictionaries: []
+```
+
+Expected behavior: The documents should contain the content from the Databricks index, with column names and values properly mapped.
+
+Actual behavior: The documents are empty dictionaries, even though the query to Databricks is successful.
+
+## Environment Information
+
+- DSPy version: latest
+- Python version: 3.11
+- Operating system: Linux",yes,yes,"When a collection or candidate sequence is only partially processed or produces empty/incomplete output, inspect for removed iteration and restore traversal over all required elements.","Across repositories required iteration has been removed, producing incomplete processing. A recovery that checks collection traversal and restores iteration is plausibly reusable across implementations.",15,"Selected for pilot as GS-F005 (missing_iteration), occurrence 3 of 3."
+GS-R035,seperman__deepdiff.ed252022.func_pm_remove_loop__5330sgrv,func_pm_remove_loop,swesmith/seperman__deepdiff.ed252022,swebench/swesmith.x86_64.seperman_1776_deepdiff.ed252022,9,910,"DeepHash fails to decode bytes with custom encodings
+
+#### Description
+
+When using DeepHash with bytes objects that require specific encodings, the function fails to properly decode the bytes even when the correct encoding is provided through the `encodings` parameter. This affects both direct hashing and operations that depend on hashing like DeepDiff with `ignore_order=True`.
+
+#### Steps/Code to Reproduce
+
+```python
+from deepdiff import DeepHash
+
+# This should work with latin-1 encoding but fails
+item = b'\xbc cup of flour'
+result = DeepHash(item, encodings=['utf-8', 'latin-1'], ignore_encoding_errors=False)
+print(result)
+```
+
+Also affects DeepDiff when ignore_order is used:
+
+```python
+from deepdiff import DeepDiff
+
+t1 = [1, 2, 3, 'a']
+t2 = [1.0, 2.0, 3.3, b'a']
+ddiff = DeepDiff(t1, t2, ignore_numeric_type_changes=True, ignore_string_type_changes=True, ignore_order=True)
+print(ddiff)
+```
+
+The second example should handle the byte string `b'a'` properly when `ignore_string_type_changes=True` but currently raises encoding errors.
+
+#### Expected Behavior
+
+DeepHash should try each encoding in the provided list until one succeeds, allowing proper hashing of bytes objects with various encodings.",no,,,,,Not selected for the frozen 15-task pilot.
