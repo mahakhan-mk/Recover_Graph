@@ -1,4 +1,4 @@
 uri_env: NEO4J_URI
-user_env: NEO4J_USER
+user_env: NEO4J_USERNAME
 password_env: NEO4J_PASSWORD
 database_env: NEO4J_DATABASE

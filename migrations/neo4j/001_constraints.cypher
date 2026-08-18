@@ -12,3 +12,12 @@ FOR (n:FailureEpisode) REQUIRE n.id IS UNIQUE;
 
 CREATE CONSTRAINT resolution_id_unique IF NOT EXISTS
 FOR (n:Resolution) REQUIRE n.id IS UNIQUE;
+
+CREATE CONSTRAINT tool_name_unique IF NOT EXISTS
+FOR (n:Tool) REQUIRE n.name IS UNIQUE;
+
+CREATE CONSTRAINT environment_id_unique IF NOT EXISTS
+FOR (n:Environment) REQUIRE n.id IS UNIQUE;
+
+CREATE CONSTRAINT outcome_id_unique IF NOT EXISTS
+FOR (n:Outcome) REQUIRE n.id IS UNIQUE;

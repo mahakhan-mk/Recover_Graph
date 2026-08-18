@@ -14,11 +14,12 @@ def _repository_class():
 
 def test_import_does_not_inject_ssl() -> None:
     sys.modules.pop("graph_swarm.graph.neo4j_repository", None)
+    fake_truststore = Mock()
 
-    with patch("truststore.inject_into_ssl") as inject_into_ssl:
+    with patch.dict(sys.modules, {"truststore": fake_truststore}):
         importlib.import_module("graph_swarm.graph.neo4j_repository")
 
-    inject_into_ssl.assert_not_called()
+    fake_truststore.inject_into_ssl.assert_not_called()
 
 
 def test_repository_methods_are_synchronous() -> None:
