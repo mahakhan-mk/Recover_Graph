@@ -1,6 +1,6 @@
 """Deterministic detection of failed test-suite executions."""
 
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid5
 
 from graph_swarm.domain.events import AgentEvent
 from graph_swarm.domain.failures import FailureEpisode, FailureType
@@ -22,7 +22,7 @@ class FailureDetector:
 
         evidence = _failure_evidence(result.error, result.output, result.exit_code)
         return FailureEpisode(
-            id=str(uuid4()),
+            id=str(uuid5(NAMESPACE_URL, event.event_id)),
             action_id=event.action_id,
             failure_type=FailureType.TEST_FAILURE,
             signature=f"{result.tool_name}:exit_code={result.exit_code}",

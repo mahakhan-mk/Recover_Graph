@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from graph_swarm.detection.failure_detector import FailureDetector, detect_failure
 from graph_swarm.domain.action import ActionResult
@@ -48,7 +48,8 @@ def test_failed_run_tests_creates_one_canonical_failure() -> None:
     assert type(failure) is FailureEpisode
     assert failure is not None
     assert failure.id != event.event_id
-    assert UUID(failure.id).version == 4
+    assert failure.id == str(uuid5(NAMESPACE_URL, event.event_id))
+    assert UUID(failure.id).version == 5
     assert failure.action_id == event.action_id
     assert failure.failure_type is FailureType.TEST_FAILURE
     assert failure.observed_at == event.occurred_at
@@ -80,4 +81,4 @@ def test_detection_is_deterministic_for_equivalent_events() -> None:
 
     assert first is not None
     assert second is not None
-    assert first.model_dump(exclude={"id"}) == second.model_dump(exclude={"id"})
+    assert first == second
