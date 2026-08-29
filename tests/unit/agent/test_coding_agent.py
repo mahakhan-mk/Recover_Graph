@@ -1,6 +1,8 @@
 from pathlib import Path
+from typing import cast
 
 import pytest
+from pydantic_ai import FunctionToolset
 from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.models.test import TestModel
 
@@ -44,13 +46,17 @@ def test_live_factory_requires_explicit_groq_configuration() -> None:
         create_coding_agent(make_settings())
 
 
-async def test_agent_has_rollout_prompt_and_exactly_four_controlled_tools() -> None:
+async def test_agent_has_rollout_prompt_and_exactly_four_controlled_tools(
+    tmp_path: Path,
+) -> None:
     settings, model = make_offline_agent()
+    dependencies = make_dependencies(tmp_path)
     agent = create_coding_agent(settings, model=model)
 
-    prompt_parts = await agent.system_prompt_parts()
+    prompt_parts = await agent.system_prompt_parts(deps=dependencies)
     assert prompt_parts[0].content == ROLLOUT1_SYSTEM_PROMPT
-    assert set(agent.toolsets[0].tools) == {
+    toolset = cast(FunctionToolset[AgentDependencies], agent.toolsets[0])
+    assert set(toolset.tools) == {
         "read_file",
         "write_file",
         "run_tests",
