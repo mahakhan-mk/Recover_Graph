@@ -134,15 +134,18 @@ ORDER BY environment.id
 
 GET_ACTION_CONTEXT = """
 MATCH (failure:FailureEpisode {id: $failure_id})
-MATCH (task:Task)-[:HAS_ACTION]->(action:Action)-[:PART_OF_FAILURE]->(failure)
-MATCH (action)-[:PART_OF]->(run:Run)
+MATCH (task:Task)-[:HAS_ACTION]->(failed_action:Action)-[:PART_OF_FAILURE]->(failure)
+MATCH (failed_action)-[:PART_OF]->(run:Run)
+MATCH (task)-[:HAS_ACTION]->(action:Action)-[:PART_OF]->(run)
 RETURN DISTINCT action, task, run
 ORDER BY action.id
 """
 
 GET_TOOLS = """
 MATCH (failure:FailureEpisode {id: $failure_id})
-MATCH (action:Action)-[:PART_OF_FAILURE]->(failure)
+MATCH (task:Task)-[:HAS_ACTION]->(failed_action:Action)-[:PART_OF_FAILURE]->(failure)
+MATCH (failed_action)-[:PART_OF]->(run:Run)
+MATCH (task)-[:HAS_ACTION]->(action:Action)-[:PART_OF]->(run)
 MATCH (action)-[:USED]->(tool:Tool)
 RETURN DISTINCT tool
 ORDER BY tool.name

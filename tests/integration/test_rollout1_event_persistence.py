@@ -16,10 +16,11 @@ from graph_swarm.agent.tools.read_file import read_file
 from graph_swarm.agent.tools.run_tests import run_tests
 from graph_swarm.agent.tools.write_file import write_file
 from graph_swarm.domain.environment import EnvironmentContext
+from graph_swarm.domain.resolutions import ResolutionStatus
 from graph_swarm.domain.runs import Run
 from graph_swarm.domain.tasks import Task
 from graph_swarm.graph.neo4j_repository import Neo4jRepository
-from graph_swarm.integration.event_persistence import persist_agent_event
+from graph_swarm.integration.event_persistence import persist_agent_event_stream
 from graph_swarm.settings import get_settings
 from scripts.setup_neo4j import apply_schema
 
@@ -74,10 +75,13 @@ def _cleanup(
     repository: Neo4jRepository,
     action_ids: list[str],
     failure_id: str | None,
+    resolution_id: str | None,
+    outcome_id: str | None,
 ) -> None:
     node_ids = [TASK_ID, RUN_ID, ENVIRONMENT_ID, *action_ids]
-    if failure_id is not None:
-        node_ids.append(failure_id)
+    for node_id in (failure_id, resolution_id, outcome_id):
+        if node_id is not None:
+            node_ids.append(node_id)
 
     repository.execute_query(
         """
@@ -110,7 +114,10 @@ def test_event_stream_persists_execution_and_one_failure(
         versions={"python": platform.python_version()},
     )
     failure_id: str | None = None
+    resolution_id: str | None = None
+    outcome_id: str | None = None
     action_ids: list[str] = []
+    reconnected_repository: Neo4jRepository | None = None
 
     try:
         first_test_result = run_tests(dependencies, timeout_seconds=30)
@@ -127,31 +134,37 @@ def test_event_stream_persists_execution_and_one_failure(
             read_result.output.replace("return a - b", "return a + b"),
         )
         assert write_result.success is True
+        assert write_result.output is not None
 
         final_test_result = run_tests(dependencies, timeout_seconds=30)
         assert final_test_result.success is True
         assert final_test_result.exit_code == 0
         assert len(dependencies.events) == 4
-
-        failures = [
-            persist_agent_event(repository, event, task, run, environment)
-            for event in dependencies.events
-        ]
-        detected_failures = [failure for failure in failures if failure is not None]
-        assert len(detected_failures) == 1
-        failure = detected_failures[0]
-        failure_id = failure.id
-
         action_ids = [event.action_id for event in dependencies.events]
-        repeated_failure = persist_agent_event(
+
+        persisted_chain = persist_agent_event_stream(
             repository,
-            dependencies.events[0],
+            dependencies.events,
             task,
             run,
             environment,
         )
-        assert repeated_failure is not None
-        assert repeated_failure.id == failure.id
+        assert persisted_chain is not None
+        failure, resolution, outcome = persisted_chain
+        failure_id = failure.id
+        resolution_id = resolution.id
+        outcome_id = outcome.id
+        repeated_chain = persist_agent_event_stream(
+            repository,
+            dependencies.events,
+            task,
+            run,
+            environment,
+        )
+        assert repeated_chain is not None
+        assert repeated_chain[0].id == failure.id
+        assert repeated_chain[1].id == resolution.id
+        assert repeated_chain[2].id == outcome.id
         assert _count(
             repository,
             """
@@ -187,6 +200,16 @@ def test_event_stream_persists_execution_and_one_failure(
         ) == 1
         assert _count(
             repository,
+            "MATCH (resolution:Resolution {id: $id}) RETURN count(resolution) AS count",
+            id=resolution.id,
+        ) == 1
+        assert _count(
+            repository,
+            "MATCH (outcome:Outcome {id: $id}) RETURN count(outcome) AS count",
+            id=outcome.id,
+        ) == 1
+        assert _count(
+            repository,
             """
             MATCH (failure:FailureEpisode)-[:OCCURRED_IN]->
                 (environment:Environment {id: $id})
@@ -205,14 +228,79 @@ def test_event_stream_persists_execution_and_one_failure(
             action_id=dependencies.events[0].action_id,
             failure_id=failure.id,
         ) == 1
+        assert _count(
+            repository,
+            """
+            MATCH (failure:FailureEpisode {id: $failure_id})
+            MATCH (resolution:Resolution {id: $resolution_id})
+            MATCH (failure)-[r:RESOLVED_BY]->(resolution)
+            RETURN count(r) AS count
+            """,
+            failure_id=failure.id,
+            resolution_id=resolution.id,
+        ) == 1
+        assert _count(
+            repository,
+            """
+            MATCH (resolution:Resolution {id: $resolution_id})
+            MATCH (outcome:Outcome {id: $outcome_id})
+            MATCH (resolution)-[r:VERIFIED_BY]->(outcome)
+            RETURN count(r) AS count
+            """,
+            resolution_id=resolution.id,
+            outcome_id=outcome.id,
+        ) == 1
+
+        settings = get_settings()
+        candidate_repository = Neo4jRepository(
+            uri=settings.neo4j_uri,
+            username=settings.neo4j_username,
+            password=settings.neo4j_password,
+            database=settings.neo4j_database,
+        )
+        try:
+            candidate_repository.verify_connectivity()
+        except Exception:
+            candidate_repository.close()
+            raise
+        reconnected_repository = candidate_repository
+        repository.close()
 
         failed_event = dependencies.events[0]
-        incident = repository.get_incident_lineage(failure.id)
+        incident = reconnected_repository.get_incident_lineage(failure.id)
         assert incident.task.id == TASK_ID
         assert incident.run.id == RUN_ID
         assert incident.environment.id == ENVIRONMENT_ID
         assert incident.failure.id == failure.id
-        assert incident.actions[0].planned_action.id == failed_event.action_id
-        assert incident.actions[0].result.action_id == failed_event.action_id
+        assert {action.planned_action.id for action in incident.actions} == set(action_ids)
+        assert {tool.name for tool in incident.tools} == {
+            "run_tests",
+            "read_file",
+            "write_file",
+        }
+        assert len(incident.resolutions) == 1
+        assert incident.resolutions[0].id == resolution.id
+        assert incident.resolutions[0].status is ResolutionStatus.OBSERVED_SUCCESSFUL
+        assert incident.resolutions[0].successful_observations == 1
+        assert dependencies.events[2].action_id in incident.resolutions[0].description
+        assert write_result.output in incident.resolutions[0].description
+        assert dependencies.events[3].action_id in incident.resolutions[0].description
+        assert len(incident.outcomes) == 1
+        assert incident.outcomes[0].id == outcome.id
+        assert incident.outcomes[0].action_id == dependencies.events[3].action_id
+        assert incident.outcomes[0].success is True
+        assert incident.outcomes[0].exit_code == 0
+        failed_action = next(
+            action
+            for action in incident.actions
+            if action.planned_action.id == failed_event.action_id
+        )
+        assert failed_action.result.action_id == failed_event.action_id
+        assert "return a - b" in (FIXTURE_PATH / "calculator.py").read_text(encoding="utf-8")
     finally:
-        _cleanup(repository, action_ids, failure_id)
+        cleanup_repository = reconnected_repository or repository
+        try:
+            _cleanup(cleanup_repository, action_ids, failure_id, resolution_id, outcome_id)
+        finally:
+            if reconnected_repository is not None:
+                reconnected_repository.close()
