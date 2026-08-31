@@ -100,7 +100,7 @@ def make_fixture() -> IncidentFixture:
             id=f"{prefix}-resolution",
             failure_id=f"{prefix}-failure",
             description="Apply the verified fixture resolution",
-            status=ResolutionStatus.VERIFIED,
+            status=ResolutionStatus.OBSERVED_SUCCESSFUL,
             successful_observations=1,
         ),
         outcome=Outcome(
@@ -221,6 +221,15 @@ def test_complete_incident_lineage_and_idempotency(repository: Neo4jRepository) 
         assert incident.environment.id == fixture.environment.id
         assert incident.resolutions[0].id == fixture.resolution.id
         assert incident.outcomes[0].id == fixture.outcome.id
+
+        candidates = repository.find_historical_recovery_candidates(
+            fixture.action,
+            fixture.environment,
+        )
+        assert len(candidates) == 1
+        assert candidates[0].failure.id == fixture.failure.id
+        assert candidates[0].resolution.id == fixture.resolution.id
+        assert candidates[0].outcomes[0].id == fixture.outcome.id
 
         expected_nodes = (
             ("Run", "id", fixture.run.id),

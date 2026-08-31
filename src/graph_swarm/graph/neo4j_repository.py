@@ -23,6 +23,10 @@ from graph_swarm.graph._validation import (
     validate_relationship_ids,
 )
 from graph_swarm.graph.read_models import ActionLineageRecord, IncidentLineage
+from graph_swarm.retrieval.candidates import (
+    HistoricalActionContext,
+    HistoricalRecoveryCandidate,
+)
 
 
 class EntityNotFoundError(LookupError):
@@ -185,6 +189,63 @@ def _read_action(properties: Mapping[str, object]) -> ActionLineageRecord:
         completed_at=_datetime(properties, "completed_at"),
     )
     return ActionLineageRecord(planned_action=planned_action, result=result)
+
+
+def _read_historical_candidate(record: Record) -> HistoricalRecoveryCandidate:
+    """Map one candidate query row without leaking Neo4j values upward."""
+    failure = FailureEpisode(
+        id=cast(str, record["failure_id"]),
+        action_id=cast(str, record["failure_action_id"]),
+        failure_type=FailureType(cast(str, record["failure_type"])),
+        signature=cast(str, record["failure_signature"]),
+        symptom=cast(str, record["symptom"]),
+        observed_at=datetime.fromisoformat(cast(str, record["failure_observed_at"])),
+    )
+    failed_action = HistoricalActionContext(
+        id=cast(str, record["failed_action_id"]),
+        tool=cast(str, record["tool"]),
+        operation=cast(str, record["operation"]),
+        planned_at=datetime.fromisoformat(cast(str, record["planned_at"])),
+    )
+    environment = EnvironmentContext(
+        id=cast(str, record["environment_id"]),
+        repository=cast(str, record["repository"]),
+        runtime=cast(str, record["runtime"]),
+        versions=_json_string_dict(
+            {"versions_json": cast(str, record["versions_json"])},
+            "versions_json",
+        ),
+        markers=_json_string_dict(
+            {"markers_json": cast(str, record["markers_json"])},
+            "markers_json",
+        ),
+    )
+    resolution = Resolution(
+        id=cast(str, record["resolution_id"]),
+        failure_id=cast(str, record["resolution_failure_id"]),
+        description=cast(str, record["resolution_description"]),
+        status=ResolutionStatus(cast(str, record["resolution_status"])),
+        successful_observations=cast(int, record["successful_observations"]),
+        failed_observations=cast(int, record["failed_observations"]),
+    )
+
+    outcomes: list[Outcome] = []
+    outcome_values = cast(Sequence[object], record["outcomes"])
+    for outcome_value in outcome_values:
+        if outcome_value is None:
+            continue
+        outcome_properties = cast(Mapping[str, object], outcome_value)
+        if outcome_properties.get("id") is None:
+            continue
+        outcomes.append(_read_outcome(outcome_properties))
+
+    return HistoricalRecoveryCandidate(
+        failure=failure,
+        failed_action=failed_action,
+        environment=environment,
+        resolution=resolution,
+        outcomes=tuple(outcomes),
+    )
 
 
 class Neo4jRepository:
@@ -433,6 +494,20 @@ class Neo4jRepository:
             resolutions=tuple(resolutions_by_id.values()),
             outcomes=tuple(outcomes_by_id.values()),
         )
+
+    def find_historical_recovery_candidates(
+        self,
+        planned_action: PlannedAction,
+        environment: EnvironmentContext,
+    ) -> tuple[HistoricalRecoveryCandidate, ...]:
+        """Retrieve eligible candidates using only persisted structural fields."""
+        result = self.execute_query(
+            queries.FIND_HISTORICAL_RECOVERY_CANDIDATES,
+            tool=planned_action.tool,
+            operation=planned_action.operation,
+            repository=environment.repository,
+        )
+        return tuple(_read_historical_candidate(record) for record in result.records)
 
     def execute_query(
         self,
