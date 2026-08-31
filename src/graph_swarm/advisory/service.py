@@ -55,6 +55,7 @@ class AdvisoryService:
             candidate
             for candidate in candidates
             if candidate.resolution.status is ResolutionStatus.OBSERVED_SUCCESSFUL
+            and any(outcome.success for outcome in candidate.outcomes)
             and candidate.failed_action.source_run_id != planned_action.run_id
             and _chronologically_available(candidate, planned_action.planned_at)
         )

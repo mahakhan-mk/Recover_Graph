@@ -164,6 +164,7 @@ FIND_HISTORICAL_RECOVERY_CANDIDATES = """
 MATCH (failed_action:Action)-[:PART_OF_FAILURE]->(failure:FailureEpisode)
 MATCH (failure)-[:OCCURRED_IN]->(historical_environment:Environment)
 MATCH (failure)-[:RESOLVED_BY]->(resolution:Resolution)
+MATCH (resolution)-[:VERIFIED_BY]->(qualifying_outcome:Outcome)
 OPTIONAL MATCH (resolution)-[:VERIFIED_BY]->(outcome:Outcome)
 WHERE failed_action.tool = $tool
   AND failed_action.operation = $operation
@@ -171,8 +172,9 @@ WHERE failed_action.tool = $tool
   AND historical_environment.repository = $repository
   AND failure.observed_at <= $planned_at
   AND resolution.status = 'observed_successful'
+  AND qualifying_outcome.success = true
 WITH failed_action, failure, historical_environment, resolution,
-     collect(outcome) AS outcomes
+     collect(DISTINCT outcome) AS outcomes
 RETURN failed_action.id AS failed_action_id,
        failed_action.run_id AS source_run_id,
        failed_action.tool AS tool,

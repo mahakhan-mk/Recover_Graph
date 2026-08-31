@@ -59,6 +59,7 @@ def make_candidate(
     successful_observations: int = 1,
     observed_at: datetime = NOW,
     source_run_id: str = "run-historical",
+    outcomes: tuple[Outcome, ...] | None = None,
 ) -> HistoricalRecoveryCandidate:
     failure = FailureEpisode(
         id=failure_id,
@@ -90,7 +91,9 @@ def make_candidate(
             status=status,
             successful_observations=successful_observations,
         ),
-        outcomes=(
+        outcomes=outcomes
+        if outcomes is not None
+        else (
             Outcome(
                 id=f"{resolution_id}-outcome",
                 action_id=f"{resolution_id}-test-action",
@@ -152,6 +155,32 @@ def test_observed_successful_match_returns_advice_and_evidence() -> None:
     assert result.provenance.failed_action_id == candidate.failed_action.id
     assert result.provenance.environment_id == candidate.environment.id
     assert result.provenance.outcome_ids == (candidate.outcomes[0].id,)
+
+
+def test_observed_successful_resolution_without_outcome_returns_no_advice() -> None:
+    candidate = make_candidate(outcomes=())
+
+    result = evaluate(make_service((candidate,)))
+
+    assert result.has_advice is False
+
+
+def test_observed_successful_resolution_with_failed_outcome_returns_no_advice() -> None:
+    candidate = make_candidate(
+        outcomes=(
+            Outcome(
+                id="failed-outcome",
+                action_id="failed-action",
+                success=False,
+                exit_code=1,
+                observed_at=NOW,
+            ),
+        )
+    )
+
+    result = evaluate(make_service((candidate,)))
+
+    assert result.has_advice is False
 
 
 def test_wrong_tool_returns_no_advice() -> None:
