@@ -17,8 +17,8 @@ SEED = 42
 MAX_PER_MUTATION_FAMILY = 15
 MAX_TOTAL_CANDIDATES = 105
 
-OUTPUT_PATH = Path("artifacts/dataset_cache/swesmith_candidates.jsonl")
-SUMMARY_PATH = Path("artifacts/dataset_cache/swesmith_candidate_summary.txt")
+OUTPUT_PATH = Path("benchmark/derived/swesmith_candidates.jsonl")
+SUMMARY_PATH = Path("benchmark/derived/swesmith_candidate_summary.txt")
 
 ALLOWED_MUTATION_FAMILIES: tuple[str, ...] = (
     "func_pm_op_swap",

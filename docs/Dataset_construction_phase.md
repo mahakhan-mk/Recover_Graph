@@ -190,8 +190,8 @@ scripts/build_candidate_pool.py
 Outputs:
 
 ```text
-artifacts/dataset_cache/swesmith_candidates.jsonl
-artifacts/dataset_cache/swesmith_candidate_summary.txt
+benchmark/derived/swesmith_candidates.jsonl
+benchmark/derived/swesmith_candidate_summary.txt
 ```
 
 ### Allowed mutation families
@@ -318,7 +318,7 @@ scripts/build_validation_shortlist.py
 Input:
 
 ```text
-artifacts/dataset_cache/swesmith_candidates.jsonl
+benchmark/derived/swesmith_candidates.jsonl
 ```
 
 Output:
@@ -967,8 +967,8 @@ The manifest is controller metadata, not a combined research dump.
 | `scripts/build_validation_shortlist.py` | Reduce 105 tasks to 35 review candidates | No |
 | `scripts/build_validation_evidence.py` | Extract mutation evidence for 35 tasks | No |
 | `scripts/finalize_pilot_manifest.py` | Materialize approved annotations and manifest | No |
-| `artifacts/dataset_cache/swesmith_candidates.jsonl` | Local candidate cache | No |
-| `artifacts/dataset_cache/swesmith_candidate_summary.txt` | Candidate-pool summary | No |
+| `benchmark/derived/swesmith_candidates.jsonl` | Derived candidate pool | No |
+| `benchmark/derived/swesmith_candidate_summary.txt` | Derived candidate-pool summary | No |
 | `benchmark/annotations/recurrence_validation.csv` | Manual recurrence QA record | No |
 | `benchmark/annotations/recurrence_evidence.jsonl` | Researcher-only mutation evidence | Never |
 | `benchmark/manifests/pilot.jsonl` | Frozen benchmark-controller manifest | Not directly |
@@ -978,15 +978,15 @@ The manifest is controller metadata, not a combined research dump.
 
 ## 24. Recommended Git handling
 
-Large or regenerable caches should not be treated as canonical benchmark definitions.
+Derived benchmark data should not be treated as canonical benchmark definitions.
 
 In particular:
 
 ```text
-artifacts/dataset_cache/
+benchmark/derived/
 ```
 
-should remain local/regenerable and should normally be ignored by Git.
+is versioned derived benchmark material and should remain separate from runtime output.
 
 The durable research artifacts are the scripts, curated annotations, and frozen manifest.
 

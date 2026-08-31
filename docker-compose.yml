@@ -7,7 +7,7 @@ services:
       - "7474:7474"
       - "7687:7687"
     environment:
-      NEO4J_AUTH: neo4j/graphswarm-dev
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
     volumes:
       - ./.neo4j/data:/data
       - ./.neo4j/logs:/logs

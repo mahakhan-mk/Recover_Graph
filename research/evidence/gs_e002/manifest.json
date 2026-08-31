@@ -1,0 +1,32 @@
+{
+  "experiment": "GS-E002",
+  "artifacts": [
+    {
+      "source_filename": "gs-e002-groq-pilot-openai-gpt-oss-120b.json",
+      "preserved_filename": "model_pilot_gpt_oss_120b.json",
+      "source_sha256": "D77450162245285ED4BD972CF2717BA26D3EC9DBA6AC8F0235D5046764E6503C",
+      "preserved_sha256": "D77450162245285ED4BD972CF2717BA26D3EC9DBA6AC8F0235D5046764E6503C",
+      "artifact_type": "pilot_result",
+      "experiment_identifier": "GS-E002 Groq model-selection pilot",
+      "model_identifier": "openai/gpt-oss-120b"
+    },
+    {
+      "source_filename": "gs-e002-groq-pilot-llama-3-3-70b-versatile.json",
+      "preserved_filename": "model_pilot_llama_3_3_70b.json",
+      "source_sha256": "68E993C06480B08EF3B3067A993C61E62C5BF8EC53E36A7A4E3078BB8AD9093C",
+      "preserved_sha256": "68E993C06480B08EF3B3067A993C61E62C5BF8EC53E36A7A4E3078BB8AD9093C",
+      "artifact_type": "pilot_result",
+      "experiment_identifier": "GS-E002 Groq model-selection pilot",
+      "model_identifier": "llama-3.3-70b-versatile"
+    },
+    {
+      "source_filename": "gs-e002-real-groq-openai-gpt-oss-120b-20260831.jsonl",
+      "preserved_filename": "real_experiment_20260831.jsonl",
+      "source_sha256": "9002F1A55ED47E6C0EF884035C26B6F4425A16E25761BBEB9A9622BD5C58B992",
+      "preserved_sha256": "9002F1A55ED47E6C0EF884035C26B6F4425A16E25761BBEB9A9622BD5C58B992",
+      "artifact_type": "real_experiment_event_stream",
+      "experiment_identifier": "GS-E002 real frozen-agent experiment",
+      "model_identifier": "openai/gpt-oss-120b"
+    }
+  ]
+}

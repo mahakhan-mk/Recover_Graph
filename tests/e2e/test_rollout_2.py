@@ -39,7 +39,7 @@ from graph_swarm.settings import Settings
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[2]
-    / "benchmarks"
+    / "benchmark"
     / "fixtures"
     / "repositories"
     / "rollout1_agent_smoke"
