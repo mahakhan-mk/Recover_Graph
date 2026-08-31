@@ -58,7 +58,8 @@ SET n.failure_id = $failure_id,
     n.description = $description,
     n.status = $status,
     n.successful_observations = $successful_observations,
-    n.failed_observations = $failed_observations
+    n.failed_observations = $failed_observations,
+    n.observed_at = $observed_at
 """
 
 SAVE_OUTCOME = """
@@ -166,11 +167,14 @@ MATCH (failure)-[:RESOLVED_BY]->(resolution:Resolution)
 OPTIONAL MATCH (resolution)-[:VERIFIED_BY]->(outcome:Outcome)
 WHERE failed_action.tool = $tool
   AND failed_action.operation = $operation
+  AND failed_action.run_id <> $current_run_id
   AND historical_environment.repository = $repository
+  AND failure.observed_at <= $planned_at
   AND resolution.status = 'observed_successful'
 WITH failed_action, failure, historical_environment, resolution,
      collect(outcome) AS outcomes
 RETURN failed_action.id AS failed_action_id,
+       failed_action.run_id AS source_run_id,
        failed_action.tool AS tool,
        failed_action.operation AS operation,
        failed_action.planned_at AS planned_at,
@@ -191,6 +195,7 @@ RETURN failed_action.id AS failed_action_id,
        resolution.status AS resolution_status,
        resolution.successful_observations AS successful_observations,
        resolution.failed_observations AS failed_observations,
+       resolution.observed_at AS resolution_observed_at,
        outcomes
 ORDER BY resolution.successful_observations DESC,
          size([item IN outcomes WHERE item.success = true]) DESC,

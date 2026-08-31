@@ -1,5 +1,7 @@
 """Deterministic, independently testable pre-execution advisory service."""
 
+from datetime import datetime
+
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.advice import (
     AdviceResult,
@@ -53,6 +55,8 @@ class AdvisoryService:
             candidate
             for candidate in candidates
             if candidate.resolution.status is ResolutionStatus.OBSERVED_SUCCESSFUL
+            and candidate.failed_action.source_run_id != planned_action.run_id
+            and _chronologically_available(candidate, planned_action.planned_at)
         )
         if not eligible:
             return AdviceResult.no_advice(
@@ -94,6 +98,8 @@ def _advice_result(
     return AdviceResult.historical_recovery(
         matched_failure_episode_id=candidate.failure.id,
         matched_resolution_id=candidate.resolution.id,
+        failed_tool=candidate.failed_action.tool,
+        failed_operation=candidate.failed_action.operation,
         recovery_summary=candidate.resolution.description,
         resolution_status=candidate.resolution.status,
         recovery_evidence=RecoveryEvidence(
@@ -116,3 +122,25 @@ def _advice_result(
             outcome_ids=tuple(outcome.id for outcome in candidate.outcomes),
         ),
     )
+
+
+def _chronologically_available(
+    candidate: HistoricalRecoveryCandidate,
+    planned_at: datetime,
+) -> bool:
+    """Reject evidence known to occur after the action being evaluated.
+
+    Resolution timestamps were added after some Rollout 1 records existed. For
+    legacy rows, the linked outcome timestamp is the conservative recovery
+    availability proxy; rows with neither timestamp nor outcome are rejected.
+    """
+    if candidate.failure.observed_at > planned_at:
+        return False
+    if candidate.resolution.observed_at is not None:
+        if candidate.resolution.observed_at > planned_at:
+            return False
+    elif not candidate.outcomes:
+        return False
+    if any(outcome.observed_at > planned_at for outcome in candidate.outcomes):
+        return False
+    return True

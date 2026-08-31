@@ -1,5 +1,7 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock
+
+import pytest
 
 from graph_swarm.advisory.service import AdvisoryService
 from graph_swarm.domain.actions import PlannedAction
@@ -56,6 +58,7 @@ def make_candidate(
     status: ResolutionStatus = ResolutionStatus.OBSERVED_SUCCESSFUL,
     successful_observations: int = 1,
     observed_at: datetime = NOW,
+    source_run_id: str = "run-historical",
 ) -> HistoricalRecoveryCandidate:
     failure = FailureEpisode(
         id=failure_id,
@@ -69,6 +72,7 @@ def make_candidate(
         failure=failure,
         failed_action=HistoricalActionContext(
             id=failure.action_id,
+            source_run_id=source_run_id,
             tool=tool,
             operation=operation,
             planned_at=observed_at,
@@ -180,6 +184,17 @@ def test_incompatible_known_version_returns_no_advice() -> None:
     assert result.has_advice is False
 
 
+def test_same_run_recovery_is_not_cross_run_historical_advice() -> None:
+    candidate = make_candidate(source_run_id="run-current")
+    action = make_action().model_copy(
+        update={"planned_at": NOW + timedelta(seconds=1)}
+    )
+
+    result = evaluate(make_service((candidate,)), action=action)
+
+    assert result.has_advice is False
+
+
 def test_candidate_selection_is_deterministic_and_prefers_stronger_evidence() -> None:
     weaker = make_candidate(
         failure_id="failure-weaker",
@@ -222,3 +237,35 @@ def test_applicability_service_reports_structured_matching_facts() -> None:
 
     assert decision.applicable is True
     assert decision.matched_fields == ("tool", "operation", "repository", "runtime", "versions")
+
+
+@pytest.mark.parametrize("future_field", ["failure", "resolution", "outcome"])
+def test_future_recovery_evidence_cannot_leak_into_current_advice(
+    future_field: str,
+) -> None:
+    candidate = make_candidate()
+    future_time = NOW + timedelta(seconds=1)
+    if future_field == "failure":
+        candidate = candidate.model_copy(
+            update={"failure": candidate.failure.model_copy(update={"observed_at": future_time})}
+        )
+    elif future_field == "resolution":
+        candidate = candidate.model_copy(
+            update={
+                "resolution": candidate.resolution.model_copy(
+                    update={"observed_at": future_time}
+                )
+            }
+        )
+    else:
+        candidate = candidate.model_copy(
+            update={
+                "outcomes": (
+                    candidate.outcomes[0].model_copy(update={"observed_at": future_time}),
+                )
+            }
+        )
+
+    result = evaluate(make_service((candidate,)))
+
+    assert result.has_advice is False

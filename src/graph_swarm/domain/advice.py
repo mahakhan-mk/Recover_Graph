@@ -61,6 +61,8 @@ class HistoricalRecoveryAdvice(BaseModel):
     kind: Literal["historical_recovery_found"] = "historical_recovery_found"
     matched_failure_episode_id: str
     matched_resolution_id: str
+    failed_tool: str
+    failed_operation: str
     recovery_summary: str
     resolution_status: ResolutionStatus
     recovery_evidence: RecoveryEvidence
@@ -95,6 +97,8 @@ class AdviceResult(BaseModel):
         *,
         matched_failure_episode_id: str,
         matched_resolution_id: str,
+        failed_tool: str,
+        failed_operation: str,
         recovery_summary: str,
         resolution_status: ResolutionStatus,
         recovery_evidence: RecoveryEvidence,
@@ -105,6 +109,8 @@ class AdviceResult(BaseModel):
             advice=HistoricalRecoveryAdvice(
                 matched_failure_episode_id=matched_failure_episode_id,
                 matched_resolution_id=matched_resolution_id,
+                failed_tool=failed_tool,
+                failed_operation=failed_operation,
                 recovery_summary=recovery_summary,
                 resolution_status=resolution_status,
                 recovery_evidence=recovery_evidence,

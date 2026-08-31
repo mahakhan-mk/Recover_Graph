@@ -47,9 +47,11 @@ def execute_process(
     command: list[str],
     timeout_seconds: float | int,
     tool_name: str,
+    *,
+    action_id: str | None = None,
 ) -> ActionResult:
     """Execute structured argv in the workspace and normalize its result."""
-    action_id = str(uuid4())
+    action_id = action_id or str(uuid4())
     started_at = datetime.now(UTC)
 
     if not command:
@@ -151,8 +153,16 @@ def run_command(
     dependencies: AgentDependencies,
     command: list[str],
     timeout_seconds: float | int,
+    *,
+    action_id: str | None = None,
 ) -> ActionResult:
     """Execute a structured command in the configured workspace."""
-    result = execute_process(dependencies, command, timeout_seconds, "run_command")
+    result = execute_process(
+        dependencies,
+        command,
+        timeout_seconds,
+        "run_command",
+        action_id=action_id,
+    )
     emit_action_event(dependencies, result)
     return result

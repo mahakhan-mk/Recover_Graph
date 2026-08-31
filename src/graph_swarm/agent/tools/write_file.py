@@ -16,9 +16,11 @@ def write_file(
     dependencies: AgentDependencies,
     path: str,
     content: str,
+    *,
+    action_id: str | None = None,
 ) -> ActionResult:
     """Write UTF-8 text to a file inside the configured workspace."""
-    action_id = str(uuid4())
+    action_id = action_id or str(uuid4())
     started_at = datetime.now(UTC)
     result: ActionResult | None = None
     error: str | None = None

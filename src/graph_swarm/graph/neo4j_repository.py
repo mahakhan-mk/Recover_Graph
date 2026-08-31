@@ -103,6 +103,13 @@ def _optional_int(properties: Mapping[str, object], key: str) -> int | None:
     return cast(int | None, _optional_value(properties, key))
 
 
+def _optional_datetime(properties: Mapping[str, object], key: str) -> datetime | None:
+    value = _optional_value(properties, key)
+    if value is None:
+        return None
+    return datetime.fromisoformat(cast(str, value))
+
+
 def _read_run(properties: Mapping[str, object]) -> Run:
     return Run(
         id=_required_text(properties, "id"),
@@ -153,6 +160,7 @@ def _read_resolution(properties: Mapping[str, object]) -> Resolution:
         status=ResolutionStatus(_required_text(properties, "status")),
         successful_observations=_required_int(properties, "successful_observations"),
         failed_observations=_required_int(properties, "failed_observations"),
+        observed_at=_optional_datetime(properties, "observed_at"),
     )
 
 
@@ -203,6 +211,7 @@ def _read_historical_candidate(record: Record) -> HistoricalRecoveryCandidate:
     )
     failed_action = HistoricalActionContext(
         id=cast(str, record["failed_action_id"]),
+        source_run_id=cast(str, record["source_run_id"]),
         tool=cast(str, record["tool"]),
         operation=cast(str, record["operation"]),
         planned_at=datetime.fromisoformat(cast(str, record["planned_at"])),
@@ -227,6 +236,10 @@ def _read_historical_candidate(record: Record) -> HistoricalRecoveryCandidate:
         status=ResolutionStatus(cast(str, record["resolution_status"])),
         successful_observations=cast(int, record["successful_observations"]),
         failed_observations=cast(int, record["failed_observations"]),
+        observed_at=_optional_datetime(
+            {"resolution_observed_at": record["resolution_observed_at"]},
+            "resolution_observed_at",
+        ),
     )
 
     outcomes: list[Outcome] = []
@@ -339,6 +352,9 @@ class Neo4jRepository:
             status=resolution.status.value,
             successful_observations=resolution.successful_observations,
             failed_observations=resolution.failed_observations,
+            observed_at=_isoformat(resolution.observed_at)
+            if resolution.observed_at is not None
+            else None,
         )
 
     def save_outcome(self, outcome: Outcome) -> None:
@@ -506,6 +522,8 @@ class Neo4jRepository:
             tool=planned_action.tool,
             operation=planned_action.operation,
             repository=environment.repository,
+            current_run_id=planned_action.run_id,
+            planned_at=_isoformat(planned_action.planned_at),
         )
         return tuple(_read_historical_candidate(record) for record in result.records)
 

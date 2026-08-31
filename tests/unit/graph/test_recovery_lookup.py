@@ -30,6 +30,7 @@ def test_candidate_lookup_maps_graph_rows_to_domain_read_models() -> None:
             [
                 {
                     "failed_action_id": "failed-action-001",
+                    "source_run_id": "run-historical",
                     "tool": "run_tests",
                     "operation": "pytest",
                     "planned_at": NOW.isoformat(),
@@ -50,6 +51,7 @@ def test_candidate_lookup_maps_graph_rows_to_domain_read_models() -> None:
                     "resolution_status": "observed_successful",
                     "successful_observations": 1,
                     "failed_observations": 0,
+                    "resolution_observed_at": NOW.isoformat(),
                     "outcomes": [
                         {
                             "id": "outcome-001",
@@ -87,6 +89,7 @@ def test_candidate_lookup_maps_graph_rows_to_domain_read_models() -> None:
     assert candidate.failure.id == "failure-001"
     assert candidate.resolution.id == "resolution-001"
     assert candidate.failed_action.tool == "run_tests"
+    assert candidate.failed_action.source_run_id == "run-historical"
     assert candidate.outcomes[0].id == "outcome-001"
     assert isinstance(candidate.resolution, Resolution)
     assert isinstance(candidate.outcomes[0], Outcome)
@@ -97,4 +100,6 @@ def test_candidate_lookup_maps_graph_rows_to_domain_read_models() -> None:
         tool="run_tests",
         operation="pytest",
         repository="example/repository",
+        current_run_id="run-current",
+        planned_at=NOW.isoformat(),
     )

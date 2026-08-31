@@ -11,6 +11,8 @@ from graph_swarm.domain.action import ActionResult
 def run_tests(
     dependencies: AgentDependencies,
     timeout_seconds: float | int = 120,
+    *,
+    action_id: str | None = None,
 ) -> ActionResult:
     """Run pytest with the current interpreter inside the configured workspace."""
     result = execute_process(
@@ -18,6 +20,7 @@ def run_tests(
         [sys.executable, "-m", "pytest"],
         timeout_seconds,
         "run_tests",
+        action_id=action_id,
     )
     emit_action_event(dependencies, result)
     return result

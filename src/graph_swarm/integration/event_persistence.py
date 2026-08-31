@@ -116,6 +116,7 @@ def persist_agent_event_stream(
         status=ResolutionStatus.OBSERVED_SUCCESSFUL,
         successful_observations=1,
         failed_observations=0,
+        observed_at=successful_test_event.occurred_at,
     )
     successful_result = successful_test_event.result
     outcome = Outcome(

@@ -222,8 +222,15 @@ def test_complete_incident_lineage_and_idempotency(repository: Neo4jRepository) 
         assert incident.resolutions[0].id == fixture.resolution.id
         assert incident.outcomes[0].id == fixture.outcome.id
 
+        future_action = fixture.action.model_copy(
+            update={
+                "id": f"{fixture.prefix}-future-action",
+                "run_id": f"{fixture.prefix}-transfer-run",
+                "planned_at": COMPLETED_AT + timedelta(seconds=1),
+            }
+        )
         candidates = repository.find_historical_recovery_candidates(
-            fixture.action,
+            future_action,
             fixture.environment,
         )
         assert len(candidates) == 1

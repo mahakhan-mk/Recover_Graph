@@ -15,11 +15,12 @@ class HistoricalActionContext(BaseModel):
     """Only the failed action fields needed for structural applicability."""
 
     id: str
+    source_run_id: str
     tool: str
     operation: str
     planned_at: datetime
 
-    @field_validator("id", "tool", "operation")
+    @field_validator("id", "source_run_id", "tool", "operation")
     @classmethod
     def require_non_empty_fields(cls, value: str) -> str:
         return require_non_empty(value)

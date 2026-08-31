@@ -12,9 +12,14 @@ def _completion_time(started_at: datetime) -> datetime:
     return max(datetime.now(UTC), started_at)
 
 
-def read_file(dependencies: AgentDependencies, path: str) -> ActionResult:
+def read_file(
+    dependencies: AgentDependencies,
+    path: str,
+    *,
+    action_id: str | None = None,
+) -> ActionResult:
     """Read a UTF-8 text file inside the configured workspace."""
-    action_id = str(uuid4())
+    action_id = action_id or str(uuid4())
     started_at = datetime.now(UTC)
     result: ActionResult | None = None
     error: str | None = None
