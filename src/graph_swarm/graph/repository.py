@@ -12,6 +12,7 @@ from graph_swarm.domain.runs import Run
 from graph_swarm.domain.tasks import Task
 from graph_swarm.domain.tools import Tool
 from graph_swarm.graph.read_models import IncidentLineage
+from graph_swarm.retrieval.candidates import HistoricalRecoveryCandidate
 
 
 class OperationalMemoryRepository(Protocol):
@@ -92,4 +93,12 @@ class OperationalMemoryRepository(Protocol):
 
     def get_incident_lineage(self, failure_id: str) -> IncidentLineage:
         """Return the typed Rollout 1 lineage rooted at ``failure_id``."""
+        ...
+
+    def find_historical_recovery_candidates(
+        self,
+        planned_action: PlannedAction,
+        environment: EnvironmentContext,
+    ) -> tuple[HistoricalRecoveryCandidate, ...]:
+        """Return structurally matching, advisory-eligible recovery candidates."""
         ...

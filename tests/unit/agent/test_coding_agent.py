@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -17,8 +18,10 @@ from graph_swarm.domain.action import ActionResult
 from graph_swarm.settings import Settings
 
 
-def make_settings() -> Settings:
-    return Settings(
+def make_settings(*, load_env_file: bool = True) -> Settings:
+    settings_factory = cast(Callable[..., Settings], Settings)
+    return settings_factory(
+        _env_file=".env" if load_env_file else None,
         neo4j_uri="neo4j+s://example.databases.neo4j.io",
         neo4j_username="example-user",
         neo4j_password="example-password",
@@ -43,7 +46,7 @@ def make_offline_agent() -> tuple[Settings, TestModel]:
 
 def test_live_factory_requires_explicit_groq_configuration() -> None:
     with pytest.raises(AgentConfigurationError, match="groq_model"):
-        create_coding_agent(make_settings())
+        create_coding_agent(make_settings(load_env_file=False))
 
 
 async def test_agent_has_rollout_prompt_and_exactly_four_controlled_tools(

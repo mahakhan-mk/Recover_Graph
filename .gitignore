@@ -22,6 +22,7 @@ build/
 .DS_Store
 
 # Experiment output
+artifacts/dataset_cache/*
 artifacts/runs/*
 artifacts/results/*
 artifacts/reports/*

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-INPUT_PATH = Path("artifacts/dataset_cache/swesmith_candidates.jsonl")
+INPUT_PATH = Path("benchmark/derived/swesmith_candidates.jsonl")
 OUTPUT_PATH = Path("benchmark/annotations/recurrence_validation.csv")
 
 MUTATION_FAMILY_ORDER: tuple[str, ...] = (

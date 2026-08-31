@@ -58,7 +58,8 @@ SET n.failure_id = $failure_id,
     n.description = $description,
     n.status = $status,
     n.successful_observations = $successful_observations,
-    n.failed_observations = $failed_observations
+    n.failed_observations = $failed_observations,
+    n.observed_at = $observed_at
 """
 
 SAVE_OUTCOME = """
@@ -157,4 +158,50 @@ MATCH (failure)-[:RESOLVED_BY]->(resolution:Resolution)
 OPTIONAL MATCH (resolution)-[:VERIFIED_BY]->(outcome:Outcome)
 RETURN resolution, collect(DISTINCT outcome) AS outcomes
 ORDER BY resolution.id
+"""
+
+FIND_HISTORICAL_RECOVERY_CANDIDATES = """
+MATCH (failed_action:Action)-[:PART_OF_FAILURE]->(failure:FailureEpisode)
+MATCH (failure)-[:OCCURRED_IN]->(historical_environment:Environment)
+MATCH (failure)-[:RESOLVED_BY]->(resolution:Resolution)
+MATCH (resolution)-[:VERIFIED_BY]->(qualifying_outcome:Outcome)
+OPTIONAL MATCH (resolution)-[:VERIFIED_BY]->(outcome:Outcome)
+WHERE failed_action.tool = $tool
+  AND failed_action.operation = $operation
+  AND failed_action.run_id <> $current_run_id
+  AND historical_environment.repository = $repository
+  AND failure.observed_at <= $planned_at
+  AND resolution.status = 'observed_successful'
+  AND qualifying_outcome.success = true
+WITH failed_action, failure, historical_environment, resolution,
+     collect(DISTINCT outcome) AS outcomes
+RETURN failed_action.id AS failed_action_id,
+       failed_action.run_id AS source_run_id,
+       failed_action.tool AS tool,
+       failed_action.operation AS operation,
+       failed_action.planned_at AS planned_at,
+       failure.id AS failure_id,
+       failure.action_id AS failure_action_id,
+       failure.failure_type AS failure_type,
+       failure.signature AS failure_signature,
+       failure.symptom AS symptom,
+       failure.observed_at AS failure_observed_at,
+       historical_environment.id AS environment_id,
+       historical_environment.repository AS repository,
+       historical_environment.runtime AS runtime,
+       historical_environment.versions_json AS versions_json,
+       historical_environment.markers_json AS markers_json,
+       resolution.id AS resolution_id,
+       resolution.failure_id AS resolution_failure_id,
+       resolution.description AS resolution_description,
+       resolution.status AS resolution_status,
+       resolution.successful_observations AS successful_observations,
+       resolution.failed_observations AS failed_observations,
+       resolution.observed_at AS resolution_observed_at,
+       outcomes
+ORDER BY resolution.successful_observations DESC,
+         size([item IN outcomes WHERE item.success = true]) DESC,
+         failure.observed_at DESC,
+         resolution.id ASC,
+         failure.id ASC
 """

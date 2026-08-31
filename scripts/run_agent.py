@@ -31,7 +31,7 @@ AGENT_OBJECTIVE = (
 def _fixture_path() -> Path:
     return (
         Path(__file__).resolve().parents[1]
-        / "benchmarks"
+        / "benchmark"
         / "fixtures"
         / "repositories"
         / "rollout1_agent_smoke"

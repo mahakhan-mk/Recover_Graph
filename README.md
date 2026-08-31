@@ -28,10 +28,11 @@ graph-swarm/
 ├── configs/            # Versioned model, graph, and experiment configuration
 ├── src/graph_swarm/    # Core implementation
 ├── migrations/neo4j/  # Explicit graph constraints and indexes
-├── benchmark/          # Recurrence families, tasks, evaluators, fixtures
+├── benchmark/          # Canonical benchmark inputs, derived data, and fixtures
 ├── experiments/        # Reproducible rollout runners
 ├── analysis/           # Metrics and statistical analysis
-├── artifacts/          # Generated run/result/report outputs
+├── research/evidence/  # Versioned research evidence
+├── artifacts/          # Temporary/generated local run output
 ├── tests/              # Unit, integration, and end-to-end tests
 ├── scripts/            # Developer utilities
 └── docs/               # Architecture, protocol, and schema notes

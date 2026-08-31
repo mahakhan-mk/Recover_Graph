@@ -10,6 +10,11 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.groq import GroqModel
 from pydantic_ai.providers.groq import GroqProvider
 
+from graph_swarm.agent.advisory import (
+    finalize_pending_advice,
+    prepare_tool_action,
+    record_post_advice_action,
+)
 from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.agent.prompts import ROLLOUT1_SYSTEM_PROMPT
 from graph_swarm.agent.tools.read_file import read_file as controlled_read_file
@@ -61,7 +66,10 @@ def create_coding_agent(
         path: str,
     ) -> ActionResult:
         """Read a UTF-8 text file within the workspace."""
-        return controlled_read_file(ctx.deps, path)
+        action = prepare_tool_action(ctx.deps, "read_file", "read_file", {"path": path})
+        result = controlled_read_file(ctx.deps, path, action_id=action.id)
+        record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
+        return result
     agent.tool(read_file)
 
     def write_file(
@@ -70,12 +78,27 @@ def create_coding_agent(
         content: str,
     ) -> ActionResult:
         """Write UTF-8 text to a file within the workspace."""
-        return controlled_write_file(ctx.deps, path, content)
+        action = prepare_tool_action(
+            ctx.deps,
+            "write_file",
+            "write_file",
+            {"path": path, "content": content},
+        )
+        result = controlled_write_file(ctx.deps, path, content, action_id=action.id)
+        record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
+        return result
     agent.tool(write_file)
 
     def run_tests(ctx: RunContext[AgentDependencies]) -> ActionResult:
         """Run the repository test suite within the configured timeout."""
-        return controlled_run_tests(ctx.deps, settings.agent_tests_timeout_seconds)
+        action = prepare_tool_action(ctx.deps, "run_tests", "run_tests", {})
+        result = controlled_run_tests(
+            ctx.deps,
+            settings.agent_tests_timeout_seconds,
+            action_id=action.id,
+        )
+        record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
+        return result
     agent.tool(run_tests)
 
     def run_command(
@@ -83,11 +106,20 @@ def create_coding_agent(
         command: list[str],
     ) -> ActionResult:
         """Run structured argv within the configured timeout."""
-        return controlled_run_command(
+        action = prepare_tool_action(
+            ctx.deps,
+            "run_command",
+            "run_command",
+            {"command": command},
+        )
+        result = controlled_run_command(
             ctx.deps,
             command,
             settings.agent_command_timeout_seconds,
+            action_id=action.id,
         )
+        record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
+        return result
     agent.tool(run_command)
 
     return agent
@@ -100,8 +132,11 @@ def run_coding_agent(
     user_prompt: str,
 ) -> AgentRunResult[str]:
     """Run a constructed agent with the configured model-request limit."""
-    return agent.run_sync(
-        user_prompt,
-        deps=dependencies,
-        usage_limits=UsageLimits(request_limit=settings.agent_request_limit),
-    )
+    try:
+        return agent.run_sync(
+            user_prompt,
+            deps=dependencies,
+            usage_limits=UsageLimits(request_limit=settings.agent_request_limit),
+        )
+    finally:
+        finalize_pending_advice(dependencies)
