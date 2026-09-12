@@ -60,6 +60,7 @@ def make_settings() -> Settings:
 def make_task(task_id: str, index: int) -> Task:
     return Task(
         id=task_id,
+        problem_statement="Fix the repository so its tests pass.",
         family_id="GS-E002-FAMILY",
         repository="rollout1_agent_smoke",
         chronological_index=index,

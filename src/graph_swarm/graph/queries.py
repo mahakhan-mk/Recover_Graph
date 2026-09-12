@@ -8,7 +8,8 @@ SET n.task_id = $task_id,
 
 SAVE_TASK = """
 MERGE (n:Task {id: $id})
-SET n.family_id = $family_id,
+SET n.problem_statement = $problem_statement,
+    n.family_id = $family_id,
     n.repository = $repository,
     n.chronological_index = $chronological_index
 """

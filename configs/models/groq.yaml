@@ -1,5 +1,5 @@
 provider: groq
-model: TBD
+model: openai/gpt-oss-120b
 settings:
   temperature: 0
 prompt_version: v1

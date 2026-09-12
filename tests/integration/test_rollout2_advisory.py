@@ -85,6 +85,7 @@ def test_gs_e002_graph_backed_advisory_path(
     prefix = f"GS-E002-NEO4J-{uuid4().hex}"
     acquisition_task = Task(
         id=f"{prefix}-ACQUISITION-TASK",
+        problem_statement="Fix the repository so its tests pass.",
         family_id="GS-E002-FAMILY",
         repository="rollout1_agent_smoke",
         chronological_index=1,
@@ -151,6 +152,7 @@ def test_gs_e002_graph_backed_advisory_path(
 
         transfer_task = Task(
             id=f"{prefix}-TRANSFER-TASK",
+            problem_statement="Fix the repository so its tests pass.",
             family_id="GS-E002-FAMILY",
             repository="rollout1_agent_smoke",
             chronological_index=2,

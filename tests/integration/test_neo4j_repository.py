@@ -57,6 +57,7 @@ def make_fixture() -> IncidentFixture:
         run=Run(id=f"{prefix}-run", task_id=f"{prefix}-task", started_at=STARTED_AT),
         task=Task(
             id=f"{prefix}-task",
+            problem_statement="Fix the integration fixture so its tests pass.",
             family_id=f"{prefix}-family",
             repository="integration/example",
             chronological_index=1,
@@ -214,6 +215,7 @@ def test_complete_incident_lineage_and_idempotency(repository: Neo4jRepository) 
         assert incident.failure.id == fixture.failure.id
         assert incident.run.id == fixture.run.id
         assert incident.task.id == fixture.task.id
+        assert incident.task.problem_statement == fixture.task.problem_statement
         assert len(incident.actions) == 1
         assert incident.actions[0].planned_action.id == fixture.action.id
         assert incident.actions[0].result.action_id == fixture.action.id

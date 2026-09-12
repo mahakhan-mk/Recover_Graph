@@ -102,6 +102,7 @@ def test_event_stream_persists_execution_and_one_failure(
     dependencies = AgentDependencies(copied_fixture, RUN_ID, TASK_ID)
     task = Task(
         id=TASK_ID,
+        problem_statement="Fix the calculator implementation so its tests pass.",
         family_id="GS-E001",
         repository="rollout1_agent_smoke",
         chronological_index=1,

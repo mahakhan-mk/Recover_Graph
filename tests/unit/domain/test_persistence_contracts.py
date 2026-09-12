@@ -18,6 +18,7 @@ AWARE_TIMESTAMP = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 def test_minimum_rollout_1_incident_objects_are_representable() -> None:
     task = Task(
         id="GS-T001",
+        problem_statement="Fix the example repository so its tests pass.",
         family_id="GS-F001",
         repository="swesmith/example",
         chronological_index=1,
@@ -58,6 +59,18 @@ def test_minimum_rollout_1_incident_objects_are_representable() -> None:
     assert outcome.id != outcome.action_id
 
 
+@pytest.mark.parametrize("problem_statement", ["", "   "])
+def test_task_rejects_empty_problem_statement(problem_statement: str) -> None:
+    with pytest.raises(ValidationError, match="non-empty"):
+        Task(
+            id="GS-T001",
+            problem_statement=problem_statement,
+            family_id="GS-F001",
+            repository="swesmith/example",
+            chronological_index=1,
+        )
+
+
 @pytest.mark.parametrize(
     ("model", "field"),
     [
@@ -77,6 +90,7 @@ def test_empty_identity_values_are_rejected(model: type[object], field: str) -> 
         elif model is Task:
             Task(
                 id="",
+                problem_statement="Fix the repository.",
                 family_id="family-001",
                 repository="repo",
                 chronological_index=1,

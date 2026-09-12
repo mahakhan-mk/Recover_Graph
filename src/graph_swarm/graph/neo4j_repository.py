@@ -121,6 +121,7 @@ def _read_run(properties: Mapping[str, object]) -> Run:
 def _read_task(properties: Mapping[str, object]) -> Task:
     return Task(
         id=_required_text(properties, "id"),
+        problem_statement=_required_text(properties, "problem_statement"),
         family_id=_required_text(properties, "family_id"),
         repository=_required_text(properties, "repository"),
         chronological_index=_required_int(properties, "chronological_index"),
@@ -294,6 +295,7 @@ class Neo4jRepository:
         self.execute_query(
             queries.SAVE_TASK,
             id=task.id,
+            problem_statement=task.problem_statement,
             family_id=task.family_id,
             repository=task.repository,
             chronological_index=task.chronological_index,

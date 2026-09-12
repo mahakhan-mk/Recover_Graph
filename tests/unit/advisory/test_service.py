@@ -120,6 +120,7 @@ def evaluate(
     return service.evaluate_action(
         Task(
             id="task-current",
+            problem_statement="Fix the repository so its tests pass.",
             family_id="family-current",
             repository="example/repository",
             chronological_index=1,

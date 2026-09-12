@@ -68,6 +68,7 @@ def test_entity_writes_use_canonical_merge_identity_and_parameters() -> None:
             repository.save_task,
             Task(
                 id="task-001",
+                problem_statement="Fix the example repository so its tests pass.",
                 family_id="family-001",
                 repository="example/repository",
                 chronological_index=1,
@@ -133,6 +134,13 @@ def test_entity_writes_use_canonical_merge_identity_and_parameters() -> None:
         assert identity not in query
         assert identity in parameters.values()
         assert "MERGE" in query
+
+    task_write = entities[1][1]
+    with patch.object(repository, "execute_query") as execute_query:
+        repository.save_task(task_write)
+    assert execute_query.call_args.kwargs["problem_statement"] == (
+        "Fix the example repository so its tests pass."
+    )
 
     with patch.object(repository, "execute_query") as execute_query:
         repository.save_action(action, result)
@@ -252,6 +260,7 @@ def test_lineage_query_converts_nodes_without_cross_product_duplicates() -> None
                         },
                         "task": {
                             "id": "task-001",
+                            "problem_statement": "Fix the example repository so its tests pass.",
                             "family_id": "family-001",
                             "repository": "example/repository",
                             "chronological_index": 1,
@@ -281,6 +290,7 @@ def test_lineage_query_converts_nodes_without_cross_product_duplicates() -> None
                         },
                         "task": {
                             "id": "task-001",
+                            "problem_statement": "Fix the example repository so its tests pass.",
                             "family_id": "family-001",
                             "repository": "example/repository",
                             "chronological_index": 1,
@@ -327,6 +337,7 @@ def test_lineage_query_converts_nodes_without_cross_product_duplicates() -> None
     assert lineage.failure.id == "failure-001"
     assert lineage.run.id == "run-001"
     assert lineage.task.id == "task-001"
+    assert lineage.task.problem_statement == "Fix the example repository so its tests pass."
     assert len(lineage.actions) == 1
     assert len(lineage.tools) == 1
     assert lineage.environment.id == "environment-001"
