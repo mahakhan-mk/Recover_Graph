@@ -34,6 +34,10 @@ from graph_swarm.graph.read_models import (
     RecoveryEvidenceTask,
     RecoveryPatternLineage,
     RecoveryPatternTask,
+    RecoveryPatternVectorCandidate,
+)
+from graph_swarm.memory.recovery_embeddings import (
+    validate_embedding_vector,
 )
 from graph_swarm.retrieval.candidates import (
     HistoricalActionContext,
@@ -496,6 +500,50 @@ class Neo4jRepository:
             raise ValueError(
                 f"RecoveryPattern {pattern.id!r} has conflicting immutable provenance"
             )
+
+    def update_recovery_pattern_embedding(
+        self,
+        pattern_id: str,
+        embedding: list[float],
+    ) -> None:
+        """Update only the native embedding of an existing RecoveryPattern."""
+        validate_relationship_ids(pattern_id=pattern_id)
+        validated_embedding = validate_embedding_vector(embedding)
+        result = self.execute_query(
+            queries.UPDATE_RECOVERY_PATTERN_EMBEDDING,
+            pattern_id=pattern_id,
+            embedding=validated_embedding,
+        )
+        if not result.records:
+            raise EntityNotFoundError(
+                f"RecoveryPattern {pattern_id!r} was not found for embedding update"
+            )
+
+    def ensure_recovery_pattern_vector_index(self) -> None:
+        """Create the native RecoveryPattern vector index idempotently."""
+        self.execute_query(queries.CREATE_RECOVERY_PATTERN_VECTOR_INDEX)
+
+    def query_recovery_pattern_vectors(
+        self,
+        query_embedding: list[float],
+        limit: int,
+    ) -> tuple[RecoveryPatternVectorCandidate, ...]:
+        """Return native vector-index results without retrieval-policy decisions."""
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero")
+        validated_embedding = validate_embedding_vector(query_embedding)
+        result = self.execute_query(
+            queries.QUERY_RECOVERY_PATTERN_VECTORS,
+            query_embedding=validated_embedding,
+            limit=limit,
+        )
+        return tuple(
+            RecoveryPatternVectorCandidate(
+                pattern=_read_recovery_pattern(_properties(record, "pattern")),
+                vector_score=record["vector_score"],
+            )
+            for record in result.records
+        )
 
     def _link(self, query: str, relationship: str, **identifiers: str) -> None:
         validate_relationship_ids(**identifiers)

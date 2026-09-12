@@ -16,6 +16,7 @@ from graph_swarm.graph.read_models import (
     IncidentLineage,
     RecoveryEvidenceLineage,
     RecoveryPatternLineage,
+    RecoveryPatternVectorCandidate,
 )
 from graph_swarm.retrieval.candidates import HistoricalRecoveryCandidate
 
@@ -70,6 +71,26 @@ class OperationalMemoryRepository(Protocol):
 
     def save_recovery_pattern(self, pattern: RecoveryPattern) -> None:
         """Persist one RecoveryPattern by ``pattern.id`` idempotently."""
+        ...
+
+    def update_recovery_pattern_embedding(
+        self,
+        pattern_id: str,
+        embedding: list[float],
+    ) -> None:
+        """Update only the native embedding of an existing pattern."""
+        ...
+
+    def ensure_recovery_pattern_vector_index(self) -> None:
+        """Create the RecoveryPattern native vector index idempotently."""
+        ...
+
+    def query_recovery_pattern_vectors(
+        self,
+        query_embedding: list[float],
+        limit: int,
+    ) -> tuple[RecoveryPatternVectorCandidate, ...]:
+        """Return raw nearest-neighbor results without eligibility filtering."""
         ...
 
     def link_task_action(self, task_id: str, action_id: str) -> None:

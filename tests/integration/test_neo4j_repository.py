@@ -1,6 +1,7 @@
 """Real Neo4j persistence and idempotency integration tests."""
 
 import os
+import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -15,6 +16,11 @@ from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
 from graph_swarm.domain.failures import FailureEpisode, FailureType
 from graph_swarm.domain.outcomes import Outcome
+from graph_swarm.domain.recovery_patterns import (
+    EnvironmentConstraints,
+    RecoveryPattern,
+    RecoveryPatternStatus,
+)
 from graph_swarm.domain.resolutions import Resolution, ResolutionStatus
 from graph_swarm.domain.runs import Run
 from graph_swarm.domain.tasks import Task
@@ -296,5 +302,89 @@ def test_complete_incident_lineage_and_idempotency(repository: Neo4jRepository) 
         )
         for relationship in expected_relationships:
             assert count_relationship(repository, *relationship) == 1
+    finally:
+        cleanup_fixture(repository, fixture.prefix)
+
+
+def test_native_recovery_pattern_vector_index_persistence_and_query(
+    repository: Neo4jRepository,
+) -> None:
+    fixture = make_fixture()
+    recovery_action = fixture.action.model_copy(
+        update={
+            "id": f"{fixture.prefix}-recovery-action",
+            "tool": "write_file",
+            "operation": "write_file",
+            "arguments": {"path": "src/example.py", "content": "return value"},
+        }
+    )
+    recovery_result = ActionResult(
+        action_id=recovery_action.id,
+        tool_name=recovery_action.tool,
+        success=True,
+        exit_code=0,
+        output="recovery observed",
+        started_at=STARTED_AT,
+        completed_at=COMPLETED_AT,
+    )
+    pattern = RecoveryPattern(
+        id=f"{fixture.prefix}-pattern",
+        title="Restore the failing assertion",
+        guidance="Inspect the assertion input and apply the observed correction.",
+        source_failure_id=fixture.failure.id,
+        source_resolution_id=fixture.resolution.id,
+        source_outcome_id=fixture.outcome.id,
+        source_task_id=fixture.task.id,
+        source_chronological_index=fixture.task.chronological_index,
+        source_tool=fixture.action.tool,
+        source_operation=fixture.action.operation,
+        source_failure_type=fixture.failure.failure_type.value,
+        environment_constraints=EnvironmentConstraints(runtime=fixture.environment.runtime),
+        verification_status=RecoveryPatternStatus.OBSERVED_SUCCESSFUL,
+        evidence_count=1,
+        evidence_summary="One observed successful recovery.",
+        embedding=[1.0] + [0.0] * 383,
+        created_at=STARTED_AT,
+    )
+
+    try:
+        persist_fixture(repository, fixture)
+        repository.save_action(recovery_action, recovery_result)
+        repository.save_tool(Tool(name=recovery_action.tool))
+        repository.link_task_action(fixture.task.id, recovery_action.id)
+        repository.link_action_tool(recovery_action.id, recovery_action.tool)
+        repository.link_action_run(recovery_action.id, fixture.run.id)
+        repository.link_resolution_observed_change(
+            fixture.resolution.id,
+            recovery_action.id,
+        )
+        repository.save_recovery_pattern(pattern)
+        repository.ensure_recovery_pattern_vector_index()
+
+        index_online = False
+        for _ in range(30):
+            index_result = repository.execute_query(
+                """
+                SHOW VECTOR INDEXES
+                YIELD name, state
+                WHERE name = 'recovery_pattern_embedding_idx'
+                RETURN state
+                """
+            )
+            if index_result.records and index_result.records[0]["state"] == "ONLINE":
+                index_online = True
+                break
+            time.sleep(0.5)
+        assert index_online
+
+        candidates = repository.query_recovery_pattern_vectors(
+            [1.0] + [0.0] * 383,
+            limit=5,
+        )
+
+        assert candidates
+        assert candidates[0].pattern.id == pattern.id
+        assert isinstance(candidates[0].vector_score, float)
+        assert candidates[0].vector_score == pytest.approx(1.0)
     finally:
         cleanup_fixture(repository, fixture.prefix)

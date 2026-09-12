@@ -1,6 +1,8 @@
 """Typed, read-only-shaped models for reconstructed graph lineage."""
 
-from pydantic import BaseModel, model_validator
+from math import isfinite
+
+from pydantic import BaseModel, field_validator, model_validator
 
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
@@ -87,3 +89,19 @@ class RecoveryPatternLineage(BaseModel):
     environment: EnvironmentContext
     failed_action: ActionLineageRecord
     recovery_action: ActionLineageRecord
+
+
+class RecoveryPatternVectorCandidate(BaseModel):
+    """Raw vector-search result without later retrieval-policy decisions."""
+
+    pattern: RecoveryPattern
+    vector_score: float
+
+    @field_validator("vector_score", mode="before")
+    @classmethod
+    def require_finite_numeric_score(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("vector_score must be numeric and not boolean")
+        if not isfinite(float(value)):
+            raise ValueError("vector_score must be finite")
+        return value

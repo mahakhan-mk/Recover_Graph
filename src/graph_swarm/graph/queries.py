@@ -270,6 +270,33 @@ RETURN DISTINCT failure, resolution, outcome, task, environment,
 ORDER BY resolution.id, outcome.id, failed_action.id, recovery_action.id
 """
 
+UPDATE_RECOVERY_PATTERN_EMBEDDING = """
+MATCH (pattern:RecoveryPattern {id: $pattern_id})
+SET pattern.embedding = $embedding
+RETURN pattern
+"""
+
+CREATE_RECOVERY_PATTERN_VECTOR_INDEX = """
+CREATE VECTOR INDEX recovery_pattern_embedding_idx IF NOT EXISTS
+FOR (pattern:RecoveryPattern) ON (pattern.embedding)
+OPTIONS {
+    indexConfig: {
+        `vector.dimensions`: 384,
+        `vector.similarity_function`: 'cosine'
+    }
+}
+"""
+
+QUERY_RECOVERY_PATTERN_VECTORS = """
+CALL db.index.vector.queryNodes(
+    'recovery_pattern_embedding_idx',
+    $limit,
+    $query_embedding
+) YIELD node AS pattern, score AS vector_score
+RETURN pattern, vector_score
+ORDER BY vector_score DESC
+"""
+
 FIND_HISTORICAL_RECOVERY_CANDIDATES = """
 MATCH (failed_action:Action)-[:PART_OF_FAILURE]->(failure:FailureEpisode)
 MATCH (failure)-[:OCCURRED_IN]->(historical_environment:Environment)

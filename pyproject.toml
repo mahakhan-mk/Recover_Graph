@@ -15,6 +15,7 @@ dependencies = [
   "pydantic>=2",
   "pydantic-ai-slim[groq]",
   "pydantic-settings>=2",
+  "sentence-transformers==5.7.0",
   "PyYAML>=6",
   "truststore>=0.10",
 ]
