@@ -451,6 +451,111 @@ def test_missing_recovery_pattern_raises_clear_not_found_error() -> None:
             repository.get_recovery_pattern("unknown-pattern")
 
 
+def test_missing_recovery_evidence_raises_without_matching_patterns() -> None:
+    repository = make_repository()
+
+    with patch.object(repository, "execute_query", return_value=FakeResult([])) as execute_query:
+        with pytest.raises(EntityNotFoundError, match="Recovery evidence"):
+            repository.get_recovery_evidence("unknown-failure")
+
+    assert execute_query.call_args.args[0] == queries.GET_RECOVERY_EVIDENCE
+    assert "RecoveryPattern" not in execute_query.call_args.args[0]
+
+
+def test_recovery_evidence_readback_reconstructs_complete_pre_pattern_chain() -> None:
+    repository = make_repository()
+    recovery_action, recovery_result = make_action_pair()
+    repository.execute_query = Mock(
+        return_value=FakeResult(
+            [
+                {
+                    "failure": {
+                        "id": "failure-001",
+                        "action_id": "failed-action-001",
+                        "failure_type": "test_failure",
+                        "signature": "run_tests:exit_code=1",
+                        "symptom": "failed",
+                        "observed_at": STARTED_AT.isoformat(),
+                    },
+                    "resolution": {
+                        "id": "resolution-001",
+                        "failure_id": "failure-001",
+                        "description": "Observed concrete change",
+                        "status": "observed_successful",
+                        "successful_observations": 1,
+                        "failed_observations": 0,
+                        "observed_at": COMPLETED_AT.isoformat(),
+                    },
+                    "outcome": {
+                        "id": "outcome-001",
+                        "action_id": recovery_action.id,
+                        "success": True,
+                        "tests_passed": 1,
+                        "tests_failed": 0,
+                        "exit_code": 0,
+                        "observed_at": COMPLETED_AT.isoformat(),
+                    },
+                    "task": {
+                        "id": "task-001",
+                        "problem_statement": "Fix the repository.",
+                        "repository": "example/repository",
+                        "chronological_index": 1,
+                    },
+                    "environment": {
+                        "id": "environment-001",
+                        "repository": "example/repository",
+                        "runtime": "python-3.13",
+                        "versions_json": '{"pytest":"8.0"}',
+                        "markers_json": "{}",
+                    },
+                    "failed_action": {
+                        "id": "failed-action-001",
+                        "run_id": "run-001",
+                        "task_id": "task-001",
+                        "tool": "run_tests",
+                        "operation": "pytest",
+                        "arguments_json": '{"paths":["tests"]}',
+                        "planned_at": STARTED_AT.isoformat(),
+                        "result_tool_name": "run_tests",
+                        "success": False,
+                        "exit_code": 1,
+                        "output": "failed",
+                        "error": "tests failed",
+                        "started_at": STARTED_AT.isoformat(),
+                        "completed_at": COMPLETED_AT.isoformat(),
+                    },
+                    "recovery_action": {
+                        "id": recovery_action.id,
+                        "run_id": recovery_action.run_id,
+                        "task_id": recovery_action.task_id,
+                        "tool": recovery_action.tool,
+                        "operation": recovery_action.operation,
+                        "arguments_json": '{"options":{"quiet":true},"paths":["tests"]}',
+                        "planned_at": STARTED_AT.isoformat(),
+                        "result_tool_name": recovery_result.tool_name,
+                        "success": recovery_result.success,
+                        "exit_code": recovery_result.exit_code,
+                        "output": recovery_result.output,
+                        "error": recovery_result.error,
+                        "started_at": STARTED_AT.isoformat(),
+                        "completed_at": COMPLETED_AT.isoformat(),
+                    },
+                }
+            ]
+        )
+    )
+
+    lineage = repository.get_recovery_evidence("failure-001")
+
+    assert lineage.failure.id == "failure-001"
+    assert lineage.resolution.failure_id == lineage.failure.id
+    assert lineage.outcome.success is True
+    assert lineage.task.id == "task-001"
+    assert lineage.failed_action.planned_action.tool == "run_tests"
+    assert lineage.recovery_action.planned_action.tool == "write_file"
+    assert "RecoveryPattern" not in repository.execute_query.call_args.args[0]
+
+
 def test_recovery_pattern_readback_reconstructs_typed_source_evidence() -> None:
     repository = make_repository()
     pattern = make_recovery_pattern()
@@ -523,8 +628,20 @@ def test_recovery_pattern_readback_reconstructs_typed_source_evidence() -> None:
                         "markers_json": "{}",
                     },
                     "failed_action": {
+                        "id": "failed-action-001",
+                        "run_id": "run-001",
+                        "task_id": "task-001",
                         "tool": "run_tests",
                         "operation": "pytest",
+                        "arguments_json": "{}",
+                        "planned_at": STARTED_AT.isoformat(),
+                        "result_tool_name": "run_tests",
+                        "success": False,
+                        "exit_code": 1,
+                        "output": "failed",
+                        "error": "tests failed",
+                        "started_at": STARTED_AT.isoformat(),
+                        "completed_at": COMPLETED_AT.isoformat(),
                     },
                     "recovery_action": {
                         "id": action.id,
@@ -676,8 +793,20 @@ def test_recovery_pattern_readback_rejects_inconsistent_pattern_properties() -> 
             "markers_json": "{}",
         },
         "failed_action": {
+            "id": "failed-action-001",
+            "run_id": "run-001",
+            "task_id": "task-001",
             "tool": "run_tests",
             "operation": "pytest",
+            "arguments_json": "{}",
+            "planned_at": STARTED_AT.isoformat(),
+            "result_tool_name": "run_tests",
+            "success": False,
+            "exit_code": 1,
+            "output": "failed",
+            "error": "tests failed",
+            "started_at": STARTED_AT.isoformat(),
+            "completed_at": COMPLETED_AT.isoformat(),
         },
         "recovery_action": {
             "id": action.id,

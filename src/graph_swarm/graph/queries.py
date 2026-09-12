@@ -252,6 +252,24 @@ RETURN pattern, failure, resolution, outcome, task, environment,
        recovery_action, failed_action
 """
 
+GET_RECOVERY_EVIDENCE = """
+MATCH (task:Task)-[:HAS_ACTION]->(failed_action:Action)-[:PART_OF_FAILURE]->(failure:FailureEpisode)
+MATCH (failed_action)-[:PART_OF]->(source_run:Run)
+MATCH (failure)-[:RESOLVED_BY]->(resolution:Resolution)
+MATCH (resolution)-[:OBSERVED_CHANGE]->(recovery_action:Action)
+MATCH (task)-[:HAS_ACTION]->(recovery_action)
+MATCH (recovery_action)-[:PART_OF]->(source_run)
+MATCH (resolution)-[:VERIFIED_BY]->(outcome:Outcome)
+MATCH (failure)-[:OCCURRED_IN]->(environment:Environment)
+WHERE failure.id = $failure_id
+  AND failure.action_id = failed_action.id
+  AND failed_action.task_id = task.id
+  AND recovery_action.task_id = task.id
+RETURN DISTINCT failure, resolution, outcome, task, environment,
+       failed_action, recovery_action
+ORDER BY resolution.id, outcome.id, failed_action.id, recovery_action.id
+"""
+
 FIND_HISTORICAL_RECOVERY_CANDIDATES = """
 MATCH (failed_action:Action)-[:PART_OF_FAILURE]->(failure:FailureEpisode)
 MATCH (failure)-[:OCCURRED_IN]->(historical_environment:Environment)

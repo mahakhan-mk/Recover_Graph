@@ -55,6 +55,27 @@ class RecoveryPatternTask(BaseModel):
     chronological_index: int
 
 
+class RecoveryEvidenceTask(BaseModel):
+    """Pre-pattern task projection without benchmark family metadata."""
+
+    id: str
+    problem_statement: str
+    repository: str
+    chronological_index: int
+
+
+class RecoveryEvidenceLineage(BaseModel):
+    """Complete historical recovery evidence before pattern creation."""
+
+    failure: FailureEpisode
+    resolution: Resolution
+    outcome: Outcome
+    task: RecoveryEvidenceTask
+    environment: EnvironmentContext
+    failed_action: ActionLineageRecord
+    recovery_action: ActionLineageRecord
+
+
 class RecoveryPatternLineage(BaseModel):
     """Typed RecoveryPattern reconstruction with complete source evidence."""
 
@@ -64,4 +85,5 @@ class RecoveryPatternLineage(BaseModel):
     outcome: Outcome
     task: RecoveryPatternTask
     environment: EnvironmentContext
+    failed_action: ActionLineageRecord
     recovery_action: ActionLineageRecord

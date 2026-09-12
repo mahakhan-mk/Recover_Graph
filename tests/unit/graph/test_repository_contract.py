@@ -12,7 +12,11 @@ from graph_swarm.graph._validation import (
     validate_action_persistence,
     validate_relationship_ids,
 )
-from graph_swarm.graph.read_models import ActionLineageRecord, IncidentLineage
+from graph_swarm.graph.read_models import (
+    ActionLineageRecord,
+    IncidentLineage,
+    RecoveryEvidenceLineage,
+)
 from graph_swarm.graph.repository import OperationalMemoryRepository
 
 STARTED_AT = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
@@ -42,7 +46,13 @@ RELATIONSHIP_METHODS = (
 
 
 def test_all_repository_methods_are_synchronous() -> None:
-    for method_name in (*ENTITY_METHODS, *RELATIONSHIP_METHODS, "get_incident_lineage"):
+    for method_name in (
+        *ENTITY_METHODS,
+        *RELATIONSHIP_METHODS,
+        "get_incident_lineage",
+        "get_recovery_evidence",
+        "get_recovery_pattern",
+    ):
         method = getattr(OperationalMemoryRepository, method_name)
         assert not inspect.iscoroutinefunction(method)
 
@@ -122,4 +132,8 @@ def test_incident_lineage_is_typed_not_a_dictionary() -> None:
     assert (
         get_type_hints(OperationalMemoryRepository.get_incident_lineage)["return"]
         is IncidentLineage
+    )
+    assert (
+        get_type_hints(OperationalMemoryRepository.get_recovery_evidence)["return"]
+        is RecoveryEvidenceLineage
     )

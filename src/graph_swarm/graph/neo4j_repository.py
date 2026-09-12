@@ -30,6 +30,8 @@ from graph_swarm.graph._validation import (
 from graph_swarm.graph.read_models import (
     ActionLineageRecord,
     IncidentLineage,
+    RecoveryEvidenceLineage,
+    RecoveryEvidenceTask,
     RecoveryPatternLineage,
     RecoveryPatternTask,
 )
@@ -664,6 +666,55 @@ class Neo4jRepository:
             recovery_actions=tuple(recovery_actions_by_id.values()),
         )
 
+    def get_recovery_evidence(self, failure_id: str) -> RecoveryEvidenceLineage:
+        validate_relationship_ids(failure_id=failure_id)
+        result = self.execute_query(
+            queries.GET_RECOVERY_EVIDENCE,
+            failure_id=failure_id,
+        )
+        if not result.records:
+            raise EntityNotFoundError(
+                f"Recovery evidence for FailureEpisode {failure_id!r} was not found"
+            )
+        if len(result.records) != 1:
+            raise ValueError(
+                f"Recovery evidence for FailureEpisode {failure_id!r} is ambiguous"
+            )
+        record = result.records[0]
+        failure = _read_failure(_properties(record, "failure"))
+        resolution = _read_resolution(_properties(record, "resolution"))
+        outcome = _read_outcome(_properties(record, "outcome"))
+        task_properties = _properties(record, "task")
+        task = RecoveryEvidenceTask(
+            id=_required_text(task_properties, "id"),
+            problem_statement=_required_text(task_properties, "problem_statement"),
+            repository=_required_text(task_properties, "repository"),
+            chronological_index=_required_int(task_properties, "chronological_index"),
+        )
+        environment = _read_environment(_properties(record, "environment"))
+        failed_action = _read_action(_properties(record, "failed_action"))
+        recovery_action = _read_action(_properties(record, "recovery_action"))
+        if (
+            failure.id != failure_id
+            or failure.action_id != failed_action.planned_action.id
+            or resolution.failure_id != failure.id
+            or failed_action.planned_action.task_id != task.id
+            or recovery_action.planned_action.task_id != task.id
+            or failed_action.planned_action.run_id != recovery_action.planned_action.run_id
+        ):
+            raise ValueError(
+                f"Recovery evidence for FailureEpisode {failure_id!r} is inconsistent"
+            )
+        return RecoveryEvidenceLineage(
+            failure=failure,
+            resolution=resolution,
+            outcome=outcome,
+            task=task,
+            environment=environment,
+            failed_action=failed_action,
+            recovery_action=recovery_action,
+        )
+
     def find_historical_recovery_candidates(
         self,
         planned_action: PlannedAction,
@@ -692,8 +743,7 @@ class Neo4jRepository:
             )
         record = result.records[0]
         pattern = _read_recovery_pattern(_properties(record, "pattern"))
-        failure_properties = _properties(record, "failure")
-        failure = _read_failure(failure_properties)
+        failure = _read_failure(_properties(record, "failure"))
         resolution = _read_resolution(_properties(record, "resolution"))
         outcome = _read_outcome(_properties(record, "outcome"))
         task_properties = _properties(record, "task")
@@ -704,22 +754,19 @@ class Neo4jRepository:
             chronological_index=_required_int(task_properties, "chronological_index"),
         )
         environment = _read_environment(_properties(record, "environment"))
+        failed_action = _read_action(_properties(record, "failed_action"))
         recovery_action = _read_action(
             _properties(record, "recovery_action")
         )
-        failed_action_properties = _properties(record, "failed_action")
         if (
             pattern.source_failure_id != failure.id
             or pattern.source_resolution_id != resolution.id
             or pattern.source_outcome_id != outcome.id
             or pattern.source_task_id != task.id
             or pattern.source_chronological_index != task.chronological_index
-            or pattern.source_failure_type
-            != _required_text(failure_properties, "failure_type")
-            or pattern.source_tool
-            != _required_text(failed_action_properties, "tool")
-            or pattern.source_operation
-            != _required_text(failed_action_properties, "operation")
+            or pattern.source_failure_type != failure.failure_type.value
+            or pattern.source_tool != failed_action.planned_action.tool
+            or pattern.source_operation != failed_action.planned_action.operation
             or resolution.failure_id != failure.id
             or recovery_action.planned_action.task_id != task.id
         ):
@@ -733,6 +780,7 @@ class Neo4jRepository:
             outcome=outcome,
             task=task,
             environment=environment,
+            failed_action=failed_action,
             recovery_action=recovery_action,
         )
 
