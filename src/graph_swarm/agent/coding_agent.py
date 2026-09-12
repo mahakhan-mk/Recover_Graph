@@ -5,7 +5,17 @@ This module constructs the provider lazily so importing it never requires Groq
 credentials or makes a network request.
 """
 
-from pydantic_ai import Agent, AgentRunResult, RunContext, UsageLimits
+import asyncio
+from collections.abc import Sequence
+
+from pydantic_ai import (
+    Agent,
+    AgentCapability,
+    AgentRunResult,
+    ModelSettings,
+    RunContext,
+    UsageLimits,
+)
 from pydantic_ai.models import Model
 from pydantic_ai.models.groq import GroqModel
 from pydantic_ai.providers.groq import GroqProvider
@@ -47,6 +57,7 @@ def create_coding_agent(
     settings: Settings,
     *,
     model: Model | None = None,
+    capabilities: Sequence[AgentCapability[AgentDependencies]] | None = None,
 ) -> Agent[AgentDependencies, str]:
     """Build the controlled coding agent without performing a model request.
 
@@ -59,6 +70,7 @@ def create_coding_agent(
         deps_type=AgentDependencies,
         output_type=str,
         system_prompt=ROLLOUT1_SYSTEM_PROMPT,
+        capabilities=capabilities,
     )
 
     def read_file(
@@ -130,13 +142,69 @@ def run_coding_agent(
     settings: Settings,
     dependencies: AgentDependencies,
     user_prompt: str,
+    *,
+    max_actions: int | None = None,
+    timeout_seconds: float | None = None,
+    model_settings: ModelSettings | None = None,
 ) -> AgentRunResult[str]:
-    """Run a constructed agent with the configured model-request limit."""
+    """Run a constructed agent with isolated identity and optional bounds."""
+    if timeout_seconds is not None:
+        return asyncio.run(
+            run_coding_agent_async(
+                agent,
+                settings,
+                dependencies,
+                user_prompt,
+                max_actions=max_actions,
+                timeout_seconds=timeout_seconds,
+                model_settings=model_settings,
+            )
+        )
     try:
         return agent.run_sync(
             user_prompt,
             deps=dependencies,
-            usage_limits=UsageLimits(request_limit=settings.agent_request_limit),
+            message_history=None,
+            conversation_id=dependencies.run_id,
+            run_id=dependencies.run_id,
+            model_settings=model_settings,
+            usage_limits=_usage_limits(settings, max_actions),
         )
     finally:
         finalize_pending_advice(dependencies)
+
+
+async def run_coding_agent_async(
+    agent: Agent[AgentDependencies, str],
+    settings: Settings,
+    dependencies: AgentDependencies,
+    user_prompt: str,
+    *,
+    max_actions: int | None = None,
+    timeout_seconds: float | None = None,
+    model_settings: ModelSettings | None = None,
+) -> AgentRunResult[str]:
+    """Async bounded variant used by the sequential Track B runner."""
+    try:
+        run = agent.run(
+            user_prompt,
+            deps=dependencies,
+            message_history=None,
+            conversation_id=dependencies.run_id,
+            run_id=dependencies.run_id,
+            model_settings=model_settings,
+            usage_limits=_usage_limits(settings, max_actions),
+        )
+        if timeout_seconds is None:
+            return await run
+        async with asyncio.timeout(timeout_seconds):
+            return await run
+    finally:
+        finalize_pending_advice(dependencies)
+
+
+def _usage_limits(settings: Settings, max_actions: int | None) -> UsageLimits:
+    return UsageLimits(
+        request_limit=settings.agent_request_limit,
+        tool_calls_limit=max_actions,
+    )

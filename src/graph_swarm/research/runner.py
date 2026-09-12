@@ -1,0 +1,928 @@
+"""Track B experiment configuration, task loading, and B0 execution.
+
+This module is deliberately limited to the no-persistent-memory control.  It
+does not construct an advisory service or read the operational memory graph.
+"""
+
+from __future__ import annotations
+
+import csv
+import dataclasses
+import json
+import shutil
+import time
+from collections.abc import Callable, Iterator, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
+from uuid import uuid4
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_ai import Agent, AgentCapability, AgentRunResult, ModelSettings
+from pydantic_ai.messages import RetryPromptPart
+from pydantic_ai.models import Model
+from pydantic_ai_harness.step_persistence import SqliteStepStore, StepPersistence
+from pydantic_evals import Case, Dataset
+from pydantic_evals.evaluators import Evaluator, EvaluatorContext
+
+from graph_swarm.agent.coding_agent import (
+    create_coding_agent,
+    run_coding_agent,
+)
+from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.domain.action import ActionResult
+from graph_swarm.domain.actions import PlannedAction
+from graph_swarm.domain.events import AgentEvent
+from graph_swarm.domain.failures import FailureType
+from graph_swarm.domain.tasks import Task
+from graph_swarm.research.contracts import ExperimentCondition, ExperimentRunArtifact
+from graph_swarm.settings import Settings, get_settings
+
+
+class ExperimentConfigurationError(ValueError):
+    """Raised when an experiment configuration is incomplete or inconsistent."""
+
+
+class RecurrenceEvaluationRequired(ExperimentConfigurationError):
+    """Raised when the frozen artifact cannot represent an unevaluated recurrence."""
+
+
+class ObjectiveEvaluationRequired(ExperimentConfigurationError):
+    """Raised when no objective benchmark/SWE-smith evaluator was supplied."""
+
+
+class WorkspaceIsolationError(ExperimentConfigurationError):
+    """Raised when a clean benchmark baseline cannot be materialized."""
+
+
+class ExperimentLimits(BaseModel):
+    """Resource limits shared by comparable Track B conditions."""
+
+    max_actions: int = Field(gt=0)
+    timeout_seconds: float = Field(gt=0)
+
+
+class ModelConfiguration(BaseModel):
+    """The frozen provider/model settings recorded with every run."""
+
+    provider: str
+    model: str
+    settings: dict[str, object] = Field(default_factory=dict)
+    prompt_version: str
+
+    @field_validator("provider", "model", "prompt_version")
+    @classmethod
+    def require_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("model configuration text must be non-empty")
+        return value
+
+
+class ExperimentConfiguration(BaseModel):
+    """Validated YAML configuration for one experiment rollout."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    experiment_id: str
+    rollout: str
+    model_config_path: str = Field(alias="model_config")
+    conditions: tuple[ExperimentCondition, ...]
+    limits: ExperimentLimits
+    task_manifest: str = "benchmark/manifests/pilot.jsonl"
+    task_problems: str = "benchmark/annotations/recurrence_validation.csv"
+    artifact_root: str = "research/evidence/results"
+    workspace_baseline_root: str = "benchmark/workspaces"
+    workspace_execution_root: str = "research/evidence/workspaces"
+    config_version: str = "v1"
+    development: bool = False
+    pilot: bool = False
+
+    @field_validator("experiment_id", "rollout", "model_config_path", "config_version")
+    @classmethod
+    def require_non_empty_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("experiment configuration text must be non-empty")
+        return value
+
+    @model_validator(mode="after")
+    def require_conditions(self) -> ExperimentConfiguration:
+        if not self.conditions:
+            raise ValueError("at least one experiment condition is required")
+        return self
+
+
+@dataclass(frozen=True)
+class LoadedExperimentConfiguration:
+    """Configuration plus resolved paths and the referenced model settings."""
+
+    config: ExperimentConfiguration
+    model: ModelConfiguration
+    config_path: Path
+    project_root: Path
+
+    @property
+    def task_manifest_path(self) -> Path:
+        return resolve_config_path(self.config.task_manifest, self.project_root)
+
+    @property
+    def task_problems_path(self) -> Path:
+        return resolve_config_path(self.config.task_problems, self.project_root)
+
+    @property
+    def artifact_root_path(self) -> Path:
+        return resolve_config_path(self.config.artifact_root, self.project_root)
+
+    @property
+    def workspace_baseline_root_path(self) -> Path:
+        return resolve_config_path(self.config.workspace_baseline_root, self.project_root)
+
+    @property
+    def workspace_execution_root_path(self) -> Path:
+        return resolve_config_path(self.config.workspace_execution_root, self.project_root)
+
+
+def resolve_config_path(value: str | Path, project_root: Path) -> Path:
+    """Resolve a config path relative to the project root."""
+    path = Path(value)
+    return path if path.is_absolute() else (project_root / path).resolve()
+
+
+def load_experiment_configuration(
+    config_path: Path,
+    *,
+    project_root: Path | None = None,
+) -> LoadedExperimentConfiguration:
+    """Load an experiment YAML file and its referenced model YAML file."""
+    resolved_config_path = config_path.expanduser().resolve()
+    root = (project_root or Path.cwd()).expanduser().resolve()
+    try:
+        with resolved_config_path.open(encoding="utf-8") as handle:
+            config = ExperimentConfiguration.model_validate(yaml.safe_load(handle))
+    except (OSError, TypeError, ValueError) as error:
+        raise ExperimentConfigurationError(
+            f"could not load experiment configuration {resolved_config_path}: {error}"
+        ) from error
+
+    model_path = resolve_config_path(config.model_config_path, root)
+    try:
+        with model_path.open(encoding="utf-8") as handle:
+            model = ModelConfiguration.model_validate(yaml.safe_load(handle))
+    except (OSError, TypeError, ValueError) as error:
+        raise ExperimentConfigurationError(
+            f"could not load model configuration {model_path}: {error}"
+        ) from error
+
+    return LoadedExperimentConfiguration(config, model, resolved_config_path, root)
+
+
+@dataclass(frozen=True)
+class BenchmarkTaskCase:
+    """Task plus benchmark-only recurrence evidence from the manifest."""
+
+    task: Task
+    occurrence_index: int
+
+
+def load_task_cases(
+    manifest_path: Path,
+    *,
+    problem_statements_path: Path | None = None,
+) -> list[BenchmarkTaskCase]:
+    """Load manifest tasks in chronological order without exposing annotations.
+
+    The manifest is intentionally metadata-only.  The annotation source is
+    used solely as a keyed source of problem statements; recovery labels,
+    patches, and all other columns are discarded before a :class:`Task` is
+    constructed.
+    """
+    manifest_records = list(_read_jsonl(manifest_path))
+    statements = (
+        _read_problem_statements(problem_statements_path)
+        if problem_statements_path
+        else {}
+    )
+    task_cases: list[BenchmarkTaskCase] = []
+    seen_ids: set[str] = set()
+    seen_indexes: set[int] = set()
+
+    for record in manifest_records:
+        task_id = _required_record_text(record, "task_id")
+        review_id = _required_record_text(record, "review_id")
+        problem_statement = record.get("problem_statement")
+        if not isinstance(problem_statement, str) or not problem_statement.strip():
+            problem_statement = statements.get(review_id)
+        if problem_statement is None:
+            raise ExperimentConfigurationError(
+                f"no problem_statement found for manifest review_id {review_id}"
+            )
+        chronological_index = _required_record_int(record, "chronological_index")
+        occurrence_index = _required_record_int(record, "occurrence_index")
+        if task_id in seen_ids or chronological_index in seen_indexes:
+            raise ExperimentConfigurationError(
+                "manifest task IDs and chronological indexes must be unique"
+            )
+        seen_ids.add(task_id)
+        seen_indexes.add(chronological_index)
+        task_cases.append(
+            BenchmarkTaskCase(
+                task=Task(
+                    id=task_id,
+                    problem_statement=problem_statement,
+                    family_id=_required_record_text(record, "family_id"),
+                    repository=_required_record_text(record, "repository"),
+                    chronological_index=chronological_index,
+                ),
+                occurrence_index=occurrence_index,
+            )
+        )
+
+    return sorted(task_cases, key=lambda case: case.task.chronological_index)
+
+
+def load_tasks(
+    manifest_path: Path,
+    *,
+    problem_statements_path: Path | None = None,
+) -> list[Task]:
+    """Load only the Task domain objects, retaining no benchmark annotations."""
+    return [
+        case.task
+        for case in load_task_cases(
+            manifest_path,
+            problem_statements_path=problem_statements_path,
+        )
+    ]
+
+
+def build_task_prompt(task: Task) -> str:
+    """Build the only task-specific model input used by B0."""
+    return f"Task problem statement:\n\n{task.problem_statement}"
+
+
+class BaselineWorkspaceManager:
+    """Materialize a fresh task workspace from an immutable benchmark baseline."""
+
+    def __init__(
+        self,
+        baseline_root: Path,
+        execution_root: Path,
+        *,
+        experiment_id: str = "GS-E003",
+        condition: ExperimentCondition = ExperimentCondition.B0,
+    ) -> None:
+        self.baseline_root = baseline_root.expanduser().resolve()
+        self.execution_root = execution_root.expanduser().resolve()
+        self.experiment_id = experiment_id
+        self.condition = condition
+
+    def materialize(self, task: Task, run_id: str) -> Path:
+        baseline = (self.baseline_root / task.repository).resolve()
+        if not baseline.is_dir():
+            raise WorkspaceIsolationError(
+                f"benchmark baseline workspace does not exist: {baseline}"
+            )
+        destination = (
+            self.execution_root
+            / self.experiment_id
+            / self.condition.value
+            / task.id
+            / run_id
+            / "workspace"
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copytree(baseline, destination, dirs_exist_ok=False)
+        except FileExistsError as error:
+            raise WorkspaceIsolationError(
+                f"refusing to reuse an existing task workspace: {destination}"
+            ) from error
+        except OSError as error:
+            raise WorkspaceIsolationError(
+                f"could not materialize benchmark baseline {baseline}: {error}"
+            ) from error
+        return destination
+
+
+@dataclass(frozen=True)
+class BenchmarkEvaluationInput:
+    """Pydantic Evals case input; only the prompt is model-visible."""
+
+    task: Task
+    prompt: str
+
+
+@dataclass(frozen=True)
+class BenchmarkEvaluationOutput:
+    """Output passed to the objective benchmark evaluator after agent execution."""
+
+    task: Task
+    workspace: Path
+    events: tuple[AgentEvent, ...]
+    agent_result: AgentRunResult[str] | None
+    error: Exception | None
+
+
+ObjectiveTaskEvaluator = Callable[[Task, Path], bool]
+RecurrenceEvaluator = Callable[
+    [
+        BenchmarkTaskCase,
+        Sequence[AgentEvent],
+        AgentRunResult[str] | None,
+        Path,
+    ],
+    bool | None,
+]
+LegacyTestEvaluator = Callable[[Task, Sequence[AgentEvent], AgentRunResult[str] | None], bool]
+
+
+@dataclass
+class ObjectiveBenchmarkEvaluator(
+    Evaluator[BenchmarkEvaluationInput, BenchmarkEvaluationOutput, None]
+):
+    """Pydantic Evals adapter for the objective SWE-smith benchmark boundary."""
+
+    objective: ObjectiveTaskEvaluator
+
+    def evaluate(
+        self,
+        ctx: EvaluatorContext[
+            BenchmarkEvaluationInput,
+            BenchmarkEvaluationOutput,
+            None,
+        ],
+    ) -> bool:
+        return self.objective(ctx.inputs.task, ctx.output.workspace)
+
+
+class BenchmarkEvaluation:
+    """Dataset/Case/Evaluator wrapper used by the sequential runner."""
+
+    def __init__(self, name: str, objective: ObjectiveTaskEvaluator) -> None:
+        self.evaluator = ObjectiveBenchmarkEvaluator(objective)
+        self.dataset = Dataset[BenchmarkEvaluationInput, BenchmarkEvaluationOutput, None](
+            name=name,
+            cases=[],
+            evaluators=[self.evaluator],
+        )
+
+    def evaluate(
+        self,
+        task: Task,
+        workspace: Path,
+        events: Sequence[AgentEvent],
+        agent_result: AgentRunResult[str] | None,
+        error: Exception | None,
+        duration_seconds: float,
+    ) -> bool:
+        case = Case[BenchmarkEvaluationInput, BenchmarkEvaluationOutput, None](
+            name=task.id,
+            inputs=BenchmarkEvaluationInput(task=task, prompt=build_task_prompt(task)),
+        )
+        output = BenchmarkEvaluationOutput(
+            task=task,
+            workspace=workspace,
+            events=tuple(events),
+            agent_result=agent_result,
+            error=error,
+        )
+        self.dataset = Dataset[BenchmarkEvaluationInput, BenchmarkEvaluationOutput, None](
+            name=self.dataset.name,
+            cases=[case],
+            evaluators=[self.evaluator],
+        )
+        report = self.dataset.evaluate_sync(
+            lambda _inputs: output,
+            max_concurrency=1,
+            progress=False,
+        )
+        case_report = report.cases[0]
+        evaluation = next(iter(case_report.assertions.values()))
+        return bool(evaluation.value)
+
+
+class ExperimentRunArtifactStore:
+    """Append-only store for canonical per-run artifacts and raw evidence."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root.expanduser().resolve()
+
+    def run_directory(
+        self,
+        experiment_id: str,
+        condition: ExperimentCondition,
+        task_id: str,
+        run_id: str,
+    ) -> Path:
+        return self.root / experiment_id / condition.value / task_id / run_id
+
+    def prepare_run_directory(
+        self,
+        experiment_id: str,
+        condition: ExperimentCondition,
+        task_id: str,
+        run_id: str,
+    ) -> Path:
+        """Create and return the unique directory shared by run evidence."""
+        run_dir = self.run_directory(experiment_id, condition, task_id, run_id)
+        run_dir.mkdir(parents=True, exist_ok=False)
+        return run_dir
+
+    def write_artifact(self, artifact: ExperimentRunArtifact) -> Path:
+        run_dir = self.run_directory(
+            artifact.experiment_id,
+            artifact.condition,
+            artifact.task_id,
+            artifact.run_id,
+        )
+        run_dir.mkdir(parents=True, exist_ok=True)
+        path = run_dir / "artifact.json"
+        serialized = json.dumps(
+            artifact.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        with path.open("x", encoding="utf-8", newline="\n") as handle:
+            handle.write(serialized + "\n")
+        return path
+
+    def write_raw_evidence(
+        self,
+        *,
+        artifact: ExperimentRunArtifact,
+        dependencies: AgentDependencies,
+        result: AgentRunResult[str] | None,
+        error: Exception | None,
+        step_database_path: Path,
+    ) -> Path:
+        run_dir = self.run_directory(
+            artifact.experiment_id,
+            artifact.condition,
+            artifact.task_id,
+            artifact.run_id,
+        )
+        run_dir.mkdir(parents=True, exist_ok=True)
+        evidence = {
+            "run_id": artifact.run_id,
+            "task_id": artifact.task_id,
+            "error": None if error is None else type(error).__name__,
+            "error_message": None if error is None else str(error),
+            "step_database": str(step_database_path),
+            "events": [event.model_dump(mode="json") for event in dependencies.events],
+            "messages": [] if result is None else json.loads(result.all_messages_json()),
+            "output": None if result is None else result.output,
+            "conversation_id": None if result is None else result.conversation_id,
+            "agent_run_id": None if result is None else result.run_id,
+            "usage": None if result is None else dataclasses.asdict(result.usage),
+        }
+        path = run_dir / "raw_evidence.json"
+        serialized = json.dumps(evidence, sort_keys=True, separators=(",", ":"), default=str)
+        with path.open("x", encoding="utf-8", newline="\n") as handle:
+            handle.write(serialized + "\n")
+        return path
+
+
+AgentFactory = Callable[
+    [Settings, Sequence[AgentCapability[AgentDependencies]]],
+    Agent[AgentDependencies, str],
+]
+WorkspaceResolver = Callable[[Task], Path]
+
+
+@dataclass(frozen=True)
+class ExperimentExecution:
+    """Result of one task/run, including its canonical artifact location."""
+
+    artifact: ExperimentRunArtifact
+    artifact_path: Path
+    raw_evidence_path: Path
+    dependencies: AgentDependencies
+    agent_result: AgentRunResult[str] | None
+    error: Exception | None
+    step_database_path: Path
+
+
+class ExperimentRunner:
+    """Sequential B0 runner with isolated PydanticAI executions."""
+
+    def __init__(
+        self,
+        configuration: LoadedExperimentConfiguration,
+        *,
+        settings: Settings | None = None,
+        agent_factory: AgentFactory | None = None,
+        model: Model | None = None,
+        workspace_resolver: WorkspaceResolver | None = None,
+        objective_evaluator: ObjectiveTaskEvaluator | None = None,
+        evaluator: LegacyTestEvaluator | None = None,
+        recurrence_evaluator: RecurrenceEvaluator | None = None,
+        artifact_store: ExperimentRunArtifactStore | None = None,
+    ) -> None:
+        if not configuration.config.development or not configuration.config.pilot:
+            raise ExperimentConfigurationError(
+                "GS-E003 must be explicitly marked development/pilot"
+            )
+        if configuration.model.provider != "groq":
+            raise ExperimentConfigurationError("GS-E003 must use the Groq model configuration")
+        if configuration.config.conditions != (ExperimentCondition.B0,):
+            raise ExperimentConfigurationError("GS-E003 Sprint 1 must enable B0 only")
+        self.configuration = configuration
+        self.settings = settings
+        self.agent_factory = agent_factory
+        self.model = model
+        self.workspace_resolver = workspace_resolver
+        if objective_evaluator is None and evaluator is not None:
+            legacy_evaluator = evaluator
+
+            def legacy_objective(task: Task, _workspace: Path) -> bool:
+                return legacy_evaluator(task, (), None)
+
+            objective_evaluator = legacy_objective
+        self.objective_evaluator = objective_evaluator
+        self.recurrence_evaluator = recurrence_evaluator or benchmark_recurrence_determination
+        self.artifact_store = artifact_store or ExperimentRunArtifactStore(
+            configuration.artifact_root_path
+        )
+
+    def run_all(self, tasks: Sequence[Task] | None = None) -> list[ExperimentExecution]:
+        """Run each selected task once, strictly in chronological order."""
+        selected_cases = (
+            [
+                BenchmarkTaskCase(task=task, occurrence_index=1)
+                for task in tasks
+            ]
+            if tasks is not None
+            else load_task_cases(
+                self.configuration.task_manifest_path,
+                problem_statements_path=self.configuration.task_problems_path,
+            )
+        )
+        ordered_cases = sorted(
+            selected_cases,
+            key=lambda case: case.task.chronological_index,
+        )
+        return [self.run_case(case) for case in ordered_cases]
+
+    def run_task(self, task: Task) -> ExperimentExecution:
+        """Run one B0 task using explicit injected test determinations."""
+        return self.run_case(BenchmarkTaskCase(task=task, occurrence_index=1))
+
+    def run_case(self, case: BenchmarkTaskCase) -> ExperimentExecution:
+        """Run one B0 case with benchmark recurrence and objective evaluation."""
+        task = case.task
+        condition = ExperimentCondition.B0
+        run_id = self._new_run_id(condition, task)
+        if case.occurrence_index < 1:
+            raise RecurrenceEvaluationRequired(
+                f"no benchmark recurrence determination for task {task.id}"
+            )
+        if self.objective_evaluator is None:
+            raise ObjectiveEvaluationRequired(
+                "a benchmark/SWE-smith objective evaluator is required"
+            )
+        run_dir = self.artifact_store.prepare_run_directory(
+            self.configuration.config.experiment_id,
+            condition,
+            task.id,
+            run_id,
+        )
+        step_database_path = run_dir / "steps.sqlite"
+        workspace = self._workspace_for(task, run_id).expanduser().resolve()
+        dependencies = AgentDependencies(
+            workspace,
+            run_id,
+            task.id,
+            task=task,
+            advisory_service=None,
+            environment=None,
+        )
+        started = datetime.now(UTC)
+        started_counter = time.perf_counter()
+        result: AgentRunResult[str] | None = None
+        error: Exception | None = None
+        try:
+            settings = self._settings_for_model()
+            step_persistence = StepPersistence(
+                store=SqliteStepStore(database=step_database_path),
+                agent_name="graph_swarm_coding_agent",
+                run_id=run_id,
+                metadata={
+                    "experiment_id": self.configuration.config.experiment_id,
+                    "condition": condition.value,
+                    "task_id": task.id,
+                },
+            )
+            agent = self._build_agent(settings, step_persistence)
+            result = run_coding_agent(
+                agent,
+                settings,
+                dependencies,
+                build_task_prompt(task),
+                max_actions=self.configuration.config.limits.max_actions,
+                timeout_seconds=self.configuration.config.limits.timeout_seconds,
+                model_settings=cast(ModelSettings, self.configuration.model.settings),
+            )
+        except Exception as caught:  # preserve bounded-run failures in evidence
+            error = caught
+
+        task_success = BenchmarkEvaluation(
+            self.configuration.config.experiment_id,
+            self.objective_evaluator,
+        ).evaluate(
+            task,
+            workspace,
+            dependencies.events,
+            result,
+            error if isinstance(error, Exception) else None,
+            (time.perf_counter() - started_counter),
+        )
+        known_failure_repeated = self.recurrence_evaluator(
+            case,
+            tuple(dependencies.events),
+            result,
+            workspace,
+        )
+        if known_failure_repeated is None:
+            raise RecurrenceEvaluationRequired(
+                f"no post-execution recurrence determination for task {task.id}"
+            )
+        artifact = self._make_artifact(
+            task=task,
+            condition=condition,
+            run_id=run_id,
+            started=started,
+            elapsed_ms=(time.perf_counter() - started_counter) * 1000,
+            dependencies=dependencies,
+            result=result,
+            error=error,
+            task_success=task_success,
+            known_failure_repeated=known_failure_repeated,
+        )
+        raw_path = self.artifact_store.write_raw_evidence(
+            artifact=artifact,
+            dependencies=dependencies,
+            result=result,
+            error=error,
+            step_database_path=step_database_path,
+        )
+        artifact_path = self.artifact_store.write_artifact(artifact)
+        return ExperimentExecution(
+            artifact,
+            artifact_path,
+            raw_path,
+            dependencies,
+            result,
+            error,
+            step_database_path,
+        )
+
+    def _settings_for_model(self) -> Settings:
+        base = self.settings or get_settings()
+        return base.model_copy(update={"groq_model": self.configuration.model.model})
+
+    def _workspace_for(self, task: Task, run_id: str) -> Path:
+        if self.workspace_resolver is not None:
+            return self.workspace_resolver(task)
+        manager = BaselineWorkspaceManager(
+            self.configuration.workspace_baseline_root_path,
+            self.configuration.workspace_execution_root_path,
+            experiment_id=self.configuration.config.experiment_id,
+            condition=ExperimentCondition.B0,
+        )
+        return manager.materialize(task, run_id)
+
+    def _build_agent(
+        self,
+        settings: Settings,
+        step_persistence: StepPersistence,
+    ) -> Agent[AgentDependencies, str]:
+        if self.agent_factory is not None:
+            agent = self.agent_factory(settings, [step_persistence])
+            if not any(
+                capability is step_persistence
+                for capability in agent.root_capability.capabilities
+            ):
+                raise ExperimentConfigurationError(
+                    "custom agent factory did not attach the mandatory StepPersistence capability"
+                )
+            return agent
+        return create_coding_agent(
+            settings,
+            model=self.model,
+            capabilities=[step_persistence],
+        )
+
+    def _new_run_id(self, condition: ExperimentCondition, task: Task) -> str:
+        return (
+            f"{self.configuration.config.experiment_id}-"
+            f"{condition.value}-{task.id}-{uuid4().hex}"
+        )
+
+    def _make_artifact(
+        self,
+        *,
+        task: Task,
+        condition: ExperimentCondition,
+        run_id: str,
+        started: datetime,
+        elapsed_ms: float,
+        dependencies: AgentDependencies,
+        result: AgentRunResult[str] | None,
+        error: Exception | None,
+        task_success: bool,
+        known_failure_repeated: bool,
+    ) -> ExperimentRunArtifact:
+        if dependencies.events:
+            event = dependencies.events[-1]
+            executed_action = event.result
+            planned_action = _planned_action(event)
+            latency_ms = (
+                max(0.0, (executed_action.completed_at - started).total_seconds() * 1000)
+            )
+        else:
+            now = datetime.now(UTC)
+            action_id = f"{run_id}-agent-run"
+            executed_action = ActionResult(
+                action_id=action_id,
+                tool_name="agent",
+                success=task_success,
+                output=None if result is None else result.output,
+                error=None if error is None else type(error).__name__,
+                started_at=started,
+                completed_at=now,
+            )
+            planned_action = PlannedAction(
+                id=action_id,
+                run_id=run_id,
+                task_id=task.id,
+                tool="agent",
+                operation="task_completion",
+                arguments={},
+                planned_at=started,
+            )
+            latency_ms = max(0.0, elapsed_ms)
+
+        usage = None if result is None else result.usage
+        retries = 0 if result is None else sum(
+            isinstance(part, RetryPromptPart)
+            for message in result.all_messages()
+            for part in message.parts
+        )
+        failure_type = _failure_type(executed_action)
+        return ExperimentRunArtifact(
+            experiment_id=self.configuration.config.experiment_id,
+            condition=condition,
+            run_id=run_id,
+            task_id=task.id,
+            family_id=task.family_id,
+            chronological_index=task.chronological_index,
+            model=self.configuration.model.model,
+            model_settings=self.configuration.model.settings,
+            prompt_version=self.configuration.model.prompt_version,
+            planned_action=planned_action,
+            executed_action=executed_action,
+            advice_received=None,
+            advice_accepted=False,
+            failure_type=failure_type,
+            task_success=task_success,
+            known_failure_repeated=known_failure_repeated,
+            tool_calls=len(dependencies.events),
+            retries=retries,
+            input_tokens=None if usage is None else usage.input_tokens,
+            output_tokens=None if usage is None else usage.output_tokens,
+            latency_ms=latency_ms,
+            retrieved_incident_id=None,
+            retrieval_score=None,
+        )
+
+
+def _planned_action(event: AgentEvent) -> PlannedAction:
+    return PlannedAction(
+        id=event.action_id,
+        run_id=event.run_id,
+        task_id=event.task_id,
+        tool=event.result.tool_name,
+        operation=event.result.tool_name,
+        arguments={},
+        planned_at=event.result.started_at,
+    )
+
+
+def _failure_type(result: ActionResult) -> FailureType | None:
+    if result.success:
+        return None
+    return {
+        "run_tests": FailureType.TEST_FAILURE,
+        "run_command": FailureType.COMMAND_FAILURE,
+    }.get(result.tool_name, FailureType.TOOL_PARAMETER_ERROR)
+
+
+def benchmark_recurrence_determination(
+    case: BenchmarkTaskCase,
+    _events: Sequence[AgentEvent],
+    _agent_result: AgentRunResult[str] | None,
+    _workspace: Path,
+) -> bool | None:
+    """Return only determinations defensible from the frozen benchmark data.
+
+    The pilot data identifies recurrence opportunities but does not contain a
+    task-specific normalized known-failure signature.  Transfer cases must
+    therefore supply an explicit benchmark matcher to compare
+    :func:`detect_failure` output with that frozen evidence.
+    """
+    if case.occurrence_index == 1:
+        return False
+    if case.occurrence_index < 1:
+        return None
+    return None
+
+
+def _read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise ExperimentConfigurationError(
+                        f"invalid JSON in {path} at line {line_number}"
+                    ) from error
+                if not isinstance(record, dict):
+                    raise ExperimentConfigurationError(
+                        f"manifest record {line_number} is not an object"
+                    )
+                yield record
+    except OSError as error:
+        raise ExperimentConfigurationError(
+            f"could not read task manifest {path}: {error}"
+        ) from error
+
+
+def _read_problem_statements(path: Path) -> dict[str, str]:
+    try:
+        with path.open(encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if "review_id" not in (reader.fieldnames or ()) or "problem_statement" not in (
+                reader.fieldnames or ()
+            ):
+                raise ExperimentConfigurationError(
+                    f"problem statement source {path} must contain review_id and problem_statement"
+                )
+            statements: dict[str, str] = {}
+            for row in reader:
+                review_id = row.get("review_id")
+                problem_statement = row.get("problem_statement")
+                if review_id and problem_statement and problem_statement.strip():
+                    statements[review_id] = problem_statement
+            return statements
+    except OSError as error:
+        raise ExperimentConfigurationError(
+            f"could not read problem statement source {path}: {error}"
+        ) from error
+
+
+def _required_record_text(record: dict[str, Any], field: str) -> str:
+    value = record.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ExperimentConfigurationError(f"manifest field {field!r} must be non-empty text")
+    return value
+
+
+def _required_record_int(record: dict[str, Any], field: str) -> int:
+    value = record.get(field)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ExperimentConfigurationError(f"manifest field {field!r} must be an integer")
+    return value
+
+
+__all__ = [
+    "AgentFactory",
+    "BaselineWorkspaceManager",
+    "BenchmarkEvaluation",
+    "BenchmarkEvaluationInput",
+    "BenchmarkEvaluationOutput",
+    "BenchmarkTaskCase",
+    "ExperimentConfiguration",
+    "ExperimentConfigurationError",
+    "ExperimentExecution",
+    "ExperimentLimits",
+    "ExperimentRunArtifactStore",
+    "ExperimentRunner",
+    "LoadedExperimentConfiguration",
+    "ModelConfiguration",
+    "ObjectiveBenchmarkEvaluator",
+    "ObjectiveEvaluationRequired",
+    "ObjectiveTaskEvaluator",
+    "RecurrenceEvaluationRequired",
+    "RecurrenceEvaluator",
+    "WorkspaceResolver",
+    "WorkspaceIsolationError",
+    "build_task_prompt",
+    "benchmark_recurrence_determination",
+    "load_experiment_configuration",
+    "load_task_cases",
+    "load_tasks",
+]

@@ -32,3 +32,5 @@ artifacts/reports/*
 
 # Neo4j local data
 .neo4j/
+
+diff.txt

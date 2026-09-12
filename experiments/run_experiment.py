@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import yaml
+from graph_swarm.research.runner import (
+    ExperimentRunner,
+    load_experiment_configuration,
+)
 
 
 def main() -> None:
@@ -13,11 +16,14 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
 
-    with args.config.open("r", encoding="utf-8") as handle:
-        config = yaml.safe_load(handle)
-
-    print(f"Loaded experiment: {config['experiment_id']}")
-    print("Implementation intentionally starts with the GS-E001 vertical slice.")
+    configuration = load_experiment_configuration(args.config)
+    runner = ExperimentRunner(configuration)
+    executions = runner.run_all()
+    print(f"Loaded experiment: {configuration.config.experiment_id}")
+    print(f"Condition: {configuration.config.conditions[0].value}")
+    print(f"Runs completed: {len(executions)}")
+    for execution in executions:
+        print(f"{execution.artifact.run_id}: {execution.artifact_path}")
 
 
 if __name__ == "__main__":
