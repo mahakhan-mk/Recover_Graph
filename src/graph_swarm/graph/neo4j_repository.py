@@ -435,6 +435,18 @@ class Neo4jRepository:
             outcome_id=outcome_id,
         )
 
+    def link_resolution_observed_change(
+        self,
+        resolution_id: str,
+        action_id: str,
+    ) -> None:
+        self._link(
+            queries.LINK_RESOLUTION_OBSERVED_CHANGE,
+            "OBSERVED_CHANGE",
+            resolution_id=resolution_id,
+            action_id=action_id,
+        )
+
     def get_incident_lineage(self, failure_id: str) -> IncidentLineage:
         validate_relationship_ids(failure_id=failure_id)
         failure_result = self.execute_query(queries.GET_FAILURE, failure_id=failure_id)
@@ -492,6 +504,7 @@ class Neo4jRepository:
         )
         resolutions_by_id: dict[str, Resolution] = {}
         outcomes_by_id: dict[str, Outcome] = {}
+        recovery_actions_by_id: dict[str, ActionLineageRecord] = {}
         for record in resolution_result.records:
             resolution = _read_resolution(_properties(record, "resolution"))
             resolutions_by_id[resolution.id] = resolution
@@ -501,6 +514,19 @@ class Neo4jRepository:
                     continue
                 outcome = _read_outcome(cast(Mapping[str, object], outcome_value))
                 outcomes_by_id[outcome.id] = outcome
+            observed_change_values = cast(
+                Sequence[object],
+                record.get("observed_changes", []),
+            )
+            for observed_change_value in observed_change_values:
+                if observed_change_value is None:
+                    continue
+                observed_change = _read_action(
+                    cast(Mapping[str, object], observed_change_value)
+                )
+                recovery_actions_by_id[
+                    observed_change.planned_action.id
+                ] = observed_change
 
         return IncidentLineage(
             run=next(iter(run_by_id.values())),
@@ -511,6 +537,7 @@ class Neo4jRepository:
             environment=environment,
             resolutions=tuple(resolutions_by_id.values()),
             outcomes=tuple(outcomes_by_id.values()),
+            recovery_actions=tuple(recovery_actions_by_id.values()),
         )
 
     def find_historical_recovery_candidates(

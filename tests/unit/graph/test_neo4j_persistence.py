@@ -185,6 +185,27 @@ def test_relationship_writes_match_endpoints_and_merge_relationships() -> None:
     }
 
 
+def test_resolution_observed_change_relationship_is_idempotent_and_typed() -> None:
+    repository = make_repository()
+
+    with patch.object(
+        repository,
+        "execute_query",
+        return_value=FakeResult([{"linked": 1}]),
+    ) as execute_query:
+        repository.link_resolution_observed_change("resolution-001", "action-001")
+
+    assert execute_query.call_args.args[0] == queries.LINK_RESOLUTION_OBSERVED_CHANGE
+    assert "MATCH" in execute_query.call_args.args[0]
+    assert "MERGE (resolution)-[:OBSERVED_CHANGE]->(action)" in (
+        execute_query.call_args.args[0]
+    )
+    assert execute_query.call_args.kwargs == {
+        "resolution_id": "resolution-001",
+        "action_id": "action-001",
+    }
+
+
 def test_relationship_write_rejects_missing_endpoint_and_empty_ids() -> None:
     repository = make_repository()
 
@@ -197,6 +218,13 @@ def test_relationship_write_rejects_missing_endpoint_and_empty_ids() -> None:
             repository.link_action_run("", "run-001")
 
     execute_query.assert_not_called()
+
+    with patch.object(repository, "execute_query", return_value=FakeResult([])):
+        with pytest.raises(EntityNotFoundError, match="endpoint"):
+            repository.link_resolution_observed_change(
+                "resolution-001",
+                "missing-action",
+            )
 
 
 def test_missing_incident_raises_clear_not_found_error() -> None:
@@ -326,6 +354,26 @@ def test_lineage_query_converts_nodes_without_cross_product_duplicates() -> None
                                 "observed_at": COMPLETED_AT.isoformat(),
                             }
                         ],
+                        "observed_changes": [
+                            {
+                                "id": action.id,
+                                "run_id": action.run_id,
+                                "task_id": action.task_id,
+                                "tool": action.tool,
+                                "operation": action.operation,
+                                "arguments_json": (
+                                    '{"options":{"quiet":true},"paths":["tests"]}'
+                                ),
+                                "planned_at": STARTED_AT.isoformat(),
+                                "result_tool_name": result.tool_name,
+                                "success": result.success,
+                                "exit_code": result.exit_code,
+                                "output": result.output,
+                                "error": result.error,
+                                "started_at": STARTED_AT.isoformat(),
+                                "completed_at": COMPLETED_AT.isoformat(),
+                            }
+                        ],
                     }
                 ]
             ),
@@ -343,4 +391,6 @@ def test_lineage_query_converts_nodes_without_cross_product_duplicates() -> None
     assert lineage.environment.id == "environment-001"
     assert len(lineage.resolutions) == 1
     assert len(lineage.outcomes) == 1
+    assert len(lineage.recovery_actions) == 1
+    assert lineage.recovery_actions[0].planned_action.arguments == action.arguments
     assert lineage.actions[0].result.action_id == lineage.actions[0].planned_action.id

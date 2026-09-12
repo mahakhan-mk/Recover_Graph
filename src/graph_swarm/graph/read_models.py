@@ -37,3 +37,9 @@ class IncidentLineage(BaseModel):
     environment: EnvironmentContext
     resolutions: tuple[Resolution, ...]
     outcomes: tuple[Outcome, ...]
+    recovery_actions: tuple[ActionLineageRecord, ...] = ()
+
+    @property
+    def observed_changes(self) -> tuple[ActionLineageRecord, ...]:
+        """Compatibility-friendly name for actions observed from resolutions."""
+        return self.recovery_actions

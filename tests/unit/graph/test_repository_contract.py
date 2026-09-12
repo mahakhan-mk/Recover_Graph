@@ -35,6 +35,7 @@ RELATIONSHIP_METHODS = (
     "link_failure_environment",
     "link_failure_resolution",
     "link_resolution_outcome",
+    "link_resolution_observed_change",
 )
 
 

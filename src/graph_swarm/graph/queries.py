@@ -122,6 +122,13 @@ MERGE (resolution)-[:VERIFIED_BY]->(outcome)
 RETURN count(*) AS linked
 """
 
+LINK_RESOLUTION_OBSERVED_CHANGE = """
+MATCH (resolution:Resolution {id: $resolution_id})
+MATCH (action:Action {id: $action_id})
+MERGE (resolution)-[:OBSERVED_CHANGE]->(action)
+RETURN count(*) AS linked
+"""
+
 GET_FAILURE = """
 MATCH (failure:FailureEpisode {id: $failure_id})
 RETURN failure
@@ -157,7 +164,10 @@ GET_RESOLUTIONS = """
 MATCH (failure:FailureEpisode {id: $failure_id})
 MATCH (failure)-[:RESOLVED_BY]->(resolution:Resolution)
 OPTIONAL MATCH (resolution)-[:VERIFIED_BY]->(outcome:Outcome)
-RETURN resolution, collect(DISTINCT outcome) AS outcomes
+OPTIONAL MATCH (resolution)-[:OBSERVED_CHANGE]->(observed_change:Action)
+RETURN resolution,
+       collect(DISTINCT outcome) AS outcomes,
+       collect(DISTINCT observed_change) AS observed_changes
 ORDER BY resolution.id
 """
 

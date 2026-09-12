@@ -91,6 +91,14 @@ class OperationalMemoryRepository(Protocol):
         """Create ``Resolution-VERIFIED_BY->Outcome`` idempotently."""
         ...
 
+    def link_resolution_observed_change(
+        self,
+        resolution_id: str,
+        action_id: str,
+    ) -> None:
+        """Create ``Resolution-OBSERVED_CHANGE->Action`` idempotently."""
+        ...
+
     def get_incident_lineage(self, failure_id: str) -> IncidentLineage:
         """Return the typed Rollout 1 lineage rooted at ``failure_id``."""
         ...
