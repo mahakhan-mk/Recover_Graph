@@ -7,11 +7,12 @@ from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
 from graph_swarm.domain.failures import FailureEpisode
 from graph_swarm.domain.outcomes import Outcome
+from graph_swarm.domain.recovery_patterns import RecoveryPattern
 from graph_swarm.domain.resolutions import Resolution
 from graph_swarm.domain.runs import Run
 from graph_swarm.domain.tasks import Task
 from graph_swarm.domain.tools import Tool
-from graph_swarm.graph.read_models import IncidentLineage
+from graph_swarm.graph.read_models import IncidentLineage, RecoveryPatternLineage
 from graph_swarm.retrieval.candidates import HistoricalRecoveryCandidate
 
 
@@ -63,6 +64,10 @@ class OperationalMemoryRepository(Protocol):
         """Persist one Outcome by ``outcome.id`` idempotently."""
         ...
 
+    def save_recovery_pattern(self, pattern: RecoveryPattern) -> None:
+        """Persist one RecoveryPattern by ``pattern.id`` idempotently."""
+        ...
+
     def link_task_action(self, task_id: str, action_id: str) -> None:
         """Create ``Task-HAS_ACTION->Action`` idempotently."""
         ...
@@ -101,6 +106,10 @@ class OperationalMemoryRepository(Protocol):
 
     def get_incident_lineage(self, failure_id: str) -> IncidentLineage:
         """Return the typed Rollout 1 lineage rooted at ``failure_id``."""
+        ...
+
+    def get_recovery_pattern(self, pattern_id: str) -> RecoveryPatternLineage:
+        """Reconstruct one RecoveryPattern and its source evidence."""
         ...
 
     def find_historical_recovery_candidates(

@@ -13,6 +13,11 @@ from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
 from graph_swarm.domain.failures import FailureEpisode, FailureType
 from graph_swarm.domain.outcomes import Outcome
+from graph_swarm.domain.recovery_patterns import (
+    EnvironmentConstraints,
+    RecoveryPattern,
+    RecoveryPatternStatus,
+)
 from graph_swarm.domain.resolutions import Resolution, ResolutionStatus
 from graph_swarm.domain.runs import Run
 from graph_swarm.domain.tasks import Task
@@ -22,7 +27,12 @@ from graph_swarm.graph._validation import (
     validate_action_persistence,
     validate_relationship_ids,
 )
-from graph_swarm.graph.read_models import ActionLineageRecord, IncidentLineage
+from graph_swarm.graph.read_models import (
+    ActionLineageRecord,
+    IncidentLineage,
+    RecoveryPatternLineage,
+    RecoveryPatternTask,
+)
 from graph_swarm.retrieval.candidates import (
     HistoricalActionContext,
     HistoricalRecoveryCandidate,
@@ -86,6 +96,34 @@ def _datetime(properties: Mapping[str, object], key: str) -> datetime:
 
 def _json_dict(properties: Mapping[str, object], key: str) -> dict[str, object]:
     return cast(dict[str, object], json.loads(_required_text(properties, key)))
+
+
+def _optional_json_dict(
+    properties: Mapping[str, object],
+    key: str,
+) -> dict[str, object]:
+    value = _optional_value(properties, key)
+    if value is None:
+        return {}
+    return cast(dict[str, object], json.loads(cast(str, value)))
+
+
+def _optional_numeric_list(
+    properties: Mapping[str, object],
+    key: str,
+) -> list[float] | None:
+    value = _optional_value(properties, key)
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError(f"Neo4j property {key!r} must contain a numeric list")
+    values = cast(list[object], value)
+    numeric_values: list[int | float] = []
+    for item in values:
+        if not isinstance(item, (int, float)) or isinstance(item, bool):
+            raise ValueError(f"Neo4j property {key!r} must contain a numeric list")
+        numeric_values.append(item)
+    return [float(item) for item in numeric_values]
 
 
 def _json_string_dict(properties: Mapping[str, object], key: str) -> dict[str, str]:
@@ -174,6 +212,48 @@ def _read_outcome(properties: Mapping[str, object]) -> Outcome:
         tests_failed=_optional_int(properties, "tests_failed"),
         exit_code=_optional_int(properties, "exit_code"),
         observed_at=_datetime(properties, "observed_at"),
+    )
+
+
+def _read_recovery_pattern(properties: Mapping[str, object]) -> RecoveryPattern:
+    return RecoveryPattern(
+        id=_required_text(properties, "id"),
+        title=_required_text(properties, "title"),
+        guidance=_required_text(properties, "guidance"),
+        source_failure_id=_required_text(properties, "source_failure_id"),
+        source_resolution_id=_required_text(properties, "source_resolution_id"),
+        source_outcome_id=_required_text(properties, "source_outcome_id"),
+        source_task_id=_required_text(properties, "source_task_id"),
+        source_chronological_index=_required_int(
+            properties,
+            "source_chronological_index",
+        ),
+        source_tool=_required_text(properties, "source_tool"),
+        source_operation=_required_text(properties, "source_operation"),
+        source_failure_type=_required_text(properties, "source_failure_type"),
+        environment_constraints=EnvironmentConstraints(
+            runtime=cast(str | None, _optional_value(properties, "environment_runtime")),
+            versions=cast(
+                dict[str, str],
+                _optional_json_dict(properties, "environment_versions_json"),
+            ),
+            dependencies=cast(
+                dict[str, str],
+                _optional_json_dict(properties, "environment_dependencies_json"),
+            ),
+            markers=cast(
+                dict[str, str],
+                _optional_json_dict(properties, "environment_markers_json"),
+            ),
+        ),
+        verification_status=RecoveryPatternStatus(
+            _required_text(properties, "verification_status")
+        ),
+        evidence_count=_required_int(properties, "evidence_count"),
+        evidence_summary=_required_text(properties, "evidence_summary"),
+        embedding=_optional_numeric_list(properties, "embedding"),
+        created_at=_datetime(properties, "created_at"),
+        invalidated_at=_optional_datetime(properties, "invalidated_at"),
     )
 
 
@@ -371,6 +451,50 @@ class Neo4jRepository:
             observed_at=_isoformat(outcome.observed_at),
         )
 
+    def save_recovery_pattern(self, pattern: RecoveryPattern) -> None:
+        result = self.execute_query(
+            queries.SAVE_RECOVERY_PATTERN,
+            id=pattern.id,
+            title=pattern.title,
+            guidance=pattern.guidance,
+            source_failure_id=pattern.source_failure_id,
+            source_resolution_id=pattern.source_resolution_id,
+            source_outcome_id=pattern.source_outcome_id,
+            source_task_id=pattern.source_task_id,
+            source_chronological_index=pattern.source_chronological_index,
+            source_tool=pattern.source_tool,
+            source_operation=pattern.source_operation,
+            source_failure_type=pattern.source_failure_type,
+            environment_runtime=pattern.environment_constraints.runtime,
+            environment_versions_json=_json_object(
+                pattern.environment_constraints.versions
+            ),
+            environment_dependencies_json=_json_object(
+                pattern.environment_constraints.dependencies
+            ),
+            environment_markers_json=_json_object(
+                pattern.environment_constraints.markers
+            ),
+            verification_status=pattern.verification_status.value,
+            evidence_count=pattern.evidence_count,
+            evidence_summary=pattern.evidence_summary,
+            embedding=pattern.embedding,
+            created_at=_isoformat(pattern.created_at),
+            invalidated_at=(
+                _isoformat(pattern.invalidated_at)
+                if pattern.invalidated_at is not None
+                else None
+            ),
+        )
+        if not result.records:
+            raise EntityNotFoundError(
+                "Cannot save RecoveryPattern: required historical provenance was not found"
+            )
+        if result.records[0].get("provenance_matches") is False:
+            raise ValueError(
+                f"RecoveryPattern {pattern.id!r} has conflicting immutable provenance"
+            )
+
     def _link(self, query: str, relationship: str, **identifiers: str) -> None:
         validate_relationship_ids(**identifiers)
         result = self.execute_query(query, **identifiers)
@@ -555,6 +679,62 @@ class Neo4jRepository:
             planned_at=_isoformat(planned_action.planned_at),
         )
         return tuple(_read_historical_candidate(record) for record in result.records)
+
+    def get_recovery_pattern(self, pattern_id: str) -> RecoveryPatternLineage:
+        validate_relationship_ids(pattern_id=pattern_id)
+        result = self.execute_query(
+            queries.GET_RECOVERY_PATTERN,
+            pattern_id=pattern_id,
+        )
+        if not result.records:
+            raise EntityNotFoundError(
+                f"RecoveryPattern {pattern_id!r} or required provenance was not found"
+            )
+        record = result.records[0]
+        pattern = _read_recovery_pattern(_properties(record, "pattern"))
+        failure_properties = _properties(record, "failure")
+        failure = _read_failure(failure_properties)
+        resolution = _read_resolution(_properties(record, "resolution"))
+        outcome = _read_outcome(_properties(record, "outcome"))
+        task_properties = _properties(record, "task")
+        task = RecoveryPatternTask(
+            id=_required_text(task_properties, "id"),
+            problem_statement=_required_text(task_properties, "problem_statement"),
+            repository=_required_text(task_properties, "repository"),
+            chronological_index=_required_int(task_properties, "chronological_index"),
+        )
+        environment = _read_environment(_properties(record, "environment"))
+        recovery_action = _read_action(
+            _properties(record, "recovery_action")
+        )
+        failed_action_properties = _properties(record, "failed_action")
+        if (
+            pattern.source_failure_id != failure.id
+            or pattern.source_resolution_id != resolution.id
+            or pattern.source_outcome_id != outcome.id
+            or pattern.source_task_id != task.id
+            or pattern.source_chronological_index != task.chronological_index
+            or pattern.source_failure_type
+            != _required_text(failure_properties, "failure_type")
+            or pattern.source_tool
+            != _required_text(failed_action_properties, "tool")
+            or pattern.source_operation
+            != _required_text(failed_action_properties, "operation")
+            or resolution.failure_id != failure.id
+            or recovery_action.planned_action.task_id != task.id
+        ):
+            raise ValueError(
+                f"RecoveryPattern {pattern_id!r} has inconsistent historical provenance"
+            )
+        return RecoveryPatternLineage(
+            pattern=pattern,
+            failure=failure,
+            resolution=resolution,
+            outcome=outcome,
+            task=task,
+            environment=environment,
+            recovery_action=recovery_action,
+        )
 
     def execute_query(
         self,
