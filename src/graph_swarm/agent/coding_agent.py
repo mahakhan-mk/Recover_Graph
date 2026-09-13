@@ -1,7 +1,7 @@
 """Minimal PydanticAI coding-agent wiring for controlled Rollout 1 execution.
 
 The existing controlled tools remain the only filesystem and process boundary.
-This module constructs the provider lazily so importing it never requires Groq
+This module constructs providers lazily so importing it never requires provider
 credentials or makes a network request.
 """
 
@@ -18,7 +18,9 @@ from pydantic_ai import (
 )
 from pydantic_ai.models import Model
 from pydantic_ai.models.groq import GroqModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.groq import GroqProvider
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from graph_swarm.agent.advisory import (
     finalize_pending_advice,
@@ -41,9 +43,7 @@ class AgentConfigurationError(ValueError):
 
 def _build_groq_model(settings: Settings) -> GroqModel:
     if not settings.groq_model or not settings.groq_model.strip():
-        raise AgentConfigurationError(
-            "groq_model must be supplied through Settings or GROQ_MODEL"
-        )
+        raise AgentConfigurationError("groq_model must be supplied through Settings or GROQ_MODEL")
     if not settings.groq_api_key or not settings.groq_api_key.strip():
         raise AgentConfigurationError(
             "groq_api_key must be supplied through Settings or GROQ_API_KEY"
@@ -51,6 +51,21 @@ def _build_groq_model(settings: Settings) -> GroqModel:
 
     provider = GroqProvider(api_key=settings.groq_api_key)
     return GroqModel(settings.groq_model, provider=provider)
+
+
+def _build_openrouter_model(settings: Settings) -> OpenAIChatModel:
+    if not settings.openrouter_model or not settings.openrouter_model.strip():
+        raise AgentConfigurationError(
+            "openrouter_model must be supplied through Settings or OPENROUTER_MODEL"
+        )
+    if not settings.openrouter_api_key or not settings.openrouter_api_key.strip():
+        raise AgentConfigurationError(
+            "openrouter_api_key must be supplied through Settings or OPENROUTER_API_KEY"
+        )
+    return OpenAIChatModel(
+        settings.openrouter_model,
+        provider=OpenRouterProvider(api_key=settings.openrouter_api_key),
+    )
 
 
 def create_coding_agent(
@@ -62,9 +77,14 @@ def create_coding_agent(
     """Build the controlled coding agent without performing a model request.
 
     ``model`` is an explicit injection point for PydanticAI's offline test
-    models. Live construction uses only the Groq model configured in ``settings``.
+    models. Live construction selects the provider configured in ``settings``.
     """
-    selected_model = model if model is not None else _build_groq_model(settings)
+    if model is not None:
+        selected_model = model
+    elif settings.model_provider == "openrouter":
+        selected_model = _build_openrouter_model(settings)
+    else:
+        selected_model = _build_groq_model(settings)
     agent: Agent[AgentDependencies, str] = Agent(
         selected_model,
         deps_type=AgentDependencies,
@@ -82,6 +102,7 @@ def create_coding_agent(
         result = controlled_read_file(ctx.deps, path, action_id=action.id)
         record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
         return result
+
     agent.tool(read_file)
 
     def write_file(
@@ -99,6 +120,7 @@ def create_coding_agent(
         result = controlled_write_file(ctx.deps, path, content, action_id=action.id)
         record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
         return result
+
     agent.tool(write_file)
 
     def run_tests(ctx: RunContext[AgentDependencies]) -> ActionResult:
@@ -111,6 +133,7 @@ def create_coding_agent(
         )
         record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
         return result
+
     agent.tool(run_tests)
 
     def run_command(
@@ -132,6 +155,7 @@ def create_coding_agent(
         )
         record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
         return result
+
     agent.tool(run_command)
 
     return agent

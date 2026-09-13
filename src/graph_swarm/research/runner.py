@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import dataclasses
 import json
+import os
 import shutil
 import time
 from collections.abc import Callable, Iterator, Sequence
@@ -206,9 +207,7 @@ def load_task_cases(
     """
     manifest_records = list(_read_jsonl(manifest_path))
     statements = (
-        _read_problem_statements(problem_statements_path)
-        if problem_statements_path
-        else {}
+        _read_problem_statements(problem_statements_path) if problem_statements_path else {}
     )
     task_cases: list[BenchmarkTaskCase] = []
     seen_ids: set[str] = set()
@@ -513,8 +512,7 @@ class ExperimentRunArtifactStore:
                         event.model_dump(mode="json") for event in dependencies.advice_events
                     ],
                     "behavior_evidence": [
-                        item.model_dump(mode="json")
-                        for item in dependencies.behavior_evidence
+                        item.model_dump(mode="json") for item in dependencies.behavior_evidence
                     ],
                 }
             )
@@ -530,6 +528,7 @@ AgentFactory = Callable[
     Agent[AgentDependencies, str],
 ]
 WorkspaceResolver = Callable[[Task], Path]
+PythonExecutableResolver = Callable[[Task, Path], Path]
 
 
 @dataclass(frozen=True)
@@ -556,6 +555,7 @@ class ExperimentRunner:
         agent_factory: AgentFactory | None = None,
         model: Model | None = None,
         workspace_resolver: WorkspaceResolver | None = None,
+        python_executable_resolver: PythonExecutableResolver | None = None,
         objective_evaluator: ObjectiveTaskEvaluator | None = None,
         evaluator: LegacyTestEvaluator | None = None,
         recurrence_evaluator: RecurrenceEvaluator | None = None,
@@ -567,8 +567,10 @@ class ExperimentRunner:
             raise ExperimentConfigurationError(
                 "GS-E003 must be explicitly marked development/pilot"
             )
-        if configuration.model.provider != "groq":
-            raise ExperimentConfigurationError("GS-E003 must use the Groq model configuration")
+        if configuration.model.provider not in {"groq", "openrouter"}:
+            raise ExperimentConfigurationError(
+                f"unsupported Track B model provider: {configuration.model.provider}"
+            )
         selected_condition = condition or _configured_condition(configuration)
         if selected_condition not in configuration.config.conditions:
             raise ExperimentConfigurationError(
@@ -595,6 +597,7 @@ class ExperimentRunner:
         self.agent_factory = agent_factory
         self.model = model
         self.workspace_resolver = workspace_resolver
+        self.python_executable_resolver = python_executable_resolver
         if objective_evaluator is None and evaluator is not None:
             legacy_evaluator = evaluator
 
@@ -612,10 +615,7 @@ class ExperimentRunner:
     def run_all(self, tasks: Sequence[Task] | None = None) -> list[ExperimentExecution]:
         """Run each selected task once, strictly in chronological order."""
         selected_cases = (
-            [
-                BenchmarkTaskCase(task=task, occurrence_index=1)
-                for task in tasks
-            ]
+            [BenchmarkTaskCase(task=task, occurrence_index=1) for task in tasks]
             if tasks is not None
             else load_task_cases(
                 self.configuration.task_manifest_path,
@@ -655,10 +655,18 @@ class ExperimentRunner:
         )
         step_database_path = run_dir / "steps.sqlite"
         workspace = self._workspace_for(task, run_id, condition).expanduser().resolve()
+        python_executable = (
+            None
+            if self.python_executable_resolver is None
+            else self.python_executable_resolver(task, workspace).expanduser().resolve()
+        )
+        if python_executable is not None and not python_executable.is_file():
+            raise WorkspaceIsolationError(
+                f"benchmark task {task.id} has no executable isolated environment: "
+                f"{python_executable}"
+            )
         environment = (
-            _environment_for(task, run_id)
-            if condition is ExperimentCondition.O1
-            else None
+            _environment_for(task, run_id) if condition is ExperimentCondition.O1 else None
         )
         dependencies = AgentDependencies(
             workspace,
@@ -666,11 +674,10 @@ class ExperimentRunner:
             task.id,
             task=task,
             advisory_service=(
-                cast(Any, self.oracle_resolver)
-                if condition is ExperimentCondition.O1
-                else None
+                cast(Any, self.oracle_resolver) if condition is ExperimentCondition.O1 else None
             ),
             environment=environment,
+            python_executable=python_executable,
             artifact_writer=(
                 JsonlResearchArtifactWriter(run_dir / "advisory_evidence.jsonl")
                 if condition is ExperimentCondition.O1
@@ -760,7 +767,24 @@ class ExperimentRunner:
 
     def _settings_for_model(self) -> Settings:
         base = self.settings or get_settings()
-        return base.model_copy(update={"groq_model": self.configuration.model.model})
+        if self.configuration.model.provider == "openrouter":
+            import os
+
+            return base.model_copy(
+                update={
+                    "model_provider": "openrouter",
+                    "openrouter_api_key": os.environ.get("OPENROUTER_API_KEY")
+                    or base.openrouter_api_key,
+                    "openrouter_model": os.environ.get("OPENROUTER_MODEL")
+                    or base.openrouter_model,
+                }
+            )
+        return base.model_copy(
+            update={
+                "model_provider": "groq",
+                "groq_model": self.configuration.model.model,
+            }
+        )
 
     def _workspace_for(
         self,
@@ -786,8 +810,7 @@ class ExperimentRunner:
         if self.agent_factory is not None:
             agent = self.agent_factory(settings, [step_persistence])
             if not any(
-                capability is step_persistence
-                for capability in agent.root_capability.capabilities
+                capability is step_persistence for capability in agent.root_capability.capabilities
             ):
                 raise ExperimentConfigurationError(
                     "custom agent factory did not attach the mandatory StepPersistence capability"
@@ -801,8 +824,7 @@ class ExperimentRunner:
 
     def _new_run_id(self, condition: ExperimentCondition, task: Task) -> str:
         return (
-            f"{self.configuration.config.experiment_id}-"
-            f"{condition.value}-{task.id}-{uuid4().hex}"
+            f"{self.configuration.config.experiment_id}-{condition.value}-{task.id}-{uuid4().hex}"
         )
 
     def _make_artifact(
@@ -824,9 +846,7 @@ class ExperimentRunner:
             event = dependencies.events[-1]
             executed_action = event.result
             planned_action = _planned_action(event)
-            latency_ms = (
-                max(0.0, (executed_action.completed_at - started).total_seconds() * 1000)
-            )
+            latency_ms = max(0.0, (executed_action.completed_at - started).total_seconds() * 1000)
         else:
             now = datetime.now(UTC)
             action_id = f"{run_id}-agent-run"
@@ -851,10 +871,14 @@ class ExperimentRunner:
             latency_ms = max(0.0, elapsed_ms)
 
         usage = None if result is None else result.usage
-        retries = 0 if result is None else sum(
-            isinstance(part, RetryPromptPart)
-            for message in result.all_messages()
-            for part in message.parts
+        retries = (
+            0
+            if result is None
+            else sum(
+                isinstance(part, RetryPromptPart)
+                for message in result.all_messages()
+                for part in message.parts
+            )
         )
         failure_type = _failure_type(executed_action)
         return ExperimentRunArtifact(
@@ -864,7 +888,7 @@ class ExperimentRunner:
             task_id=task.id,
             family_id=task.family_id,
             chronological_index=task.chronological_index,
-            model=self.configuration.model.model,
+            model=self._artifact_model_name(),
             model_settings=self.configuration.model.settings,
             prompt_version=self.configuration.model.prompt_version,
             planned_action=planned_action,
@@ -882,6 +906,16 @@ class ExperimentRunner:
             retrieved_incident_id=None,
             retrieval_score=None,
         )
+
+    def _artifact_model_name(self) -> str:
+        if self.configuration.model.provider == "openrouter":
+            base = self.settings or get_settings()
+            return (
+                os.environ.get("OPENROUTER_MODEL")
+                or base.openrouter_model
+                or self.configuration.model.model
+            )
+        return self.configuration.model.model
 
 
 def _planned_action(event: AgentEvent) -> PlannedAction:
@@ -1033,6 +1067,7 @@ __all__ = [
     "RecurrenceEvaluationRequired",
     "RecurrenceEvaluator",
     "WorkspaceResolver",
+    "PythonExecutableResolver",
     "WorkspaceIsolationError",
     "build_task_prompt",
     "benchmark_recurrence_determination",

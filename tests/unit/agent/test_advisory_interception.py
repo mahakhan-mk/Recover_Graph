@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -174,13 +175,10 @@ def test_applicable_advice_reaches_pre_tool_flow_before_execution(tmp_path: Path
         if isinstance(part, RetryPromptPart)
     ]
     assert any(
-        "A comparable historical action previously failed" in part.content
-        for part in retry_prompts
+        "A comparable historical action previously failed" in part.content for part in retry_prompts
     )
     artifact_lines = [
-        line
-        for line in artifact_path.read_text(encoding="utf-8").splitlines()
-        if line
+        line for line in artifact_path.read_text(encoding="utf-8").splitlines() if line
     ]
     assert [json.loads(line)["record_type"] for line in artifact_lines] == [
         "advice_event",
@@ -233,6 +231,36 @@ def test_same_advised_action_retries_once_then_executes_without_a_loop(
     assert executed.success is True
     assert len(dependencies.behavior_evidence) == 1
     assert dependencies.behavior_evidence[0].observation == "unchanged"
+
+
+def test_frozen_one_shot_advice_records_only_the_direct_post_advice_action(
+    tmp_path: Path,
+) -> None:
+    task, environment = make_context()
+    service = make_service(make_candidate())
+    cast(Any, service).one_shot = True
+    dependencies = AgentDependencies(
+        tmp_path,
+        "run-current",
+        task.id,
+        task=task,
+        environment=environment,
+        advisory_service=service,
+    )
+
+    with pytest.raises(ModelRetry):
+        prepare_tool_action(dependencies, "run_tests", "run_tests", {})
+    first_after = prepare_tool_action(dependencies, "read_file", "read_file", {"path": "x"})
+    record_post_advice_action(dependencies, first_after)
+    later = prepare_tool_action(dependencies, "write_file", "write_file", {"path": "x"})
+    record_post_advice_action(dependencies, later)
+
+    assert len(dependencies.advice_events) == 1
+    assert len(dependencies.behavior_evidence) == 1
+    evidence = dependencies.behavior_evidence[0]
+    assert evidence.planned_action_before_advice.tool == "run_tests"
+    assert evidence.actual_action_after_advice is not None
+    assert evidence.actual_action_after_advice.tool == "read_file"
 
 
 def test_lookup_failure_keeps_normal_tool_execution_available(tmp_path: Path) -> None:

@@ -32,20 +32,18 @@ class AgentDependencies:
     environment: EnvironmentContext | None = None
     advisory_service: AdvisoryService | None = None
     artifact_writer: JsonlResearchArtifactWriter | None = None
-    advice_events: list[AdviceEvent] = field(
-        default_factory=lambda: list[AdviceEvent]()
-    )
+    python_executable: Path | None = None
+    advice_events: list[AdviceEvent] = field(default_factory=lambda: list[AdviceEvent]())
     behavior_evidence: list[BehaviorChangeEvidence] = field(
         default_factory=lambda: list[BehaviorChangeEvidence]()
     )
     advisory_errors: list[str] = field(default_factory=lambda: list[str]())
     artifact_errors: list[str] = field(default_factory=lambda: list[str]())
-    _advised_action_keys: set[str] = field(
-        default_factory=lambda: set[str](), repr=False
-    )
+    _advised_action_keys: set[str] = field(default_factory=lambda: set[str](), repr=False)
     _pending_advice_events: list[AdviceEvent] = field(
         default_factory=lambda: list[AdviceEvent](), repr=False
     )
+    oracle_advice_issued: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
         self.workspace_root = self.workspace_root.expanduser().resolve()
@@ -106,7 +104,5 @@ class AgentDependencies:
             ) from error
 
         if not resolved_path.is_relative_to(self.workspace_root):
-            raise WorkspacePathError(
-                f"path resolves outside workspace: {relative_path!s}"
-            )
+            raise WorkspacePathError(f"path resolves outside workspace: {relative_path!s}")
         return resolved_path

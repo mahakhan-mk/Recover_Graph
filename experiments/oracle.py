@@ -41,6 +41,8 @@ class OracleTransferEvidence:
 class FrozenOracleResolver:
     """Resolve O1 guidance from validated transfer evidence only."""
 
+    one_shot = True
+
     def __init__(self, transfers: Mapping[str, str | OracleTransferEvidence]) -> None:
         normalized: dict[str, OracleTransferEvidence] = {}
         for task_id, evidence in transfers.items():
@@ -78,9 +80,7 @@ class FrozenOracleResolver:
                 annotations: dict[str, dict[str, str]] = {}
                 for row in csv.DictReader(handle):
                     review_id = row.get("review_id") or ""
-                    annotations[review_id] = {
-                        key: value or "" for key, value in row.items()
-                    }
+                    annotations[review_id] = {key: value or "" for key, value in row.items()}
         except (OSError, UnicodeError, json.JSONDecodeError, csv.Error) as error:
             raise OracleEvidenceRequired(
                 f"could not load frozen Oracle evidence: {error}"

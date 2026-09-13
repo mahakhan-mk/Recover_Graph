@@ -1,7 +1,9 @@
 """Controlled structured-argv process execution tool."""
 
+import os
 import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 from graph_swarm.agent.dependencies import AgentDependencies
@@ -42,6 +44,15 @@ def _result(
     )
 
 
+def workspace_process_environment(workspace: Path) -> dict[str, str]:
+    """Build a process environment rooted only in the selected workspace."""
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    import_paths = [workspace, workspace / "src"]
+    environment["PYTHONPATH"] = os.pathsep.join(str(path) for path in import_paths if path.exists())
+    return environment
+
+
 def execute_process(
     dependencies: AgentDependencies,
     command: list[str],
@@ -79,6 +90,7 @@ def execute_process(
         completed = subprocess.run(
             command,
             cwd=dependencies.workspace_root,
+            env=workspace_process_environment(dependencies.workspace_root),
             capture_output=True,
             check=False,
             encoding="utf-8",

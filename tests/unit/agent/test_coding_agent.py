@@ -49,6 +49,22 @@ def test_live_factory_requires_explicit_groq_configuration() -> None:
         create_coding_agent(make_settings(load_env_file=False))
 
 
+def test_openrouter_factory_requires_key_only_when_selected() -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={"model_provider": "openrouter", "openrouter_model": "qwen/test"}
+    )
+    with pytest.raises(AgentConfigurationError, match="OPENROUTER_API_KEY"):
+        create_coding_agent(settings)
+
+
+def test_openrouter_factory_requires_model_only_when_selected() -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={"model_provider": "openrouter", "openrouter_api_key": "offline-key"}
+    )
+    with pytest.raises(AgentConfigurationError, match="OPENROUTER_MODEL"):
+        create_coding_agent(settings)
+
+
 async def test_agent_has_rollout_prompt_and_exactly_four_controlled_tools(
     tmp_path: Path,
 ) -> None:

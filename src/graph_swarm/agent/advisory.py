@@ -39,6 +39,12 @@ def prepare_tool_action(
     if service is None or task is None or environment is None:
         return action
 
+    # The frozen O1 adapter is deliberately a one-shot intervention.  Its
+    # ModelRetry is the reconsideration boundary; later actions are evidence,
+    # not additional opportunities to inject the same advice.
+    if getattr(service, "one_shot", False) and dependencies.oracle_advice_issued:
+        return action
+
     try:
         advice = service.evaluate_action(task, action, environment)
     except Exception as error:  # noqa: BLE001 - advisory failure must not mutate execution
@@ -66,6 +72,8 @@ def prepare_tool_action(
         return action
 
     dependencies.remember_advised_action(key)
+    if getattr(service, "one_shot", False):
+        dependencies.oracle_advice_issued = True
     dependencies.queue_advice_event(event)
     raise ModelRetry(rendered)
 
