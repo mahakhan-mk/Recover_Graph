@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime
+from typing import cast
 from uuid import uuid4
 
 from pydantic_ai import ModelRetry
@@ -48,7 +49,12 @@ def prepare_tool_action(
         return action
 
     try:
-        rendered = format_advice(advice)
+        oracle_renderer = getattr(service, "render_advice", None)
+        rendered = (
+            cast(str, oracle_renderer(advice))
+            if callable(oracle_renderer)
+            else format_advice(advice)
+        )
         if not rendered:
             raise ValueError("applicable advice rendered as empty text")
         key = _recovery_key(action, advice)

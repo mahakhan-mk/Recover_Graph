@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import yaml
@@ -34,9 +34,12 @@ from graph_swarm.agent.coding_agent import (
 from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
+from graph_swarm.domain.advice import AdviceResult
+from graph_swarm.domain.environment import EnvironmentContext
 from graph_swarm.domain.events import AgentEvent
 from graph_swarm.domain.failures import FailureType
 from graph_swarm.domain.tasks import Task
+from graph_swarm.research.artifacts import JsonlResearchArtifactWriter
 from graph_swarm.research.contracts import ExperimentCondition, ExperimentRunArtifact
 from graph_swarm.settings import Settings, get_settings
 
@@ -55,6 +58,10 @@ class ObjectiveEvaluationRequired(ExperimentConfigurationError):
 
 class WorkspaceIsolationError(ExperimentConfigurationError):
     """Raised when a clean benchmark baseline cannot be materialized."""
+
+
+class OracleEvidenceRequired(ExperimentConfigurationError):
+    """Raised when O1 lacks validated frozen transfer evidence."""
 
 
 class ExperimentLimits(BaseModel):
@@ -337,6 +344,27 @@ RecurrenceEvaluator = Callable[
 LegacyTestEvaluator = Callable[[Task, Sequence[AgentEvent], AgentRunResult[str] | None], bool]
 
 
+class OracleAdviceResolver(Protocol):
+    """O1-only adapter for validated, pre-action recovery guidance."""
+
+    def validate_case(self, case: BenchmarkTaskCase) -> None:
+        """Validate frozen Oracle evidence before model execution."""
+        ...
+
+    def evaluate_action(
+        self,
+        task: Task,
+        planned_action: PlannedAction,
+        environment: EnvironmentContext,
+    ) -> AdviceResult:
+        """Return Oracle advice for a planned action, without changing it."""
+        ...
+
+    def render_advice(self, advice: AdviceResult) -> str:
+        """Render only recovery guidance for the agent-visible retry."""
+        ...
+
+
 @dataclass
 class ObjectiveBenchmarkEvaluator(
     Evaluator[BenchmarkEvaluationInput, BenchmarkEvaluationOutput, None]
@@ -476,6 +504,20 @@ class ExperimentRunArtifactStore:
             "agent_run_id": None if result is None else result.run_id,
             "usage": None if result is None else dataclasses.asdict(result.usage),
         }
+        if artifact.condition is ExperimentCondition.O1:
+            evidence.update(
+                {
+                    "condition": artifact.condition.value,
+                    "advice_source": "O1",
+                    "advice_events": [
+                        event.model_dump(mode="json") for event in dependencies.advice_events
+                    ],
+                    "behavior_evidence": [
+                        item.model_dump(mode="json")
+                        for item in dependencies.behavior_evidence
+                    ],
+                }
+            )
         path = run_dir / "raw_evidence.json"
         serialized = json.dumps(evidence, sort_keys=True, separators=(",", ":"), default=str)
         with path.open("x", encoding="utf-8", newline="\n") as handle:
@@ -504,7 +546,7 @@ class ExperimentExecution:
 
 
 class ExperimentRunner:
-    """Sequential B0 runner with isolated PydanticAI executions."""
+    """Sequential B0/O1 runner with isolated PydanticAI executions."""
 
     def __init__(
         self,
@@ -517,6 +559,8 @@ class ExperimentRunner:
         objective_evaluator: ObjectiveTaskEvaluator | None = None,
         evaluator: LegacyTestEvaluator | None = None,
         recurrence_evaluator: RecurrenceEvaluator | None = None,
+        oracle_resolver: OracleAdviceResolver | None = None,
+        condition: ExperimentCondition | None = None,
         artifact_store: ExperimentRunArtifactStore | None = None,
     ) -> None:
         if not configuration.config.development or not configuration.config.pilot:
@@ -525,9 +569,28 @@ class ExperimentRunner:
             )
         if configuration.model.provider != "groq":
             raise ExperimentConfigurationError("GS-E003 must use the Groq model configuration")
-        if configuration.config.conditions != (ExperimentCondition.B0,):
-            raise ExperimentConfigurationError("GS-E003 Sprint 1 must enable B0 only")
+        selected_condition = condition or _configured_condition(configuration)
+        if selected_condition not in configuration.config.conditions:
+            raise ExperimentConfigurationError(
+                "condition "
+                f"{selected_condition.value} is not enabled in the experiment configuration"
+            )
+        if selected_condition is ExperimentCondition.T:
+            raise ExperimentConfigurationError("Track B Sprint 2A does not implement T")
+        if selected_condition not in (ExperimentCondition.B0, ExperimentCondition.O1):
+            raise ExperimentConfigurationError(
+                f"unsupported Track B condition: {selected_condition.value}"
+            )
+        if selected_condition is ExperimentCondition.O1 and oracle_resolver is None:
+            raise OracleEvidenceRequired("O1 requires a validated Oracle resolver")
+        if selected_condition is ExperimentCondition.O1 and not callable(
+            getattr(oracle_resolver, "render_advice", None)
+        ):
+            raise OracleEvidenceRequired(
+                "O1 requires an Oracle resolver with a guidance-only renderer"
+            )
         self.configuration = configuration
+        self.condition = selected_condition
         self.settings = settings
         self.agent_factory = agent_factory
         self.model = model
@@ -541,6 +604,7 @@ class ExperimentRunner:
             objective_evaluator = legacy_objective
         self.objective_evaluator = objective_evaluator
         self.recurrence_evaluator = recurrence_evaluator or benchmark_recurrence_determination
+        self.oracle_resolver = oracle_resolver
         self.artifact_store = artifact_store or ExperimentRunArtifactStore(
             configuration.artifact_root_path
         )
@@ -565,13 +629,13 @@ class ExperimentRunner:
         return [self.run_case(case) for case in ordered_cases]
 
     def run_task(self, task: Task) -> ExperimentExecution:
-        """Run one B0 task using explicit injected test determinations."""
+        """Run one configured Track B task using explicit test determinations."""
         return self.run_case(BenchmarkTaskCase(task=task, occurrence_index=1))
 
     def run_case(self, case: BenchmarkTaskCase) -> ExperimentExecution:
-        """Run one B0 case with benchmark recurrence and objective evaluation."""
+        """Run one configured B0/O1 case with benchmark evaluation."""
         task = case.task
-        condition = ExperimentCondition.B0
+        condition = self.condition
         run_id = self._new_run_id(condition, task)
         if case.occurrence_index < 1:
             raise RecurrenceEvaluationRequired(
@@ -581,6 +645,8 @@ class ExperimentRunner:
             raise ObjectiveEvaluationRequired(
                 "a benchmark/SWE-smith objective evaluator is required"
             )
+        if condition is ExperimentCondition.O1 and self.oracle_resolver is not None:
+            self.oracle_resolver.validate_case(case)
         run_dir = self.artifact_store.prepare_run_directory(
             self.configuration.config.experiment_id,
             condition,
@@ -588,14 +654,28 @@ class ExperimentRunner:
             run_id,
         )
         step_database_path = run_dir / "steps.sqlite"
-        workspace = self._workspace_for(task, run_id).expanduser().resolve()
+        workspace = self._workspace_for(task, run_id, condition).expanduser().resolve()
+        environment = (
+            _environment_for(task, run_id)
+            if condition is ExperimentCondition.O1
+            else None
+        )
         dependencies = AgentDependencies(
             workspace,
             run_id,
             task.id,
             task=task,
-            advisory_service=None,
-            environment=None,
+            advisory_service=(
+                cast(Any, self.oracle_resolver)
+                if condition is ExperimentCondition.O1
+                else None
+            ),
+            environment=environment,
+            artifact_writer=(
+                JsonlResearchArtifactWriter(run_dir / "advisory_evidence.jsonl")
+                if condition is ExperimentCondition.O1
+                else None
+            ),
         )
         started = datetime.now(UTC)
         started_counter = time.perf_counter()
@@ -658,6 +738,7 @@ class ExperimentRunner:
             error=error,
             task_success=task_success,
             known_failure_repeated=known_failure_repeated,
+            advice_received=_advice_received(dependencies),
         )
         raw_path = self.artifact_store.write_raw_evidence(
             artifact=artifact,
@@ -681,14 +762,19 @@ class ExperimentRunner:
         base = self.settings or get_settings()
         return base.model_copy(update={"groq_model": self.configuration.model.model})
 
-    def _workspace_for(self, task: Task, run_id: str) -> Path:
+    def _workspace_for(
+        self,
+        task: Task,
+        run_id: str,
+        condition: ExperimentCondition,
+    ) -> Path:
         if self.workspace_resolver is not None:
             return self.workspace_resolver(task)
         manager = BaselineWorkspaceManager(
             self.configuration.workspace_baseline_root_path,
             self.configuration.workspace_execution_root_path,
             experiment_id=self.configuration.config.experiment_id,
-            condition=ExperimentCondition.B0,
+            condition=condition,
         )
         return manager.materialize(task, run_id)
 
@@ -732,6 +818,7 @@ class ExperimentRunner:
         error: Exception | None,
         task_success: bool,
         known_failure_repeated: bool,
+        advice_received: AdviceResult | None,
     ) -> ExperimentRunArtifact:
         if dependencies.events:
             event = dependencies.events[-1]
@@ -782,7 +869,7 @@ class ExperimentRunner:
             prompt_version=self.configuration.model.prompt_version,
             planned_action=planned_action,
             executed_action=executed_action,
-            advice_received=None,
+            advice_received=advice_received,
             advice_accepted=False,
             failure_type=failure_type,
             task_success=task_success,
@@ -816,6 +903,31 @@ def _failure_type(result: ActionResult) -> FailureType | None:
         "run_tests": FailureType.TEST_FAILURE,
         "run_command": FailureType.COMMAND_FAILURE,
     }.get(result.tool_name, FailureType.TOOL_PARAMETER_ERROR)
+
+
+def _configured_condition(
+    configuration: LoadedExperimentConfiguration,
+) -> ExperimentCondition:
+    conditions = configuration.config.conditions
+    if len(conditions) != 1:
+        raise ExperimentConfigurationError(
+            "select exactly one Track B condition when constructing ExperimentRunner"
+        )
+    return conditions[0]
+
+
+def _environment_for(task: Task, run_id: str) -> EnvironmentContext:
+    return EnvironmentContext(
+        id=f"{run_id}-environment",
+        repository=task.repository,
+        runtime="python",
+    )
+
+
+def _advice_received(dependencies: AgentDependencies) -> AdviceResult | None:
+    if not dependencies.advice_events:
+        return None
+    return AdviceResult(advice=dependencies.advice_events[0].advice)
 
 
 def benchmark_recurrence_determination(
@@ -916,6 +1028,8 @@ __all__ = [
     "ObjectiveBenchmarkEvaluator",
     "ObjectiveEvaluationRequired",
     "ObjectiveTaskEvaluator",
+    "OracleAdviceResolver",
+    "OracleEvidenceRequired",
     "RecurrenceEvaluationRequired",
     "RecurrenceEvaluator",
     "WorkspaceResolver",

@@ -1,0 +1,16 @@
+experiment_id: GS-E003
+rollout: track_b_development_pilot
+config_version: v1
+development: true
+pilot: true
+model_config: configs/models/groq.yaml
+task_manifest: benchmark/manifests/pilot.jsonl
+task_problems: benchmark/annotations/recurrence_validation.csv
+artifact_root: research/evidence/results
+workspace_baseline_root: benchmark/workspaces
+workspace_execution_root: research/evidence/workspaces
+conditions:
+  - O1
+limits:
+  max_actions: 15
+  timeout_seconds: 300
