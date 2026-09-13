@@ -545,6 +545,16 @@ class Neo4jRepository:
             for record in result.records
         )
 
+    def count_recovery_pattern_vectors(self) -> int:
+        """Count embedded patterns before policy-free vector search."""
+        result = self.execute_query(queries.COUNT_RECOVERY_PATTERN_VECTORS)
+        if not result.records:
+            raise ValueError("Neo4j did not return an embedded RecoveryPattern count")
+        count = result.records[0]["count"]
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError("Neo4j returned an invalid embedded RecoveryPattern count")
+        return count
+
     def _link(self, query: str, relationship: str, **identifiers: str) -> None:
         validate_relationship_ids(**identifiers)
         result = self.execute_query(query, **identifiers)

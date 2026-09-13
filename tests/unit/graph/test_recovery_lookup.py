@@ -95,6 +95,9 @@ def test_candidate_lookup_maps_graph_rows_to_domain_read_models() -> None:
     assert isinstance(candidate.outcomes[0], Outcome)
     assert isinstance(candidate, HistoricalRecoveryCandidate)
     assert not isinstance(candidate, dict)
+    assert "historical_environment.repository = $repository" not in (
+        repository.execute_query.call_args.args[0]
+    )
     repository.execute_query.assert_called_once_with(
         queries.FIND_HISTORICAL_RECOVERY_CANDIDATES,
         tool="run_tests",

@@ -6,6 +6,7 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
+from math import sqrt
 from typing import cast
 from uuid import uuid4
 
@@ -26,6 +27,8 @@ from graph_swarm.domain.runs import Run
 from graph_swarm.domain.tasks import Task
 from graph_swarm.domain.tools import Tool
 from graph_swarm.graph.neo4j_repository import Neo4jRepository
+from graph_swarm.memory.recovery_embeddings import RecoveryPatternEmbedder
+from graph_swarm.retrieval.service import RecoveryPatternRetrievalService
 from graph_swarm.settings import get_settings
 from scripts.setup_neo4j import apply_schema
 
@@ -56,8 +59,14 @@ class IncidentFixture:
     outcome: Outcome
 
 
-def make_fixture() -> IncidentFixture:
+def make_fixture(
+    *,
+    repository: str = "integration/example",
+    tool_name: str | None = None,
+    chronological_index: int = 1,
+) -> IncidentFixture:
     prefix = f"integration-{uuid4().hex}"
+    resolved_tool_name = tool_name or f"{prefix}-tool"
     return IncidentFixture(
         prefix=prefix,
         run=Run(id=f"{prefix}-run", task_id=f"{prefix}-task", started_at=STARTED_AT),
@@ -65,21 +74,21 @@ def make_fixture() -> IncidentFixture:
             id=f"{prefix}-task",
             problem_statement="Fix the integration fixture so its tests pass.",
             family_id=f"{prefix}-family",
-            repository="integration/example",
-            chronological_index=1,
+            repository=repository,
+            chronological_index=chronological_index,
         ),
         action=PlannedAction(
             id=f"{prefix}-action",
             run_id=f"{prefix}-run",
             task_id=f"{prefix}-task",
-            tool=f"{prefix}-tool",
+            tool=resolved_tool_name,
             operation="pytest",
             arguments={"paths": ["tests"], "options": {"quiet": True}},
             planned_at=STARTED_AT,
         ),
         result=ActionResult(
             action_id=f"{prefix}-action",
-            tool_name=f"{prefix}-tool",
+            tool_name=resolved_tool_name,
             success=False,
             exit_code=1,
             output="one test failed",
@@ -87,10 +96,10 @@ def make_fixture() -> IncidentFixture:
             started_at=STARTED_AT,
             completed_at=COMPLETED_AT,
         ),
-        tool=Tool(name=f"{prefix}-tool"),
+        tool=Tool(name=resolved_tool_name),
         environment=EnvironmentContext(
             id=f"{prefix}-environment",
-            repository="integration/example",
+            repository=repository,
             runtime="python-3.13",
             versions={"pytest": "8"},
             markers={"ci": "integration"},
@@ -388,3 +397,150 @@ def test_native_recovery_pattern_vector_index_persistence_and_query(
         assert candidates[0].vector_score == pytest.approx(1.0)
     finally:
         cleanup_fixture(repository, fixture.prefix)
+
+
+class ConstantQueryEncoder:
+    def encode(self, text: str, *, normalize_embeddings: bool) -> object:
+        assert text
+        assert normalize_embeddings is True
+        return [1.0] + [0.0] * 383
+
+
+def test_live_retrieval_filters_future_and_incompatible_patterns(
+    repository: Neo4jRepository,
+) -> None:
+    common_tool = "sprint5-vector-tool"
+    earlier = make_fixture(
+        repository="repo-A",
+        tool_name=common_tool,
+        chronological_index=1,
+    )
+    future = make_fixture(
+        repository="repo-A",
+        tool_name=common_tool,
+        chronological_index=6,
+    )
+
+    def pattern_for(
+        fixture: IncidentFixture,
+        pattern_id: str,
+        vector_score: float,
+        *,
+        runtime: str = "python-3.13",
+    ) -> RecoveryPattern:
+        return RecoveryPattern(
+            id=pattern_id,
+            title="Restore the historical condition",
+            guidance="Apply the observed correction.",
+            source_failure_id=fixture.failure.id,
+            source_resolution_id=fixture.resolution.id,
+            source_outcome_id=fixture.outcome.id,
+            source_task_id=fixture.task.id,
+            source_chronological_index=fixture.task.chronological_index,
+            source_tool=fixture.action.tool,
+            source_operation=fixture.action.operation,
+            source_failure_type=fixture.failure.failure_type.value,
+            environment_constraints=EnvironmentConstraints(
+                runtime=runtime,
+                versions={"pytest": "8"},
+                markers={"ci": "integration"},
+            ),
+            verification_status=RecoveryPatternStatus.OBSERVED_SUCCESSFUL,
+            evidence_count=1,
+            evidence_summary="Observed successful recovery.",
+            embedding=[vector_score, sqrt(1 - vector_score**2)] + [0.0] * 382,
+            created_at=STARTED_AT,
+        )
+
+    incompatible = make_fixture(
+        repository="repo-A",
+        tool_name=common_tool,
+        chronological_index=2,
+    )
+    patterns = (
+        pattern_for(earlier, f"{earlier.prefix}-pattern", 0.80),
+        pattern_for(future, f"{future.prefix}-pattern", 0.99),
+        pattern_for(
+            incompatible,
+            f"{incompatible.prefix}-pattern",
+            0.95,
+            runtime="python-3.12",
+        ),
+    )
+    current_task = Task(
+        id=f"{earlier.prefix}-current-task",
+        problem_statement="Restore the historical condition.",
+        family_id="must-not-enter-retrieval",
+        repository="repo-B",
+        chronological_index=5,
+    )
+    current_action = PlannedAction(
+        id=f"{earlier.prefix}-current-action",
+        run_id=f"{earlier.prefix}-current-run",
+        task_id=current_task.id,
+        tool=common_tool,
+        operation="pytest",
+        planned_at=STARTED_AT,
+    )
+    current_environment = EnvironmentContext(
+        id=f"{earlier.prefix}-current-environment",
+        repository="repo-B",
+        runtime="python-3.13",
+        versions={"pytest": "8"},
+        markers={"ci": "integration"},
+    )
+
+    try:
+        for fixture in (earlier, future, incompatible):
+            persist_fixture(repository, fixture)
+            recovery_action = fixture.action.model_copy(
+                update={
+                    "id": f"{fixture.prefix}-recovery-action",
+                    "tool": "write_file",
+                    "operation": "write_file",
+                    "arguments": {"path": "src/example.py", "content": "return value"},
+                }
+            )
+            recovery_result = ActionResult(
+                action_id=recovery_action.id,
+                tool_name=recovery_action.tool,
+                success=True,
+                exit_code=0,
+                output="recovery observed",
+                started_at=STARTED_AT,
+                completed_at=COMPLETED_AT,
+            )
+            repository.save_action(recovery_action, recovery_result)
+            repository.save_tool(Tool(name=recovery_action.tool))
+            repository.link_task_action(fixture.task.id, recovery_action.id)
+            repository.link_action_tool(recovery_action.id, recovery_action.tool)
+            repository.link_action_run(recovery_action.id, fixture.run.id)
+            repository.link_resolution_observed_change(
+                fixture.resolution.id,
+                recovery_action.id,
+            )
+        for pattern in patterns:
+            repository.save_recovery_pattern(pattern)
+        repository.ensure_recovery_pattern_vector_index()
+        result = RecoveryPatternRetrievalService(
+            repository,
+            RecoveryPatternEmbedder(encoder=ConstantQueryEncoder()),
+        ).retrieve(current_task, current_action, current_environment)
+
+        assert result.selected_pattern is not None
+        assert result.selected_pattern.id == patterns[0].id
+        # Neo4j returns its native cosine-index score unchanged. For the
+        # [0.80, 0.60] unit vector, this server reports (1 + cosine) / 2.
+        assert result.selected_vector_score == pytest.approx(0.90, rel=1e-6)
+        assert [candidate.pattern_id for candidate in result.eligible_candidates] == [
+            patterns[0].id
+        ]
+        assert next(
+            candidate for candidate in result.candidates if candidate.pattern_id == patterns[1].id
+        ).rejection_reasons == ("not_strictly_historical",)
+        assert next(
+            candidate for candidate in result.candidates if candidate.pattern_id == patterns[2].id
+        ).rejection_reasons == ("runtime_mismatch",)
+    finally:
+        for fixture in (earlier, future, incompatible):
+            cleanup_fixture(repository, fixture.prefix)

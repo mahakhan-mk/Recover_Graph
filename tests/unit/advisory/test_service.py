@@ -196,13 +196,13 @@ def test_wrong_operation_returns_no_advice() -> None:
     assert result.has_advice is False
 
 
-def test_incompatible_environment_returns_no_advice() -> None:
+def test_cross_repository_environment_does_not_block_legacy_advice() -> None:
     result = evaluate(
         make_service((make_candidate(repository="other/repository"),)),
         environment=make_environment(repository="example/repository"),
     )
 
-    assert result.has_advice is False
+    assert result.has_advice is True
 
 
 def test_incompatible_known_version_returns_no_advice() -> None:
@@ -266,7 +266,7 @@ def test_applicability_service_reports_structured_matching_facts() -> None:
     )
 
     assert decision.applicable is True
-    assert decision.matched_fields == ("tool", "operation", "repository", "runtime", "versions")
+    assert decision.matched_fields == ("tool", "operation", "runtime", "versions")
 
 
 @pytest.mark.parametrize("future_field", ["failure", "resolution", "outcome"])

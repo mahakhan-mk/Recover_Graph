@@ -93,6 +93,10 @@ class OperationalMemoryRepository(Protocol):
         """Return raw nearest-neighbor results without eligibility filtering."""
         ...
 
+    def count_recovery_pattern_vectors(self) -> int:
+        """Count currently embedded RecoveryPatterns for complete-pool retrieval."""
+        ...
+
     def link_task_action(self, task_id: str, action_id: str) -> None:
         """Create ``Task-HAS_ACTION->Action`` idempotently."""
         ...

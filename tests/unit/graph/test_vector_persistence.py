@@ -131,3 +131,18 @@ def test_vector_query_returns_typed_raw_candidates_and_score() -> None:
     }
     assert "recovery_pattern_embedding_idx" in execute_query.call_args.args[0]
     assert "ORDER BY" in execute_query.call_args.args[0]
+
+
+def test_embedded_pattern_count_is_the_complete_pool_size_primitive() -> None:
+    repository = make_repository()
+
+    with patch.object(
+        repository,
+        "execute_query",
+        return_value=FakeResult([{"count": 7}]),
+    ) as execute_query:
+        count = repository.count_recovery_pattern_vectors()
+
+    assert count == 7
+    execute_query.assert_called_once_with(queries.COUNT_RECOVERY_PATTERN_VECTORS)
+    assert "embedding IS NOT NULL" in queries.COUNT_RECOVERY_PATTERN_VECTORS

@@ -306,7 +306,6 @@ OPTIONAL MATCH (resolution)-[:VERIFIED_BY]->(outcome:Outcome)
 WHERE failed_action.tool = $tool
   AND failed_action.operation = $operation
   AND failed_action.run_id <> $current_run_id
-  AND historical_environment.repository = $repository
   AND failure.observed_at <= $planned_at
   AND resolution.status = 'observed_successful'
   AND qualifying_outcome.success = true
@@ -341,4 +340,10 @@ ORDER BY resolution.successful_observations DESC,
          failure.observed_at DESC,
          resolution.id ASC,
          failure.id ASC
+"""
+
+COUNT_RECOVERY_PATTERN_VECTORS = """
+MATCH (pattern:RecoveryPattern)
+WHERE pattern.embedding IS NOT NULL
+RETURN count(pattern) AS count
 """
