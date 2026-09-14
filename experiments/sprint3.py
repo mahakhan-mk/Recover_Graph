@@ -8,13 +8,18 @@ the approved :class:`ExperimentRunner`.
 from __future__ import annotations
 
 import argparse
+import configparser
 import hashlib
 import importlib
 import json
+import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -22,11 +27,22 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
+
 from experiments.oracle import FrozenOracleResolver
 from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.agent.tools.run_command import workspace_process_environment
 from graph_swarm.domain.behavior import BehaviorChangeEvidence
 from graph_swarm.domain.events import AgentEvent
+from graph_swarm.research.benchmark_environments import (
+    BenchmarkEnvironmentConfigurationError,
+    BenchmarkEnvironmentPolicy,
+    effective_python_constraints,
+    load_benchmark_environment_policy,
+    policy_fingerprint_payload,
+    reconcile_task_policy,
+)
 from graph_swarm.research.contracts import ExperimentCondition, ExperimentRunArtifact
 from graph_swarm.research.runner import (
     BenchmarkTaskCase,
@@ -66,6 +82,9 @@ class BenchmarkPreflightError(RuntimeError):
     """Raised before model execution when the isolated benchmark is unusable."""
 
 
+TASK_DEPENDENCY_OVERLAYS: Mapping[str, Sequence[str]] = {}
+
+
 @dataclass(frozen=True)
 class IsolatedTaskEnvironment:
     """Executable environment assigned to one benchmark task."""
@@ -73,12 +92,49 @@ class IsolatedTaskEnvironment:
     task_id: str
     python_executable: Path
     validation_marker: Path | None = None
+    python_version: str | None = None
+    environment_fingerprint: str | None = None
+    runtime_type: str = "local_venv"
+    container_image: str | None = None
+    dependency_plan: DependencyInstallPlan | None = None
+    dependency_source_root: Path | None = None
+    container_python_executable: str | None = None
+    base_container_image: str | None = None
+    benchmark_policy_path: Path | None = None
+    benchmark_manifest_path: Path | None = None
 
     def mark_validated(self) -> None:
         if self.validation_marker is None:
             return
+        metadata: dict[str, Any] = {}
+        if self.validation_marker.is_file():
+            try:
+                raw: Any = json.loads(self.validation_marker.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                raw = None
+            if isinstance(raw, dict):
+                metadata = cast(dict[str, Any], raw)
+        metadata.update(
+            {
+                "task_id": self.task_id,
+                "validated": True,
+                "python_executable": str(self.python_executable),
+                "python_version": self.python_version,
+                "environment_fingerprint": self.environment_fingerprint,
+                "runtime_type": self.runtime_type,
+                "container_image": self.container_image,
+                "container_python_executable": self.container_python_executable,
+                "base_container_image": self.base_container_image,
+                "benchmark_policy_path": str(self.benchmark_policy_path)
+                if self.benchmark_policy_path is not None
+                else None,
+                "benchmark_manifest_path": str(self.benchmark_manifest_path)
+                if self.benchmark_manifest_path is not None
+                else None,
+            }
+        )
         self.validation_marker.write_text(
-            json.dumps({"task_id": self.task_id, "validated": True}, sort_keys=True) + "\n",
+            json.dumps(metadata, sort_keys=True) + "\n",
             encoding="utf-8",
         )
 
@@ -110,13 +166,34 @@ class FrozenSWEsmithObjective:
             raise BenchmarkPreflightError(
                 f"no isolated SWE-smith executable was selected for {task.id}"
             )
-        command = (
-            str(environment.python_executable),
+        pytest_arguments = (
             "-m",
             "pytest",
             *(_pytest_target(test_id) for test_id in case.fail_to_pass),
             "-q",
         )
+        if environment.runtime_type == "docker":
+            if not environment.container_image:
+                raise BenchmarkPreflightError(
+                    f"container image is missing for {task.id}"
+                )
+            container_python = environment.container_python_executable or "python"
+            command = (
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--mount",
+                f"type=bind,source={workspace.resolve()},target=/workspace",
+                "--workdir",
+                "/workspace",
+                environment.container_image,
+                container_python,
+                *pytest_arguments,
+            )
+        else:
+            command = (str(environment.python_executable), *pytest_arguments)
         condition = _condition_from_workspace(workspace)
         started = datetime.now(UTC)
         try:
@@ -127,11 +204,17 @@ class FrozenSWEsmithObjective:
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=300,
+                encoding="utf-8",
+                errors="replace",
+                timeout=900,
             )
             output = f"{completed.stdout}\n{completed.stderr}"
             status = "passed" if completed.returncode == 0 else "test_failure"
-            if completed.returncode in (2, 4, 5) or _looks_like_collection_failure(output):
+            if (
+                completed.returncode in (2, 3, 4, 5)
+                or "__GS_DEPENDENCY_SETUP_FAILED__" in output
+                or _looks_like_collection_failure(output)
+            ):
                 status = "objective_infrastructure_failure"
             self.observations.append(
                 ObjectiveObservation(
@@ -171,8 +254,16 @@ class FrozenSWEsmithObjective:
         self(task, workspace)
         observation = self.observations[-1]
         if observation.status == "objective_infrastructure_failure":
+            details = "\n".join(
+                value for value in (observation.stdout, observation.stderr) if value
+            )
             raise BenchmarkPreflightError(
-                f"SWE-smith preflight failed for {task.id}: {observation.stderr[-2000:]}"
+                f"SWE-smith preflight failed for {task.id}: {details[-4000:]}"
+            )
+        if observation.status != "test_failure" or observation.return_code == 0:
+            raise BenchmarkPreflightError(
+                f"SWE-smith preflight for {task.id} did not produce the expected "
+                "mutated test failure"
             )
         self.environments[task.id].mark_validated()
         if len(self.observations) != before + 1:  # pragma: no cover - defensive invariant
@@ -329,7 +420,238 @@ def _pytest_target(test_id: str) -> str:
     return f"{module}::{parts[-1]}::{method.strip()}"
 
 
-def _dependency_fingerprint(repository: Path) -> str:
+@dataclass(frozen=True)
+class PythonInterpreter:
+    """A concrete interpreter selected for one frozen benchmark repository."""
+
+    executable: Path
+    version: str
+
+
+@dataclass(frozen=True)
+class DependencyInstallPlan:
+    """Repository-declared dependency sources plus explicit test overlays."""
+
+    requirement_files: tuple[Path, ...]
+    package_extras: tuple[str, ...]
+    overlays: tuple[str, ...] = ()
+    environment: tuple[tuple[str, str], ...] = ()
+
+
+_PYTHON_CONSTRAINT_PATTERN = re.compile(
+    r"(?:python_requires|requires-python)\s*\+?=\s*[\"'](?P<constraint>[^\"']+)[\"']",
+    re.IGNORECASE,
+)
+
+
+def _combine_python_constraint_fragments(fragments: Sequence[str]) -> str:
+    """Combine setup.py assignments into a valid comma-separated specifier."""
+    normalized = [fragment.strip().strip(",") for fragment in fragments if fragment.strip()]
+    return ",".join(fragment for fragment in normalized if fragment)
+
+
+def _python_constraints(repository: Path) -> SpecifierSet:
+    """Read the repository's declared Python constraints without modifying it."""
+    constraints: list[str] = []
+    pyproject = repository / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            raw: Any = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+            requires_python = raw.get("project", {}).get("requires-python")
+            if isinstance(requires_python, str) and requires_python.strip():
+                constraints.append(requires_python.strip())
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+            raise BenchmarkPreflightError(
+                f"could not read Python constraints from {pyproject}: {error}"
+            ) from error
+
+    for filename in ("setup.cfg", "setup.py"):
+        path = repository / filename
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            raise BenchmarkPreflightError(
+                f"could not read Python constraints from {path}: {error}"
+            ) from error
+        matches = [
+            match.group("constraint").strip()
+            for match in _PYTHON_CONSTRAINT_PATTERN.finditer(text)
+        ]
+        if filename == "setup.py" and matches:
+            constraints.append(_combine_python_constraint_fragments(matches))
+        else:
+            constraints.extend(matches)
+        if filename == "setup.cfg":
+            parser = configparser.ConfigParser()
+            try:
+                parser.read_string(text)
+            except configparser.Error:
+                parser = configparser.ConfigParser()
+            if parser.has_option("options", "python_requires"):
+                constraints.append(parser.get("options", "python_requires").strip())
+
+    if not constraints:
+        return SpecifierSet()
+    try:
+        return SpecifierSet(",".join(constraints))
+    except ValueError as error:
+        raise BenchmarkPreflightError(
+            f"invalid Python constraint for {repository}: {constraints!r}"
+        ) from error
+
+
+def _interpreter_version(executable: Path) -> str:
+    completed = subprocess.run(
+        [str(executable), "-c", "import platform; print(platform.python_version())"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if completed.returncode != 0:
+        raise BenchmarkPreflightError(
+            f"could not inspect Python interpreter {executable}: {completed.stderr.strip()}"
+        )
+    version = completed.stdout.strip()
+    try:
+        Version(version)
+    except ValueError as error:
+        raise BenchmarkPreflightError(
+            f"Python interpreter {executable} returned an invalid version {version!r}"
+        ) from error
+    return version
+
+
+def _discover_python_interpreters() -> tuple[PythonInterpreter, ...]:
+    """Discover installed interpreters; never treat the host environment as a fallback."""
+    candidates: list[Path] = []
+    if sys.executable:
+        candidates.append(Path(sys.executable).resolve())
+    launcher = shutil.which("py")
+    if launcher is not None:
+        listed = subprocess.run(
+            [launcher, "-0p"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        for line in listed.stdout.splitlines():
+            match = re.search(r"(?P<path>[A-Za-z]:\\[^\r\n]+python(?:\.exe)?)$", line.strip())
+            if match:
+                candidates.append(Path(match.group("path")).resolve())
+    interpreters: list[PythonInterpreter] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen or not candidate.is_file():
+            continue
+        seen.add(candidate)
+        try:
+            interpreters.append(PythonInterpreter(candidate, _interpreter_version(candidate)))
+        except (BenchmarkPreflightError, OSError, subprocess.SubprocessError):
+            continue
+    return tuple(interpreters)
+
+
+def _select_python_interpreter(repository: Path, task_id: str) -> PythonInterpreter:
+    constraints = _python_constraints(repository)
+    available = _discover_python_interpreters()
+    return _select_compatible_interpreter(available, constraints, task_id)
+
+
+def _select_compatible_interpreter(
+    available: Sequence[PythonInterpreter],
+    constraints: SpecifierSet,
+    task_id: str,
+    *,
+    constraint_description: str | None = None,
+) -> PythonInterpreter:
+    """Select the highest available interpreter satisfying all constraints."""
+    compatible = [item for item in available if Version(item.version) in constraints]
+    if not compatible:
+        available_text = ", ".join(
+            f"{item.executable} ({item.version})" for item in available
+        ) or "none"
+        constraint_text = constraint_description or str(constraints) or "any Python version"
+        raise BenchmarkPreflightError(
+            f"no compatible Python interpreter for {task_id}: requires {constraint_text}; "
+            f"available: {available_text}"
+        )
+    compatible.sort(key=lambda item: Version(item.version), reverse=True)
+    return compatible[0]
+
+
+def _dependency_install_plan(
+    repository: Path,
+    *,
+    task_id: str = "",
+    overlays: Mapping[str, Sequence[str]] | None = None,
+    required_extras: Sequence[str] = (),
+) -> DependencyInstallPlan:
+    """Collect repository-declared test dependencies and explicit task overlays."""
+    requirement_files: set[Path] = {
+        path for path in repository.glob("requirements*.txt") if path.is_file()
+    }
+    extras: set[str] = {extra.strip() for extra in required_extras if extra.strip()}
+    environment: dict[str, str] = {}
+    tox_path = repository / "tox.ini"
+    if tox_path.is_file():
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read(tox_path, encoding="utf-8")
+        except (OSError, configparser.Error):
+            parser = configparser.ConfigParser(interpolation=None)
+        for section in parser.sections():
+            if section != "testenv":
+                continue
+            deps = parser.get(section, "deps", fallback="")
+            for line in deps.splitlines():
+                requirement_match = re.search(r"(?:-r|--requirement)\s+([^\s]+)", line.strip())
+                if requirement_match:
+                    requirement_file = (repository / requirement_match.group(1)).resolve()
+                    if requirement_file.is_file():
+                        requirement_files.add(requirement_file)
+                match = re.search(r"\.\[([^\]]+)\]", line.strip())
+                if match:
+                    extras.update(part.strip() for part in match.group(1).split(","))
+            declared_extras = parser.get(section, "extras", fallback="")
+            extras.update(
+                part.strip()
+                for part in re.split(r"[,\r\n]+", declared_extras)
+                if part.strip()
+            )
+            setenv = parser.get(section, "setenv", fallback="")
+            for line in setenv.splitlines():
+                if "=" not in line:
+                    continue
+                key, value = (part.strip() for part in line.split("=", 1))
+                if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+                    environment[key] = value
+    overlay_values = tuple(
+        str(item).strip()
+        for item in (overlays or {}).get(task_id, ())
+        if str(item).strip()
+    )
+    return DependencyInstallPlan(
+        tuple(sorted(requirement_files)),
+        tuple(sorted(extras)),
+        overlay_values,
+        tuple(sorted(environment.items())),
+    )
+
+
+def _dependency_fingerprint(
+    repository: Path,
+    interpreter: PythonInterpreter,
+    plan: DependencyInstallPlan,
+    *,
+    runtime_type: str = "local_venv",
+    base_image_digest: str | None = None,
+    benchmark_policy: BenchmarkEnvironmentPolicy | None = None,
+    benchmark_manifest_path: Path | None = None,
+) -> str:
     digest = hashlib.sha256()
     head = subprocess.run(
         ["git", "-C", str(repository), "rev-parse", "--verify", "HEAD"],
@@ -343,19 +665,41 @@ def _dependency_fingerprint(repository: Path) -> str:
             f"{head.stderr.strip()}"
         )
     digest.update(head.stdout.strip().encode("utf-8"))
-    digest.update(f"python-{sys.version_info.major}.{sys.version_info.minor}".encode("ascii"))
-    for path in sorted(repository.iterdir()):
-        if path.is_file() and (
+    digest.update(str(interpreter.executable).encode("utf-8"))
+    digest.update(interpreter.version.encode("ascii"))
+    digest.update(runtime_type.encode("ascii"))
+    if base_image_digest is not None:
+        digest.update(base_image_digest.encode("utf-8"))
+    if benchmark_policy is not None:
+        digest.update(policy_fingerprint_payload(benchmark_policy))
+    if benchmark_manifest_path is not None:
+        digest.update(benchmark_manifest_path.read_bytes())
+    for path in sorted(
+        path
+        for path in repository.rglob("*")
+        if path.is_file()
+        and ".git" not in path.parts
+        and (
             path.name.startswith("requirements")
             and path.suffix == ".txt"
             or path.name in {"pyproject.toml", "setup.py", "setup.cfg", "Pipfile", "tox.ini"}
-        ):
-            digest.update(path.name.encode("utf-8"))
-            digest.update(path.read_bytes())
+        )
+    ):
+        digest.update(str(path.relative_to(repository)).encode("utf-8"))
+        digest.update(path.read_bytes())
+    digest.update(json.dumps(plan.overlays, sort_keys=True).encode("utf-8"))
+    digest.update(json.dumps(plan.package_extras, sort_keys=True).encode("utf-8"))
+    digest.update(json.dumps(plan.environment, sort_keys=True).encode("utf-8"))
     return digest.hexdigest()[:16]
 
 
-def _run_install(python_executable: Path, arguments: Sequence[str], task_id: str) -> None:
+def _run_install(
+    python_executable: Path,
+    arguments: Sequence[str],
+    task_id: str,
+    *,
+    cwd: Path | None = None,
+) -> None:
     completed = subprocess.run(
         [
             str(python_executable),
@@ -369,6 +713,7 @@ def _run_install(python_executable: Path, arguments: Sequence[str], task_id: str
         capture_output=True,
         text=True,
         timeout=900,
+        cwd=cwd,
     )
     if completed.returncode != 0:
         raise BenchmarkPreflightError(
@@ -376,10 +721,363 @@ def _run_install(python_executable: Path, arguments: Sequence[str], task_id: str
         )
 
 
+def _docker_engine_status() -> tuple[bool, str]:
+    """Return Docker Linux-engine readiness without starting or installing anything."""
+    docker = shutil.which("docker")
+    if docker is None:
+        return False, "Docker CLI is not installed"
+    try:
+        completed = subprocess.run(
+            [docker, "info", "--format", "{{.ServerVersion}}"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, f"Docker engine is unavailable: {error}"
+    if completed.returncode != 0:
+        return False, completed.stderr.strip() or "Docker engine is unavailable"
+    return True, completed.stdout.strip() or "Docker engine is available"
+
+
+def _docker_python_interpreters(
+    image: str,
+    task_id: str,
+) -> tuple[PythonInterpreter, ...]:
+    docker = shutil.which("docker") or "docker"
+    completed = subprocess.run(
+        [
+            docker,
+            "run",
+            "--rm",
+            image,
+            "sh",
+            "-lc",
+            (
+                "for candidate in python python3 python3.12 python3.11 python3.10 "
+                "python3.9 python3.8; do "
+                "if command -v \"$candidate\" >/dev/null 2>&1; then "
+                "printf '%s\\t' \"$(command -v \"$candidate\")\"; "
+                "\"$candidate\" -c 'import platform; print(platform.python_version())'; "
+                "fi; done"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if completed.returncode != 0:
+        raise BenchmarkPreflightError(
+            f"could not inspect container Python for {task_id} ({image}): "
+            f"{completed.stderr.strip()}"
+        )
+    interpreters: list[PythonInterpreter] = []
+    for line in completed.stdout.splitlines():
+        executable, _, version = line.partition("\t")
+        if not executable or not version:
+            continue
+        try:
+            Version(version)
+        except ValueError:
+            continue
+        interpreter = PythonInterpreter(Path(executable), version)
+        if interpreter not in interpreters:
+            interpreters.append(interpreter)
+    if not interpreters:
+        raise BenchmarkPreflightError(
+            f"container {image} exposed no usable Python interpreter for {task_id}"
+        )
+    return tuple(interpreters)
+
+
+def _docker_base_image_digest(image: str, task_id: str) -> str:
+    docker = shutil.which("docker") or "docker"
+    completed = subprocess.run(
+        [docker, "image", "inspect", image, "--format", "{{json .RepoDigests}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+    if completed.returncode != 0:
+        raise BenchmarkPreflightError(
+            f"required SWE-smith container image is unavailable for {task_id}: "
+            f"{image}: {completed.stderr.strip()}"
+        )
+    try:
+        repo_digests = json.loads(completed.stdout.strip())
+    except json.JSONDecodeError:
+        repo_digests = []
+    if isinstance(repo_digests, list) and repo_digests:
+        return str(repo_digests[0])
+    image_id = subprocess.run(
+        [docker, "image", "inspect", image, "--format", "{{.Id}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+    if image_id.returncode != 0 or not image_id.stdout.strip():
+        raise BenchmarkPreflightError(
+            f"container image {image} has no usable immutable digest for {task_id}"
+        )
+    return f"{image}@{image_id.stdout.strip()}"
+
+
+def _prepared_dockerfile(
+    *,
+    base_image_digest: str,
+    python_executable: str,
+    repository: Path,
+    plan: DependencyInstallPlan,
+) -> str:
+    base_image, _, digest = base_image_digest.partition("@")
+    if not digest:
+        raise BenchmarkPreflightError(
+            f"base container image digest is invalid for {repository.name}: {base_image_digest}"
+        )
+    commands = ["set -eu"]
+    for key, value in plan.environment:
+        commands.append(f"export {key}={shlex.quote(value)}")
+    python = shlex.quote(python_executable)
+    commands.append(
+        f"{python} -m pip install --disable-pip-version-check pytest"
+    )
+    for requirement_file in plan.requirement_files:
+        relative = requirement_file.resolve().relative_to(repository.resolve()).as_posix()
+        commands.append(
+            f"{python} -m pip install --disable-pip-version-check "
+            f"--requirement {shlex.quote('/workspace/' + relative)}"
+        )
+    extras = ",".join(plan.package_extras)
+    package_spec = f"/workspace[{extras}]" if extras else "/workspace"
+    commands.append(
+        f"{python} -m pip install --disable-pip-version-check {shlex.quote(package_spec)}"
+    )
+    for overlay in plan.overlays:
+        commands.append(
+            f"{python} -m pip install --disable-pip-version-check {shlex.quote(overlay)}"
+        )
+    return "\n".join(
+        [
+            f"FROM {base_image}@{digest}",
+            *[f"ENV {key}={json.dumps(value)}" for key, value in plan.environment],
+            "WORKDIR /workspace",
+            "COPY . /workspace",
+            "RUN " + " && ".join(commands),
+        ]
+    ) + "\n"
+
+
+def _prepare_docker_image(
+    *,
+    environment_root: Path,
+    task_id: str,
+    image_tag: str,
+    dockerfile: str,
+    repository: Path,
+    docker_build_timeout_seconds: int,
+) -> None:
+    dockerfile_path = environment_root / task_id / image_tag.rsplit(":", 1)[-1] / "Dockerfile"
+    dockerfile_path.parent.mkdir(parents=True, exist_ok=True)
+    dockerfile_path.write_text(dockerfile, encoding="utf-8")
+    docker = shutil.which("docker") or "docker"
+    built = subprocess.run(
+        [
+            docker,
+            "build",
+            "--pull=false",
+            "--tag",
+            image_tag,
+            "--file",
+            str(dockerfile_path),
+            str(repository),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=docker_build_timeout_seconds,
+    )
+    if built.returncode != 0:
+        raise BenchmarkPreflightError(
+            f"could not prepare immutable container environment for {task_id}: "
+            f"{built.stderr[-4000:]}"
+        )
+
+
+def _container_environment(
+    environment_root: Path,
+    task_id: str,
+    repository: Path,
+    image: str,
+    plan: DependencyInstallPlan,
+    benchmark_policy: BenchmarkEnvironmentPolicy,
+    benchmark_manifest_path: Path | None = None,
+) -> IsolatedTaskEnvironment:
+    available, detail = _docker_engine_status()
+    if not available:
+        raise BenchmarkPreflightError(
+            f"container runtime unavailable for {task_id}: {detail}; "
+            "no host-Python fallback is permitted"
+        )
+    docker = shutil.which("docker") or "docker"
+    base_image_digest = _docker_base_image_digest(image, task_id)
+    repository_constraints = _python_constraints(repository)
+    try:
+        task_policy = benchmark_policy.task(task_id)
+        constraints = effective_python_constraints(task_policy, repository_constraints)
+    except BenchmarkEnvironmentConfigurationError as error:
+        raise BenchmarkPreflightError(str(error)) from error
+    container_interpreters = _docker_python_interpreters(image, task_id)
+    container_interpreter = _select_compatible_interpreter(
+        container_interpreters,
+        constraints,
+        task_id,
+        constraint_description=(
+            f"repository {repository_constraints} and policy "
+            f"{task_policy.python_constraint_assertion or 'any Python version'}"
+        ),
+    )
+    compatible = (container_interpreter,)
+    if not compatible:
+        raise BenchmarkPreflightError(
+            f"no compatible Python interpreter in container for {task_id}: "
+            f"requires {constraints or 'any Python version'}; available: "
+            + ", ".join(
+                f"{item.executable} ({item.version})" for item in container_interpreters
+            )
+        )
+    container_python_executable = str(container_interpreter.executable).replace("\\", "/")
+    version = container_interpreter.version
+    interpreter = PythonInterpreter(
+        Path(f"docker://{image}{container_python_executable}"),
+        version,
+    )
+    fingerprint = _dependency_fingerprint(
+        repository,
+        interpreter,
+        plan,
+        runtime_type="docker",
+        base_image_digest=base_image_digest,
+        benchmark_policy=benchmark_policy,
+        benchmark_manifest_path=benchmark_manifest_path,
+    )
+    prepared_image_tag = f"graph-swarm/sprint3b-{task_id.lower()}:{fingerprint}"
+    task_environment_root = environment_root / task_id / fingerprint
+    task_environment_root.mkdir(parents=True, exist_ok=True)
+    marker = task_environment_root / "environment.json"
+    docker_path = Path(docker).resolve()
+    if marker.is_file():
+        try:
+            metadata: Any = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            metadata = None
+        if (
+            isinstance(metadata, dict)
+            and cast(dict[str, Any], metadata).get("validated") is True
+            and cast(dict[str, Any], metadata).get("environment_fingerprint") == fingerprint
+            and cast(dict[str, Any], metadata).get("python_version") == version
+            and cast(dict[str, Any], metadata).get("runtime_type") == "docker"
+            and cast(dict[str, Any], metadata).get("container_image") == prepared_image_tag
+            and cast(dict[str, Any], metadata).get("container_python_executable")
+            == container_python_executable
+            and subprocess.run(
+                [docker, "image", "inspect", prepared_image_tag],
+                check=False,
+                capture_output=True,
+                timeout=60,
+            ).returncode
+            == 0
+        ):
+            return IsolatedTaskEnvironment(
+                task_id,
+                docker_path,
+                marker,
+                version,
+                fingerprint,
+                "docker",
+                prepared_image_tag,
+                plan,
+                repository,
+                container_python_executable,
+                image,
+                benchmark_policy.path,
+                benchmark_manifest_path,
+            )
+    _prepare_docker_image(
+        environment_root=environment_root,
+        task_id=task_id,
+        image_tag=prepared_image_tag,
+        dockerfile=_prepared_dockerfile(
+            base_image_digest=base_image_digest,
+            python_executable=container_python_executable,
+            repository=repository,
+            plan=plan,
+        ),
+        repository=repository,
+        docker_build_timeout_seconds=benchmark_policy.docker_build_timeout_seconds,
+    )
+    marker.write_text(
+        json.dumps(
+            {
+                "task_id": task_id,
+                "validated": False,
+                "python_executable": str(docker_path),
+                "python_version": version,
+                "environment_fingerprint": fingerprint,
+                "runtime_type": "docker",
+                "container_image": prepared_image_tag,
+                "base_container_image": image,
+                "base_image_digest": base_image_digest,
+                "container_python_executable": container_python_executable,
+                "requirement_files": [str(path) for path in plan.requirement_files],
+                "package_extras": list(plan.package_extras),
+                "overlays": list(plan.overlays),
+                "environment": dict(plan.environment),
+                "benchmark_policy_path": str(benchmark_policy.path),
+                "benchmark_manifest_path": str(benchmark_manifest_path)
+                if benchmark_manifest_path is not None
+                else None,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return IsolatedTaskEnvironment(
+        task_id,
+        docker_path,
+        marker,
+        version,
+        fingerprint,
+        "docker",
+        prepared_image_tag,
+        plan,
+        repository,
+        container_python_executable,
+        image,
+        benchmark_policy.path,
+        benchmark_manifest_path,
+    )
+
+
 def _isolated_python(
     environment_root: Path,
     task_id: str,
     repository: Path | None = None,
+    *,
+    dependency_overlays: Mapping[str, Sequence[str]] | None = None,
+    benchmark_policy: BenchmarkEnvironmentPolicy | None = None,
+    benchmark_manifest_path: Path | None = None,
+    required_extras: Sequence[str] = (),
 ) -> tuple[Path, Path]:
     """Create/cache an environment from the selected repository metadata."""
     if repository is None:
@@ -391,10 +1089,23 @@ def _isolated_python(
         raise BenchmarkPreflightError(
             f"benchmark repository is missing for {task_id}: {repository}"
         )
-    fingerprint = _dependency_fingerprint(repository)
+    interpreter = _select_python_interpreter(repository, task_id)
+    plan = _dependency_install_plan(
+        repository,
+        task_id=task_id,
+        overlays=dependency_overlays,
+        required_extras=required_extras,
+    )
+    fingerprint = _dependency_fingerprint(
+        repository,
+        interpreter,
+        plan,
+        benchmark_policy=benchmark_policy,
+        benchmark_manifest_path=benchmark_manifest_path,
+    )
     task_environment_root = environment_root / task_id / fingerprint
     environment_dir = task_environment_root / "venv"
-    executable = environment_dir / "Scripts" / "python.exe"
+    executable = environment_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     validation_marker = task_environment_root / "environment.json"
     if executable.is_file() and validation_marker.is_file():
         try:
@@ -404,13 +1115,17 @@ def _isolated_python(
         if (
             isinstance(raw_metadata, dict)
             and cast(dict[str, Any], raw_metadata).get("validated") is True
+            and cast(dict[str, Any], raw_metadata).get("environment_fingerprint") == fingerprint
+            and cast(dict[str, Any], raw_metadata).get("python_version") == interpreter.version
+            and cast(dict[str, Any], raw_metadata).get("python_executable") == str(executable)
+            and cast(dict[str, Any], raw_metadata).get("runtime_type") == "local_venv"
         ):
             return executable, validation_marker
 
     if not executable.is_file():
         task_environment_root.mkdir(parents=True, exist_ok=True)
         created = subprocess.run(
-            [sys.executable, "-m", "venv", str(environment_dir)],
+            [str(interpreter.executable), "-m", "venv", str(environment_dir)],
             check=False,
             capture_output=True,
             text=True,
@@ -424,19 +1139,37 @@ def _isolated_python(
         raise BenchmarkPreflightError(f"isolated Python was not created for {task_id}")
 
     _run_install(executable, ["pytest"], task_id)
-    for requirement_file in sorted(
-        path
-        for path in repository.iterdir()
-        if path.is_file() and path.name.startswith("requirements") and path.suffix == ".txt"
-    ):
+    for requirement_file in plan.requirement_files:
         _run_install(executable, ["--requirement", str(requirement_file)], task_id)
     if any((repository / name).is_file() for name in ("pyproject.toml", "setup.py", "setup.cfg")):
         # Install the distribution for declared runtime dependencies.  The
         # objective later places the copied task workspace first on PYTHONPATH,
         # so this baseline package copy cannot hide the mutation under test.
-        _run_install(executable, [str(repository)], task_id)
+        package_spec = "."
+        if plan.package_extras:
+            package_spec += "[" + ",".join(plan.package_extras) + "]"
+        _run_install(executable, [package_spec], task_id, cwd=repository)
+    for overlay in plan.overlays:
+        _run_install(executable, [overlay], task_id)
     validation_marker.write_text(
-        json.dumps({"task_id": task_id, "validated": False}, sort_keys=True) + "\n",
+        json.dumps(
+            {
+                "task_id": task_id,
+                "validated": False,
+                "python_executable": str(executable),
+                "base_python_executable": str(interpreter.executable),
+                "python_version": interpreter.version,
+                "environment_fingerprint": fingerprint,
+                "runtime_type": "local_venv",
+                "container_image": None,
+                "requirement_files": [str(path) for path in plan.requirement_files],
+                "package_extras": list(plan.package_extras),
+                "overlays": list(plan.overlays),
+                "environment": dict(plan.environment),
+            },
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return executable, validation_marker
@@ -447,18 +1180,71 @@ def _prepare_task_environments(
     *,
     environment_root: Path,
     source_root: Path,
+    dependency_overlays: Mapping[str, Sequence[str]] | None = None,
+    container_images: Mapping[str, str] | None = None,
+    benchmark_policy: BenchmarkEnvironmentPolicy | None = None,
+    benchmark_manifest_path: Path | None = None,
 ) -> dict[str, IsolatedTaskEnvironment]:
-    return {
-        case.task.id: IsolatedTaskEnvironment(case.task.id, executable, marker)
-        for case in cases
-        for executable, marker in (
-            _isolated_python(
+    if benchmark_policy is None:
+        raise BenchmarkPreflightError("validated benchmark environment policy is required")
+    environments: dict[str, IsolatedTaskEnvironment] = {}
+    for case in cases:
+        repository = (source_root / case.task.repository).resolve()
+        try:
+            constraints = _python_constraints(repository)
+            task_policy = reconcile_task_policy(benchmark_policy, case.task.id, constraints)
+            plan = _dependency_install_plan(
+                repository,
+                task_id=case.task.id,
+                overlays=dependency_overlays,
+                required_extras=task_policy.required_extras,
+            )
+            if task_policy.runtime == "manifest_container_required":
+                raise BenchmarkPreflightError(
+                    f"benchmark policy requires the manifest container for {case.task.id}"
+                )
+            interpreter = _select_python_interpreter(repository, case.task.id)
+            executable, marker = _isolated_python(
                 environment_root,
                 case.task.id,
-                source_root / case.task.repository,
-            ),
-        )
-    }
+                repository,
+                dependency_overlays=dependency_overlays,
+                benchmark_policy=benchmark_policy,
+                benchmark_manifest_path=benchmark_manifest_path,
+                required_extras=task_policy.required_extras,
+            )
+            environments[case.task.id] = IsolatedTaskEnvironment(
+                case.task.id,
+                executable,
+                marker,
+                interpreter.version,
+                _dependency_fingerprint(
+                    repository,
+                    interpreter,
+                    plan,
+                    benchmark_policy=benchmark_policy,
+                    benchmark_manifest_path=benchmark_manifest_path,
+                ),
+            )
+        except BenchmarkPreflightError as local_error:
+            image = (container_images or {}).get(case.task.id)
+            if not image:
+                raise
+            try:
+                environments[case.task.id] = _container_environment(
+                    environment_root,
+                    case.task.id,
+                    repository,
+                    image,
+                    plan,
+                    benchmark_policy,
+                    benchmark_manifest_path,
+                )
+            except BenchmarkPreflightError as container_error:
+                raise BenchmarkPreflightError(
+                    f"{local_error}; approved container path also failed: {container_error}"
+                ) from container_error
+    return environments
 
 
 def _materialize_workspace(
@@ -559,6 +1345,107 @@ def _apply_patch(
         patch_path.unlink(missing_ok=True)
 
 
+def run_preflight(
+    *,
+    project_root: Path,
+    baseline_root: Path,
+    execution_root: Path,
+    artifact_root: Path,
+) -> Path:
+    """Prepare and preflight T006-T015 without invoking any experiment runner."""
+    b0_config = _configured_runtime(
+        load_experiment_configuration(
+            project_root / "configs/experiments/rollout_3a_pilot.yaml",
+            project_root=project_root,
+        ),
+        baseline_root,
+        execution_root,
+    )
+    try:
+        benchmark_policy = load_benchmark_environment_policy(
+            project_root / "configs/research/benchmark_environments.toml"
+        )
+    except BenchmarkEnvironmentConfigurationError as error:
+        raise BenchmarkPreflightError(str(error)) from error
+    all_cases = load_task_cases(
+        b0_config.task_manifest_path,
+        problem_statements_path=b0_config.task_problems_path,
+    )
+    cases = [case for case in all_cases if case.task.id in TRANSFER_TASKS]
+    if tuple(case.task.id for case in cases) != TRANSFER_TASKS:
+        raise BenchmarkPreflightError("frozen T006-T015 cases are incomplete or out of order")
+    _verify_baselines(cases, baseline_root)
+    instance_ids = _manifest_instance_ids(
+        b0_config.task_manifest_path,
+        [case.task.id for case in cases],
+    )
+    container_images = _manifest_image_names(
+        b0_config.task_manifest_path,
+        [case.task.id for case in cases],
+    )
+    frozen_by_instance = load_frozen_swesmith_cases(tuple(instance_ids.values()))
+    frozen_cases = {
+        case.task.id: frozen_by_instance[instance_ids[case.task.id].lower()]
+        for case in cases
+    }
+    _verify_frozen_patches(cases, baseline_root, frozen_cases)
+    environments = _prepare_task_environments(
+        cases,
+        environment_root=execution_root / "sprint3-task-environments",
+        source_root=baseline_root,
+        dependency_overlays=TASK_DEPENDENCY_OVERLAYS,
+        container_images=container_images,
+        benchmark_policy=benchmark_policy,
+        benchmark_manifest_path=b0_config.task_manifest_path,
+    )
+    objective = FrozenSWEsmithObjective(frozen_cases, environments)
+    observations: list[dict[str, Any]] = []
+    for case in cases:
+        workspace = _materialize_workspace(
+            source_root=baseline_root,
+            execution_root=execution_root,
+            frozen_cases=frozen_cases,
+            condition="preflight",
+            task=case.task,
+        )
+        observation = objective.preflight(case.task, workspace)
+        observations.append(
+            {
+                "task_id": case.task.id,
+                "runtime_type": environments[case.task.id].runtime_type,
+                "python_version": environments[case.task.id].python_version,
+                "python_executable": str(environments[case.task.id].python_executable),
+                "container_python_executable": (
+                    environments[case.task.id].container_python_executable
+                ),
+                "environment_fingerprint": environments[case.task.id].environment_fingerprint,
+                "status": observation.status,
+                "return_code": observation.return_code,
+            }
+        )
+    result_root = artifact_root / "GS-E003" / "sprint3b"
+    result_root.mkdir(parents=True, exist_ok=True)
+    result_path = result_root / (
+        "preflight-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + ".json"
+    )
+    result_path.write_text(
+        json.dumps(
+            {
+                "status": "READY_FOR_B0_O1",
+                "provider_calls": 0,
+                "b0_launched": False,
+                "o1_launched": False,
+                "tasks": observations,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return result_path
+
+
 def run_diagnostic(
     *,
     project_root: Path,
@@ -583,6 +1470,12 @@ def run_diagnostic(
         baseline_root,
         execution_root,
     )
+    try:
+        benchmark_policy = load_benchmark_environment_policy(
+            project_root / "configs/research/benchmark_environments.toml"
+        )
+    except BenchmarkEnvironmentConfigurationError as error:
+        raise RuntimeError(str(error)) from error
     all_cases = load_task_cases(
         b0_config.task_manifest_path,
         problem_statements_path=b0_config.task_problems_path,
@@ -593,6 +1486,10 @@ def run_diagnostic(
     _verify_baselines(cases, baseline_root)
 
     instance_ids = _manifest_instance_ids(
+        b0_config.task_manifest_path,
+        [case.task.id for case in cases],
+    )
+    container_images = _manifest_image_names(
         b0_config.task_manifest_path,
         [case.task.id for case in cases],
     )
@@ -607,8 +1504,21 @@ def run_diagnostic(
         cases,
         environment_root=execution_root / "sprint3-task-environments",
         source_root=baseline_root,
+        dependency_overlays=TASK_DEPENDENCY_OVERLAYS,
+        container_images=container_images,
+        benchmark_policy=benchmark_policy,
+        benchmark_manifest_path=b0_config.task_manifest_path,
     )
     objective = FrozenSWEsmithObjective(frozen_cases, environments)
+    for case in cases:
+        preflight_workspace = _materialize_workspace(
+            source_root=baseline_root,
+            execution_root=execution_root,
+            frozen_cases=frozen_cases,
+            condition="preflight",
+            task=case.task,
+        )
+        objective.preflight(case.task, preflight_workspace)
     recurrence = make_recurrence_matcher(frozen_cases)
     oracle = FrozenOracleResolver.from_frozen_files(
         o1_config.task_manifest_path,
@@ -676,6 +1586,12 @@ def run_smoke(
         baseline_root,
         execution_root,
     )
+    try:
+        benchmark_policy = load_benchmark_environment_policy(
+            project_root / "configs/research/benchmark_environments.toml"
+        )
+    except BenchmarkEnvironmentConfigurationError as error:
+        raise RuntimeError(str(error)) from error
     o1_config = _configured_runtime(
         load_experiment_configuration(
             project_root / "configs/experiments/rollout_3a_o1.yaml",
@@ -697,6 +1613,7 @@ def run_smoke(
     case = cases[0]
     _verify_baselines([case], baseline_root)
     instance_ids = _manifest_instance_ids(b0_config.task_manifest_path, [task_id])
+    container_images = _manifest_image_names(b0_config.task_manifest_path, [task_id])
     frozen_by_instance = load_frozen_swesmith_cases(tuple(instance_ids.values()))
     frozen = frozen_by_instance.get(instance_ids[task_id].lower())
     if frozen is None:
@@ -707,6 +1624,10 @@ def run_smoke(
         [case],
         environment_root=execution_root / "sprint3a-task-environments",
         source_root=baseline_root,
+        dependency_overlays=TASK_DEPENDENCY_OVERLAYS,
+        container_images=container_images,
+        benchmark_policy=benchmark_policy,
+        benchmark_manifest_path=b0_config.task_manifest_path,
     )
     objective = FrozenSWEsmithObjective(frozen_cases, environments)
     preflight_workspace = _materialize_workspace(
@@ -1002,6 +1923,26 @@ def _manifest_instance_ids(manifest_path: Path, task_ids: Sequence[str]) -> dict
                 found[task_id] = instance_id
     if set(found) != target_ids:
         raise RuntimeError("frozen manifest instance IDs are incomplete for T006-T015")
+    return found
+
+
+def _manifest_image_names(manifest_path: Path, task_ids: Sequence[str]) -> dict[str, str]:
+    """Load frozen SWE-smith container image names without exposing them to the agent."""
+    target_ids = set(task_ids)
+    found: dict[str, str] = {}
+    with manifest_path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            record = cast(dict[str, Any], json.loads(line))
+            task_id = record.get("task_id")
+            image_name = record.get("image_name")
+            if task_id in target_ids and isinstance(image_name, str) and image_name.strip():
+                found[task_id] = image_name.strip()
+    if set(found) != target_ids:
+        raise BenchmarkPreflightError(
+            "frozen manifest container image names are incomplete for T006-T015"
+        )
     return found
 
 
