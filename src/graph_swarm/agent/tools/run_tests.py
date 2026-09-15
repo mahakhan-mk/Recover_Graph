@@ -12,8 +12,14 @@ def run_tests(
     *,
     action_id: str | None = None,
 ) -> ActionResult:
-    """Run pytest with the current interpreter inside the configured workspace."""
-    executable = dependencies.python_executable or _current_python()
+    """Run pytest with the configured local or container interpreter."""
+    runtime = dependencies.execution_runtime
+    if runtime is not None and runtime.runtime_type == "docker":
+        executable = runtime.container_python_executable
+    elif runtime is not None:
+        executable = runtime.python_executable or _current_python()
+    else:
+        executable = dependencies.python_executable or _current_python()
     result = execute_process(
         dependencies,
         [str(executable), "-m", "pytest"],

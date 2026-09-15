@@ -32,7 +32,7 @@ from graph_swarm.agent.coding_agent import (
     create_coding_agent,
     run_coding_agent,
 )
-from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.advice import AdviceResult
@@ -529,6 +529,7 @@ AgentFactory = Callable[
 ]
 WorkspaceResolver = Callable[[Task], Path]
 PythonExecutableResolver = Callable[[Task, Path], Path]
+ExecutionRuntimeResolver = Callable[[Task, Path], ExecutionRuntime]
 
 
 @dataclass(frozen=True)
@@ -556,6 +557,7 @@ class ExperimentRunner:
         model: Model | None = None,
         workspace_resolver: WorkspaceResolver | None = None,
         python_executable_resolver: PythonExecutableResolver | None = None,
+        execution_runtime_resolver: ExecutionRuntimeResolver | None = None,
         objective_evaluator: ObjectiveTaskEvaluator | None = None,
         evaluator: LegacyTestEvaluator | None = None,
         recurrence_evaluator: RecurrenceEvaluator | None = None,
@@ -598,6 +600,7 @@ class ExperimentRunner:
         self.model = model
         self.workspace_resolver = workspace_resolver
         self.python_executable_resolver = python_executable_resolver
+        self.execution_runtime_resolver = execution_runtime_resolver
         if objective_evaluator is None and evaluator is not None:
             legacy_evaluator = evaluator
 
@@ -655,15 +658,25 @@ class ExperimentRunner:
         )
         step_database_path = run_dir / "steps.sqlite"
         workspace = self._workspace_for(task, run_id, condition).expanduser().resolve()
-        python_executable = (
-            None
-            if self.python_executable_resolver is None
-            else self.python_executable_resolver(task, workspace).expanduser().resolve()
+        execution_runtime = (
+            self.execution_runtime_resolver(task, workspace)
+            if self.execution_runtime_resolver is not None
+            else None
         )
-        if python_executable is not None and not python_executable.is_file():
+        python_executable = None
+        if execution_runtime is None and self.python_executable_resolver is not None:
+            python_executable = (
+                self.python_executable_resolver(task, workspace).expanduser().resolve()
+            )
+        local_executable = (
+            execution_runtime.python_executable
+            if execution_runtime is not None and execution_runtime.runtime_type == "local"
+            else python_executable
+        )
+        if local_executable is not None and not local_executable.is_file():
             raise WorkspaceIsolationError(
                 f"benchmark task {task.id} has no executable isolated environment: "
-                f"{python_executable}"
+                f"{local_executable}"
             )
         environment = (
             _environment_for(task, run_id) if condition is ExperimentCondition.O1 else None
@@ -678,6 +691,7 @@ class ExperimentRunner:
             ),
             environment=environment,
             python_executable=python_executable,
+            execution_runtime=execution_runtime,
             artifact_writer=(
                 JsonlResearchArtifactWriter(run_dir / "advisory_evidence.jsonl")
                 if condition is ExperimentCondition.O1

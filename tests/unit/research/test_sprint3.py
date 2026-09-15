@@ -478,6 +478,24 @@ def test_container_objective_uses_source_first_workspace_environment(
     assert command[image_index + 1] == "/usr/bin/python3.10"
 
 
+def test_container_agent_runtime_separates_docker_cli_and_python() -> None:
+    environment = IsolatedTaskEnvironment(
+        "GS-T006",
+        Path("docker.exe"),
+        runtime_type="docker",
+        container_image="prepared:image",
+        container_python_executable="/opt/miniconda3/bin/python",
+    )
+
+    runtime = environment.agent_execution_runtime()
+
+    assert runtime.runtime_type == "docker"
+    assert runtime.docker_executable == Path("docker.exe")
+    assert runtime.container_image == "prepared:image"
+    assert runtime.container_python_executable == "/opt/miniconda3/bin/python"
+    assert runtime.python_executable is None
+
+
 def test_local_venv_objective_command_is_unchanged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

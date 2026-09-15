@@ -12,7 +12,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, UserProm
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from graph_swarm.agent.coding_agent import create_coding_agent
-from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.detection.failure_detector import detect_failure
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.events import AgentEvent, AgentEventType
@@ -220,6 +220,55 @@ def test_runner_wires_configured_action_timeout_and_model_limits(
     assert captured["max_actions"] == 15
     assert captured["timeout_seconds"] == 300
     assert captured["model_settings"] == {"temperature": 0}
+
+
+def test_runner_passes_docker_runtime_contract_without_host_python(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configuration = load_experiment_configuration(PILOT_CONFIG, project_root=ROOT)
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        _agent: Agent[AgentDependencies, str],
+        _settings: Settings,
+        dependencies: AgentDependencies,
+        _prompt: str,
+        **_kwargs: object,
+    ) -> AgentRunResult[str] | None:
+        captured["dependencies"] = dependencies
+        return None
+
+    monkeypatch.setattr("graph_swarm.research.runner.run_coding_agent", fake_run)
+    runtime = ExecutionRuntime(
+        runtime_type="docker",
+        docker_executable=Path("docker.exe"),
+        container_image="prepared:image",
+        container_python_executable="/usr/bin/python3.10",
+    )
+    runner = ExperimentRunner(
+        configuration,
+        settings=make_settings(),
+        agent_factory=lambda settings, capabilities: create_coding_agent(
+            settings,
+            model=FunctionModel(
+                lambda _messages, _info: ModelResponse(parts=[TextPart("done")])
+            ),
+            capabilities=capabilities,
+        ),
+        workspace_resolver=lambda _task: tmp_path / "workspace",
+        artifact_store=ExperimentRunArtifactStore(tmp_path / "results"),
+        objective_evaluator=lambda _task, _workspace: True,
+        recurrence_evaluator=lambda _case, _events, _result, _workspace: False,
+        execution_runtime_resolver=lambda _task, _workspace: runtime,
+    )
+
+    runner.run_task(make_task("GS-T001", 1))
+
+    dependencies = captured["dependencies"]
+    assert isinstance(dependencies, AgentDependencies)
+    assert dependencies.execution_runtime == runtime
+    assert dependencies.python_executable is None
 
 
 def test_step_persistence_is_per_run_and_never_reused_as_history(tmp_path: Path) -> None:

@@ -1,7 +1,10 @@
+import subprocess
 import sys
 from pathlib import Path
 
-from graph_swarm.agent.dependencies import AgentDependencies
+import pytest
+
+from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.agent.tools.run_command import run_command
 from graph_swarm.domain.action import ActionResult
 
@@ -10,6 +13,22 @@ def make_dependencies(tmp_path: Path) -> AgentDependencies:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     return AgentDependencies(workspace, "run-001", "task-001")
+
+
+def make_docker_dependencies(tmp_path: Path) -> AgentDependencies:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    return AgentDependencies(
+        workspace,
+        "run-001",
+        "task-001",
+        execution_runtime=ExecutionRuntime(
+            runtime_type="docker",
+            docker_executable=Path("docker.exe"),
+            container_image="prepared:image",
+            container_python_executable="/opt/miniconda3/bin/python",
+        ),
+    )
 
 
 def assert_timestamps_are_valid(result: ActionResult) -> None:
@@ -130,3 +149,63 @@ def test_nonzero_command_emits_one_matching_event(tmp_path: Path) -> None:
     assert len(dependencies.events) == 1
     assert dependencies.events[0].result == result
     assert dependencies.events[0].action_id == result.action_id
+
+
+def test_docker_command_wraps_arbitrary_argv_in_prepared_container(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dependencies = make_docker_dependencies(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, "container output\n", "")
+
+    monkeypatch.setattr("graph_swarm.agent.tools.run_command.subprocess.run", fake_run)
+
+    result = run_command(
+        dependencies,
+        ["python", "-c", "print('inside')"],
+        timeout_seconds=5,
+    )
+
+    command = captured["command"]
+    assert isinstance(command, list)
+    assert command[:4] == ["docker.exe", "run", "--rm", "--network"]
+    assert command[4:6] == ["none", "--mount"]
+    assert command[6] == (
+        f"type=bind,source={dependencies.workspace_root},target=/workspace"
+    )
+    assert command[7:11] == [
+        "--workdir",
+        "/workspace",
+        "--env",
+        "PYTHONPATH=/workspace/src:/workspace",
+    ]
+    assert command[11:] == ["prepared:image", "python", "-c", "print('inside')"]
+    assert result.success is True
+    assert result.output == "container output\n"
+    assert dependencies.events[0].result == result
+
+
+def test_docker_command_failure_preserves_tool_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dependencies = make_docker_dependencies(tmp_path)
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 7, "partial output", "container error")
+
+    monkeypatch.setattr("graph_swarm.agent.tools.run_command.subprocess.run", fake_run)
+
+    result = run_command(dependencies, ["pytest", "-q"], timeout_seconds=5)
+
+    assert result.success is False
+    assert result.exit_code == 7
+    assert result.output == "partial output"
+    assert result.error == "container error"
+    assert len(dependencies.events) == 1
+    assert dependencies.events[0].result == result

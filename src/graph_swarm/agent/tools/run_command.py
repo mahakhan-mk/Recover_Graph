@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.agent.hooks import emit_action_event
 from graph_swarm.domain.action import ActionResult
 
@@ -53,6 +53,41 @@ def workspace_process_environment(workspace: Path) -> dict[str, str]:
     return environment
 
 
+def _runtime_for_dependencies(dependencies: AgentDependencies) -> ExecutionRuntime:
+    """Return the explicit runtime, or the historical local runtime."""
+    if dependencies.execution_runtime is not None:
+        return dependencies.execution_runtime
+    return ExecutionRuntime(
+        python_executable=dependencies.python_executable,
+    )
+
+
+def _process_command(
+    dependencies: AgentDependencies,
+    command: list[str],
+) -> list[str]:
+    runtime = _runtime_for_dependencies(dependencies)
+    if runtime.runtime_type == "local":
+        return command
+
+    source = str(dependencies.workspace_root)
+    return [
+        str(runtime.docker_executable),
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--mount",
+        f"type=bind,source={source},target=/workspace",
+        "--workdir",
+        "/workspace",
+        "--env",
+        "PYTHONPATH=/workspace/src:/workspace",
+        str(runtime.container_image),
+        *command,
+    ]
+
+
 def execute_process(
     dependencies: AgentDependencies,
     command: list[str],
@@ -88,7 +123,7 @@ def execute_process(
 
     try:
         completed = subprocess.run(
-            command,
+            _process_command(dependencies, command),
             cwd=dependencies.workspace_root,
             env=workspace_process_environment(dependencies.workspace_root),
             capture_output=True,

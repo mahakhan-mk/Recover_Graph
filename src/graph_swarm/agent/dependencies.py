@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from graph_swarm.domain.behavior import BehaviorChangeEvidence
 from graph_swarm.domain.events import AdviceEvent, AgentEvent
@@ -20,6 +20,36 @@ class WorkspacePathError(ValueError):
     """Raised when a path resolves outside the configured workspace."""
 
 
+@dataclass(frozen=True)
+class ExecutionRuntime:
+    """Process runtime used by agent tools.
+
+    A local runtime executes its command directly. A Docker runtime keeps the
+    host Docker CLI separate from the Python executable that exists in the
+    prepared container.
+    """
+
+    runtime_type: Literal["local", "docker"] = "local"
+    python_executable: Path | None = None
+    docker_executable: Path | None = None
+    container_image: str | None = None
+    container_python_executable: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.runtime_type == "local":
+            if self.docker_executable is not None:
+                raise ValueError("local runtimes must not define docker_executable")
+            return
+        if self.python_executable is not None:
+            raise ValueError("docker runtimes must not define python_executable")
+        if self.docker_executable is None:
+            raise ValueError("docker runtimes require docker_executable")
+        if not self.container_image:
+            raise ValueError("docker runtimes require container_image")
+        if not self.container_python_executable:
+            raise ValueError("docker runtimes require container_python_executable")
+
+
 @dataclass
 class AgentDependencies:
     """Minimal in-memory runtime context shared by future agent tools."""
@@ -33,6 +63,7 @@ class AgentDependencies:
     advisory_service: AdvisoryService | None = None
     artifact_writer: JsonlResearchArtifactWriter | None = None
     python_executable: Path | None = None
+    execution_runtime: ExecutionRuntime | None = None
     advice_events: list[AdviceEvent] = field(default_factory=lambda: list[AdviceEvent]())
     behavior_evidence: list[BehaviorChangeEvidence] = field(
         default_factory=lambda: list[BehaviorChangeEvidence]()

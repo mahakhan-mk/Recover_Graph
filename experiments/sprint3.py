@@ -31,7 +31,7 @@ from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
 from experiments.oracle import FrozenOracleResolver
-from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.agent.tools.run_command import workspace_process_environment
 from graph_swarm.domain.behavior import BehaviorChangeEvidence
 from graph_swarm.domain.events import AgentEvent
@@ -102,6 +102,24 @@ class IsolatedTaskEnvironment:
     base_container_image: str | None = None
     benchmark_policy_path: Path | None = None
     benchmark_manifest_path: Path | None = None
+
+    def agent_execution_runtime(self) -> ExecutionRuntime:
+        """Describe the runtime available to Track B process tools."""
+        if self.runtime_type == "docker":
+            if self.container_image is None or self.container_python_executable is None:
+                raise BenchmarkPreflightError(
+                    f"container execution metadata is incomplete for {self.task_id}"
+                )
+            return ExecutionRuntime(
+                runtime_type="docker",
+                docker_executable=self.python_executable,
+                container_image=self.container_image,
+                container_python_executable=self.container_python_executable,
+            )
+        return ExecutionRuntime(
+            runtime_type="local",
+            python_executable=self.python_executable,
+        )
 
     def mark_validated(self) -> None:
         if self.validation_marker is None:
@@ -1811,8 +1829,8 @@ def run_diagnostic(
             recurrence_evaluator=recurrence,
             oracle_resolver=resolver,
             condition=condition,
-            python_executable_resolver=lambda task, _workspace: (
-                environments[task.id].python_executable
+            execution_runtime_resolver=lambda task, _workspace: (
+                environments[task.id].agent_execution_runtime()
             ),
             workspace_resolver=_make_workspace_resolver(
                 source_root=baseline_root,
@@ -1926,8 +1944,8 @@ def run_smoke(
             recurrence_evaluator=make_recurrence_matcher(frozen_cases),
             oracle_resolver=resolver,
             condition=condition,
-            python_executable_resolver=lambda task, _workspace: (
-                environments[task.id].python_executable
+            execution_runtime_resolver=lambda task, _workspace: (
+                environments[task.id].agent_execution_runtime()
             ),
             workspace_resolver=_make_workspace_resolver(
                 source_root=baseline_root,

@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from graph_swarm.agent.dependencies import AgentDependencies, WorkspacePathError
+from graph_swarm.agent.dependencies import (
+    AgentDependencies,
+    ExecutionRuntime,
+    WorkspacePathError,
+)
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.events import AgentEvent, AgentEventType
 
@@ -82,3 +86,35 @@ def test_empty_run_id_is_rejected(tmp_path: Path) -> None:
 def test_empty_task_id_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="task_id"):
         AgentDependencies(tmp_path, "run-001", "")
+
+
+def test_docker_runtime_separates_host_cli_from_container_python() -> None:
+    runtime = ExecutionRuntime(
+        runtime_type="docker",
+        docker_executable=Path("docker.exe"),
+        container_image="prepared:image",
+        container_python_executable="/opt/miniconda3/bin/python",
+    )
+
+    assert runtime.docker_executable == Path("docker.exe")
+    assert runtime.container_python_executable == "/opt/miniconda3/bin/python"
+
+
+def test_docker_runtime_requires_container_execution_metadata() -> None:
+    with pytest.raises(ValueError, match="container_image"):
+        ExecutionRuntime(
+            runtime_type="docker",
+            docker_executable=Path("docker.exe"),
+            container_python_executable="/usr/bin/python3.10",
+        )
+
+
+def test_docker_runtime_rejects_a_host_path_as_python() -> None:
+    with pytest.raises(ValueError, match="must not define python_executable"):
+        ExecutionRuntime(
+            runtime_type="docker",
+            python_executable=Path("docker.exe"),
+            docker_executable=Path("docker.exe"),
+            container_image="prepared:image",
+            container_python_executable="/usr/bin/python3.10",
+        )
