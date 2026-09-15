@@ -171,6 +171,46 @@ Runtime-smoke evidence is written append-only under
 `research/evidence/results/GS-E003/sprint3b/` with a distinct timestamped
 `runtime-smoke-*.json` filename.
 
+## Provider B0/O1 smoke
+
+The first provider-backed Track B check is a development smoke, not Gate B1.
+Its fixed task is `GS-T007`, the validated `GS-R014` transfer opportunity that
+also has the successful Sprint 3C-B runtime-smoke prerequisite. It performs
+exactly one B0 run and one O1 run, with fresh workspaces, run IDs, sessions,
+and SQLite step stores. B0 has no Oracle or Graph Swarm lookup; O1 uses only
+the frozen recovery pattern through `FrozenOracleResolver`.
+
+The complete workflow is:
+
+```text
+benchmark_prepare
+  -> benchmark_preflight
+  -> benchmark_runtime_smoke
+  -> provider B0/O1 smoke
+  -> full T006-T015 B0/O1 Gate B1 experiment
+```
+
+After the runtime smoke has emitted `AGENT_RUNTIME_SMOKE_READY`, run the
+provider smoke with the currently selected model configuration:
+
+```powershell
+& .\.venv\Scripts\python.exe -m graph_swarm.research.provider_smoke `
+  --project-root (Get-Location).Path `
+  --baseline-root (Join-Path (Get-Location).Path 'benchmark\workspaces') `
+  --execution-root (Join-Path (Get-Location).Path 'research\evidence\workspaces') `
+  --artifact-root (Join-Path (Get-Location).Path 'research\evidence\results')
+```
+
+The command succeeds only when the prepared environment marker is validated,
+the matching runtime-smoke artifact exists, both immutable run artifacts were
+written, B0 received zero Oracle advice, and O1 received its expected frozen
+one-shot intervention. Provider or infrastructure failures are recorded and
+the smoke fails without an automatic rerun. Objective success is reported but
+is not required for this development smoke. Summary files are append-only
+`provider-smoke-*.json` documents under
+`research/evidence/results/GS-E003/sprint3b/`; every summary explicitly keeps
+`gate_b1_evaluated` false.
+
 ## Troubleshooting
 
 - If Docker reports that the engine is unavailable, start the Linux engine and

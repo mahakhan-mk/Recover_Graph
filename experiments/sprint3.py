@@ -21,7 +21,7 @@ import sys
 import tempfile
 import tomllib
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,6 +36,7 @@ from graph_swarm.agent.tools.run_command import run_command, workspace_process_e
 from graph_swarm.agent.tools.run_tests import run_tests
 from graph_swarm.domain.behavior import BehaviorChangeEvidence
 from graph_swarm.domain.events import AgentEvent
+from graph_swarm.domain.tasks import Task
 from graph_swarm.research.benchmark_environments import (
     BenchmarkEnvironmentConfigurationError,
     BenchmarkEnvironmentPolicy,
@@ -57,6 +58,7 @@ from graph_swarm.research.runner import (
     ExperimentRunner,
     LoadedExperimentConfiguration,
     RecurrenceEvaluationRequired,
+    RecurrenceEvaluator,
     load_experiment_configuration,
     load_task_cases,
 )
@@ -375,7 +377,7 @@ def load_frozen_swesmith_cases(
 
 def make_recurrence_matcher(
     frozen_cases: Mapping[str, FrozenSWEsmithCase],
-):
+) -> RecurrenceEvaluator:
     """Match observed failed test output against frozen FAIL_TO_PASS IDs."""
 
     def determine(
@@ -1542,6 +1544,120 @@ def _require_validated_environments(
                 f"{case.task.id} benchmark environment is missing or unvalidated.\n"
                 + instruction
             )
+
+
+@dataclass(frozen=True)
+class PreparedProviderSmokeContext:
+    """One fixed transfer task with its already-prepared execution boundary."""
+
+    configuration: LoadedExperimentConfiguration
+    case: BenchmarkTaskCase
+    frozen_cases: Mapping[str, FrozenSWEsmithCase]
+    environment: IsolatedTaskEnvironment
+    objective: FrozenSWEsmithObjective
+    recurrence_evaluator: RecurrenceEvaluator
+    baseline_root: Path
+    execution_root: Path
+
+    def workspace_resolver_for(self, condition: ExperimentCondition) -> Callable[[Task], Path]:
+        """Create the existing fresh patched-workspace resolver for a condition."""
+        return cast(
+            Callable[[Task], Path],
+            _make_workspace_resolver(
+                source_root=self.baseline_root,
+                execution_root=self.execution_root,
+                frozen_cases=self.frozen_cases,
+                condition=condition,
+            ),
+        )
+
+
+def prepare_provider_smoke_context(
+    *,
+    project_root: Path,
+    baseline_root: Path,
+    execution_root: Path,
+    config_path: Path | None = None,
+    task_id: str = "GS-T007",
+) -> PreparedProviderSmokeContext:
+    """Load one validated transfer task without preparing or mutating its runtime."""
+    root = project_root.expanduser().resolve()
+    baseline = baseline_root.expanduser().resolve()
+    execution = execution_root.expanduser().resolve()
+    selected_config_path = config_path or root / "configs/experiments/rollout_3a_pilot.yaml"
+    configuration = _configured_runtime(
+        load_experiment_configuration(selected_config_path, project_root=root),
+        baseline,
+        execution,
+    )
+    if configuration.config.conditions != (ExperimentCondition.B0,):
+        raise BenchmarkPreflightError(
+            "provider smoke config must enable exactly B0; O1 is derived from the same contract"
+        )
+    try:
+        benchmark_policy = load_benchmark_environment_policy(
+            root / "configs/research/benchmark_environments.toml"
+        )
+    except BenchmarkEnvironmentConfigurationError as error:
+        raise BenchmarkPreflightError(str(error)) from error
+
+    cases = [
+        case
+        for case in load_task_cases(
+            configuration.task_manifest_path,
+            problem_statements_path=configuration.task_problems_path,
+        )
+        if case.task.id == task_id
+    ]
+    if len(cases) != 1:
+        raise BenchmarkPreflightError(
+            f"frozen provider smoke task {task_id} is missing or not unique"
+        )
+    case = cases[0]
+    if case.occurrence_index <= 1:
+        raise BenchmarkPreflightError(
+            f"provider smoke task {task_id} is not a frozen transfer opportunity"
+        )
+
+    _verify_baselines([case], baseline)
+    instance_ids = _manifest_instance_ids(configuration.task_manifest_path, [task_id])
+    container_images = _manifest_image_names(configuration.task_manifest_path, [task_id])
+    frozen_by_instance = load_frozen_swesmith_cases(
+        tuple(instance_ids.values()),
+        allow_network=False,
+    )
+    frozen = frozen_by_instance.get(instance_ids[task_id].lower())
+    if frozen is None:
+        raise BenchmarkPreflightError(f"frozen SWE-smith data is incomplete for {task_id}")
+    frozen_cases = {task_id: frozen}
+    _verify_frozen_patches([case], baseline, frozen_cases)
+    environments = _prepare_task_environments(
+        [case],
+        environment_root=execution / "sprint3-task-environments",
+        source_root=baseline,
+        dependency_overlays=TASK_DEPENDENCY_OVERLAYS,
+        container_images=container_images,
+        benchmark_policy=benchmark_policy,
+        benchmark_manifest_path=configuration.task_manifest_path,
+        mode="preflight",
+    )
+    _require_validated_environments([case], environments)
+    environment = environments[task_id]
+    if environment.runtime_type != "docker":
+        raise BenchmarkPreflightError("provider smoke requires the prepared Docker runtime")
+    if not environment.container_image or not environment.container_python_executable:
+        raise BenchmarkPreflightError("prepared Docker runtime metadata is incomplete")
+
+    return PreparedProviderSmokeContext(
+        configuration=configuration,
+        case=case,
+        frozen_cases=frozen_cases,
+        environment=environment,
+        objective=FrozenSWEsmithObjective(frozen_cases, {task_id: environment}),
+        recurrence_evaluator=make_recurrence_matcher(frozen_cases),
+        baseline_root=baseline,
+        execution_root=execution,
+    )
 
 
 def run_prepare(

@@ -32,10 +32,11 @@ from graph_swarm.research.runner import (
 
 @dataclass(frozen=True)
 class OracleTransferEvidence:
-    """Validated guidance attached to one frozen transfer task."""
+    """Validated guidance and source provenance for one frozen transfer task."""
 
     task_id: str
     recovery_pattern: str
+    review_id: str | None = None
 
 
 class FrozenOracleResolver:
@@ -55,7 +56,14 @@ class FrozenOracleResolver:
                 raise OracleEvidenceRequired(
                     "Oracle transfer evidence requires a task ID and recovery pattern"
                 )
-            normalized[task_id] = OracleTransferEvidence(task_id, pattern.strip())
+            review_id = evidence.review_id if isinstance(evidence, OracleTransferEvidence) else None
+            if review_id is not None and not review_id.strip():
+                raise OracleEvidenceRequired("Oracle transfer evidence has an empty review ID")
+            normalized[task_id] = OracleTransferEvidence(
+                task_id,
+                pattern.strip(),
+                review_id.strip() if review_id is not None else None,
+            )
         self._transfers = normalized
 
     @classmethod
@@ -64,7 +72,7 @@ class FrozenOracleResolver:
         manifest_path: Path,
         annotations_path: Path,
     ) -> FrozenOracleResolver:
-        """Load only validated recovery patterns for manifest transfer tasks."""
+        """Load validated recovery patterns and source review IDs for transfers."""
         try:
             manifest_records: list[dict[str, Any]] = []
             for line in manifest_path.read_text(encoding="utf-8").splitlines():
@@ -86,7 +94,7 @@ class FrozenOracleResolver:
                 f"could not load frozen Oracle evidence: {error}"
             ) from error
 
-        transfers: dict[str, str] = {}
+        transfers: dict[str, OracleTransferEvidence] = {}
         for record in manifest_records:
             occurrence_index = record.get("occurrence_index")
             if not isinstance(occurrence_index, int) or isinstance(occurrence_index, bool):
@@ -117,7 +125,11 @@ class FrozenOracleResolver:
                 raise OracleEvidenceRequired(
                     f"transfer task {task_id} has no validated recovery pattern"
                 )
-            transfers[task_id] = recovery_pattern
+            transfers[task_id] = OracleTransferEvidence(
+                task_id=task_id,
+                recovery_pattern=recovery_pattern,
+                review_id=review_id,
+            )
 
         return cls(transfers)
 
@@ -129,6 +141,16 @@ class FrozenOracleResolver:
             raise OracleEvidenceRequired(
                 f"O1 transfer task {case.task.id} has no validated Oracle evidence"
             )
+
+    def review_id_for(self, task_id: str) -> str | None:
+        """Return the frozen source review ID without exposing it to the model."""
+        evidence = self._transfers.get(task_id)
+        return None if evidence is None else evidence.review_id
+
+    def recovery_pattern_for(self, task_id: str) -> str | None:
+        """Return the frozen recovery pattern for evaluation-side comparison."""
+        evidence = self._transfers.get(task_id)
+        return None if evidence is None else evidence.recovery_pattern
 
     def evaluate_action(
         self,
