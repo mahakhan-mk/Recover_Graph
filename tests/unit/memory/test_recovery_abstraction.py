@@ -29,6 +29,7 @@ from graph_swarm.memory.recovery_abstraction import (
     abstract_and_persist_recovery_pattern,
     build_recovery_evidence_package,
     construct_recovery_pattern,
+    create_recovery_abstraction_agent,
     deterministic_recovery_pattern_id,
     validate_recovery_abstraction,
 )
@@ -186,7 +187,7 @@ def test_structured_output_is_typed_and_uses_frozen_model_configuration() -> Non
     )
 
     assert isinstance(pattern.title, str)
-    assert FROZEN_RECOVERY_MODEL == "openai/gpt-oss-120b"
+    assert FROZEN_RECOVERY_MODEL == "cohere/north-mini-code:free"
     assert RECOVERY_MODEL_SETTINGS == {"temperature": 0}
     repository.save_recovery_pattern.assert_called_once_with(pattern)
 
@@ -273,6 +274,9 @@ def test_deterministic_abstraction_validation_rejects_unusable_output(
     (
         ("Use task-001 when applying this lesson.", "source identifier"),
         ("Use environment-001 when applying this lesson.", "source identifier"),
+        ("Use failure-001 when applying this lesson.", "source identifier"),
+        ("Use resolution-001 when applying this lesson.", "source identifier"),
+        ("Use outcome-001 when applying this lesson.", "source identifier"),
         ("Edit src/example.py before rerunning the check.", "source path"),
         (
             "def compute(value):\n    total = value + 1\n    return total",
@@ -291,9 +295,7 @@ def test_source_specific_leakage_is_rejected_by_deterministic_category(
     )
     evidence = build_recovery_evidence_package(make_lineage())
     if category == "copied source fragment":
-        evidence = evidence.model_copy(
-            update={"recovery_action_arguments": {"content": guidance}}
-        )
+        evidence = evidence.model_copy(update={"recovery_action_arguments": {"content": guidance}})
 
     with pytest.raises(RecoveryAbstractionValidationError, match=category):
         validate_recovery_abstraction(output, evidence)
@@ -306,9 +308,28 @@ def test_generic_content_phrase_is_not_source_leakage() -> None:
         evidence_summary="The observed concrete change preceded a successful outcome.",
     )
 
-    assert validate_recovery_abstraction(
-        output, build_recovery_evidence_package(make_lineage())
-    ) == output
+    assert (
+        validate_recovery_abstraction(output, build_recovery_evidence_package(make_lineage()))
+        == output
+    )
+
+
+def test_supported_generic_flag_and_version_are_actionable_and_allowed() -> None:
+    output = RecoveryAbstractionOutput(
+        title="Align the test invocation with the observed correction",
+        guidance=(
+            "Use the quiet flag with pytest 8.0 when rerunning the focused check, "
+            "then compare the result with the expected behavior."
+        ),
+        evidence_summary=(
+            "The supported test configuration preceded an objective successful outcome."
+        ),
+    )
+
+    assert (
+        validate_recovery_abstraction(output, build_recovery_evidence_package(make_lineage()))
+        == output
+    )
 
 
 def test_rejected_abstraction_is_not_persisted() -> None:
@@ -329,12 +350,20 @@ def test_rejected_abstraction_is_not_persisted() -> None:
 def test_model_failure_is_explicit_and_does_not_persist() -> None:
     repository = Mock(spec=OperationalMemoryRepository)
 
-    with pytest.raises(RecoveryAbstractionModelError, match="Groq provider unavailable"):
+    with pytest.raises(RecoveryAbstractionModelError, match="OpenRouter provider unavailable"):
         abstract_and_persist_recovery_pattern(
             make_lineage(), repository, make_settings(api_key=None), created_at=NOW
         )
 
     repository.save_recovery_pattern.assert_not_called()
+
+
+def test_configured_openrouter_model_must_remain_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "another/model")
+
+    with pytest.raises(RecoveryAbstractionModelError, match="frozen"):
+        create_recovery_abstraction_agent(make_settings())
 
 
 def test_malformed_structured_output_is_explicit_and_does_not_persist() -> None:
@@ -406,8 +435,6 @@ def test_construct_rejects_untrusted_provenance_arguments() -> None:
 def test_evidence_package_rejects_invalid_source_chronology() -> None:
     with pytest.raises(ValidationError):
         RecoveryEvidencePackage.model_validate(
-            build_recovery_evidence_package(make_lineage()).model_dump(
-                mode="python"
-            )
+            build_recovery_evidence_package(make_lineage()).model_dump(mode="python")
             | {"source_chronological_index": -1}
         )

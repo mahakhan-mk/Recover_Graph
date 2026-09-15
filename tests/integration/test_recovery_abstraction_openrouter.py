@@ -20,11 +20,15 @@ from graph_swarm.graph.read_models import (
 from graph_swarm.graph.repository import OperationalMemoryRepository
 from graph_swarm.memory.recovery_abstraction import (
     FROZEN_RECOVERY_MODEL,
+    RecoveryAbstractionOutput,
     abstract_and_persist_recovery_pattern,
+    build_recovery_evidence_package,
+    deterministic_recovery_pattern_id,
+    validate_recovery_abstraction,
 )
 from graph_swarm.settings import get_settings
 
-RUN_GROQ_INTEGRATION = os.getenv("GRAPH_SWARM_RUN_GROQ_INTEGRATION") == "1"
+RUN_OPENROUTER_INTEGRATION = os.getenv("GRAPH_SWARM_RUN_OPENROUTER_INTEGRATION") == "1"
 NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
@@ -119,18 +123,39 @@ def make_live_evidence() -> RecoveryEvidenceLineage:
 
 @pytest.mark.integration
 @pytest.mark.skipif(
-    not RUN_GROQ_INTEGRATION,
-    reason="Set GRAPH_SWARM_RUN_GROQ_INTEGRATION=1 to run against Groq",
+    not RUN_OPENROUTER_INTEGRATION,
+    reason="Set GRAPH_SWARM_RUN_OPENROUTER_INTEGRATION=1 to run against OpenRouter",
 )
-def test_frozen_groq_recovery_abstraction_returns_typed_output() -> None:
+def test_frozen_openrouter_recovery_abstraction_returns_typed_output() -> None:
     repository = Mock(spec=OperationalMemoryRepository)
+    evidence = make_live_evidence()
     pattern = abstract_and_persist_recovery_pattern(
-        make_live_evidence(),
+        evidence,
         repository,
         get_settings(),
         created_at=NOW,
     )
 
+    assert FROZEN_RECOVERY_MODEL == "cohere/north-mini-code:free"
+    assert pattern.id == deterministic_recovery_pattern_id(
+        build_recovery_evidence_package(evidence)
+    )
+    assert pattern.title.strip()
+    assert pattern.guidance.strip()
+    assert pattern.evidence_summary.strip()
     assert pattern.source_failure_id == "failure-live-001"
-    assert FROZEN_RECOVERY_MODEL == "openai/gpt-oss-120b"
+    assert pattern.source_resolution_id == "resolution-live-001"
+    assert pattern.source_outcome_id == "outcome-live-001"
+    assert pattern.source_task_id == "task-live-001"
+    assert pattern.verification_status.value == "observed_successful"
+    assert pattern.evidence_count == 1
+    assert pattern.embedding is None
+    validate_recovery_abstraction(
+        RecoveryAbstractionOutput(
+            title=pattern.title,
+            guidance=pattern.guidance,
+            evidence_summary=pattern.evidence_summary,
+        ),
+        build_recovery_evidence_package(evidence),
+    )
     repository.save_recovery_pattern.assert_called_once_with(pattern)

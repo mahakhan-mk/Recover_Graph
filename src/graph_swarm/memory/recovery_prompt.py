@@ -1,6 +1,11 @@
 """Versioned prompts for grounded RecoveryPattern abstraction."""
 
-RECOVERY_ABSTRACTION_PROMPT_VERSION = "v1"
+# Prompt history is intentionally retained here rather than rewriting prior
+# audit artifacts that were generated under v1.
+# v1 = previous GPT-OSS development abstraction prompt.
+# v2 = North Mini Code abstraction prompt with tightened repository-specific
+# leakage instructions.
+RECOVERY_ABSTRACTION_PROMPT_VERSION = "v2"
 
 RECOVERY_ABSTRACTION_SYSTEM_PROMPT = """
 You are producing a concise operational recovery lesson from one bounded
@@ -34,10 +39,15 @@ action. The actionable guidance should describe a practical check or action
 to consider when similar operational conditions recur. It must not instruct
 the user to blindly repeat the exact historical patch.
 
-Generalize away repository-specific details where possible. Do not reproduce
-repository names, task IDs, benchmark labels, exact filenames, identifiers,
-gold solutions, patch text, or copied source code unless such information is
-strictly necessary to express the operational lesson.
+Never reproduce repository-specific paths, exact repository-specific
+filenames, repository names, task or source IDs, source code, patch contents,
+gold or evaluation information, secrets, or large literal action payloads.
+Generic operational parameters, flags, versions, dependency or configuration
+values, and parameter choices may be expressed only when they are directly
+supported by this bounded historical evidence, necessary for an actionable
+repository-independent lesson, and not repository-specific, secret,
+benchmark-derived, or future information. Do not blindly copy an action
+payload into the lesson.
 
 The evidence summary must describe only what was observed. It must not turn
 temporal sequence into a causal conclusion.

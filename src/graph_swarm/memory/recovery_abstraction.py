@@ -1,9 +1,10 @@
-"""Grounded RecoveryPattern abstraction through the frozen Groq model."""
+"""Grounded RecoveryPattern abstraction through the frozen OpenRouter model."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -13,8 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai import Agent, ModelSettings
 from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
 from pydantic_ai.models import Model
-from pydantic_ai.models.groq import GroqModel
-from pydantic_ai.providers.groq import GroqProvider
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from graph_swarm.domain.recovery_patterns import (
     EnvironmentConstraints,
@@ -30,7 +31,7 @@ from graph_swarm.memory.recovery_prompt import (
 )
 from graph_swarm.settings import Settings
 
-FROZEN_RECOVERY_MODEL = "openai/gpt-oss-120b"
+FROZEN_RECOVERY_MODEL = "cohere/north-mini-code:free"
 RECOVERY_MODEL_SETTINGS: ModelSettings = {"temperature": 0}
 
 
@@ -164,17 +165,24 @@ def create_recovery_abstraction_agent(
     *,
     model: Model | None = None,
 ) -> Agent[None, RecoveryAbstractionOutput]:
-    """Create the frozen GPT-OSS abstraction agent with test injection."""
+    """Create the frozen North Mini Code abstraction agent with test injection."""
     selected_model = model
     if selected_model is None:
-        if not settings.groq_api_key or not settings.groq_api_key.strip():
+        configured_model = os.getenv("OPENROUTER_MODEL")
+        if configured_model is not None and configured_model.strip() != FROZEN_RECOVERY_MODEL:
             raise RecoveryAbstractionModelError(
-                "Groq provider unavailable: groq_api_key must be supplied through "
-                "Settings or GROQ_API_KEY"
+                "OpenRouter model is frozen to "
+                f"{FROZEN_RECOVERY_MODEL!r}; configured OPENROUTER_MODEL does not match"
             )
-        selected_model = GroqModel(
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key or not api_key.strip():
+            raise RecoveryAbstractionModelError(
+                "OpenRouter provider unavailable: OPENROUTER_API_KEY must be supplied "
+                "through the environment"
+            )
+        selected_model = OpenAIChatModel(
             FROZEN_RECOVERY_MODEL,
-            provider=GroqProvider(api_key=settings.groq_api_key),
+            provider=OpenRouterProvider(api_key=api_key),
         )
     return Agent(
         selected_model,
@@ -207,11 +215,11 @@ def _run_structured_abstraction(
         return agent.run_sync(_evidence_prompt(evidence)).output
     except ModelAPIError as error:
         raise RecoveryAbstractionModelError(
-            f"GPT-OSS/Groq abstraction failed: {error}"
+            f"North Mini Code/OpenRouter abstraction failed: {error}"
         ) from error
     except UnexpectedModelBehavior as error:
         raise RecoveryAbstractionStructuredOutputError(
-            f"GPT-OSS returned invalid structured abstraction output: {error}"
+            f"North Mini Code returned invalid structured abstraction output: {error}"
         ) from error
 
 
@@ -264,9 +272,7 @@ def validate_recovery_abstraction(
     for field_name in ("title", "guidance", "evidence_summary"):
         value = getattr(output, field_name)
         if not isinstance(value, str) or not value.strip():
-            raise RecoveryAbstractionValidationError(
-                f"abstraction {field_name} must be non-empty"
-            )
+            raise RecoveryAbstractionValidationError(f"abstraction {field_name} must be non-empty")
 
     normalized_guidance = _normalized_text(output.guidance)
     if normalized_guidance in _GENERIC_GUIDANCE:
@@ -286,10 +292,14 @@ def validate_recovery_abstraction(
     forbidden_source_fragments: dict[str, set[str]] = {
         "source identifier": {
             evidence.source_task_id,
+            evidence.source_failure_id,
+            evidence.source_resolution_id,
+            evidence.source_outcome_id,
             evidence.source_environment_id,
         },
         "source path": set(),
         "copied source fragment": set(),
+        "large literal action payload": set(),
     }
 
     def iter_string_values(value: object) -> list[str]:
@@ -341,6 +351,9 @@ def validate_recovery_abstraction(
             for item in iter_string_values(value):
                 if is_substantial_copied_material(item):
                     forbidden_source_fragments["copied source fragment"].add(item)
+        for item in iter_string_values(value):
+            if len(item.strip()) >= 120 or len(item.splitlines()) >= 3:
+                forbidden_source_fragments["large literal action payload"].add(item)
         if isinstance(value, Mapping):
             mapping = cast(Mapping[object, object], value)
             for nested_key, nested_value in mapping.items():

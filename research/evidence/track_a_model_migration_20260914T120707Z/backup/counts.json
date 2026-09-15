@@ -1,0 +1,485 @@
+{
+  "branch": "research/recovery-memory-v2",
+  "exported": {
+    "embedded_recovery_pattern_count": 0,
+    "node_count": 10,
+    "recovery_pattern_count": 0,
+    "relationship_count": 6
+  },
+  "observed": {
+    "constraints": [
+      {
+        "classification": "undesignated",
+        "createStatement": "CREATE CONSTRAINT `action_id_unique` FOR (n:`Action`) REQUIRE (n.`id`) IS UNIQUE",
+        "enforcedLabel": null,
+        "entityType": "NODE",
+        "id": 7,
+        "labelsOrTypes": [
+          "Action"
+        ],
+        "name": "action_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "ownedIndex": "action_id_unique",
+        "properties": [
+          "id"
+        ],
+        "propertyType": null,
+        "type": "NODE_PROPERTY_UNIQUENESS"
+      },
+      {
+        "classification": "undesignated",
+        "createStatement": "CREATE CONSTRAINT `environment_id_unique` FOR (n:`Environment`) REQUIRE (n.`id`) IS UNIQUE",
+        "enforcedLabel": null,
+        "entityType": "NODE",
+        "id": 15,
+        "labelsOrTypes": [
+          "Environment"
+        ],
+        "name": "environment_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "ownedIndex": "environment_id_unique",
+        "properties": [
+          "id"
+        ],
+        "propertyType": null,
+        "type": "NODE_PROPERTY_UNIQUENESS"
+      },
+      {
+        "classification": "undesignated",
+        "createStatement": "CREATE CONSTRAINT `failure_id_unique` FOR (n:`FailureEpisode`) REQUIRE (n.`id`) IS UNIQUE",
+        "enforcedLabel": null,
+        "entityType": "NODE",
+        "id": 9,
+        "labelsOrTypes": [
+          "FailureEpisode"
+        ],
+        "name": "failure_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "ownedIndex": "failure_id_unique",
+        "properties": [
+          "id"
+        ],
+        "propertyType": null,
+        "type": "NODE_PROPERTY_UNIQUENESS"
+      },
+      {
+        "classification": "undesignated",
+        "createStatement": "CREATE CONSTRAINT `outcome_id_unique` FOR (n:`Outcome`) REQUIRE (n.`id`) IS UNIQUE",
+        "enforcedLabel": null,
+        "entityType": "NODE",
+        "id": 17,
+        "labelsOrTypes": [
+          "Outcome"
+        ],
+        "name": "outcome_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "ownedIndex": "outcome_id_unique",
+        "properties": [
+          "id"
+        ],
+        "propertyType": null,
+        "type": "NODE_PROPERTY_UNIQUENESS"
+      },
+      {
+        "classification": "undesignated",
+        "createStatement": "CREATE CONSTRAINT `resolution_id_unique` FOR (n:`Resolution`) REQUIRE (n.`id`) IS UNIQUE",
+        "enforcedLabel": null,
+        "entityType": "NODE",
+        "id": 11,
+        "labelsOrTypes": [
+          "Resolution"
+        ],
+        "name": "resolution_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "ownedIndex": "resolution_id_unique",
+        "properties": [
+          "id"
+        ],
+        "propertyType": null,
+        "type": "NODE_PROPERTY_UNIQUENESS"
+      },
+      {
+        "classification": "undesignated",
+        "createStatement": "CREATE CONSTRAINT `run_id_unique` FOR (n:`Run`) REQUIRE (n.`id`) IS UNIQUE",
+        "enforcedLabel": null,
+        "entityType": "NODE",
+        "id": 3,
+        "labelsOrTypes": [
+          "Run"
+        ],
+        "name": "run_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "ownedIndex": "run_id_unique",
+        "properties": [
+          "id"
+        ],
+        "propertyType": null,
+        "type": "NODE_PROPERTY_UNIQUENESS"
+      },
+      {
+        "classification": "undesignated",
+        "createStatement": "CREATE CONSTRAINT `task_id_unique` FOR (n:`Task`) REQUIRE (n.`id`) IS UNIQUE",
+        "enforcedLabel": null,
+        "entityType": "NODE",
+        "id": 5,
+        "labelsOrTypes": [
+          "Task"
+        ],
+        "name": "task_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "ownedIndex": "task_id_unique",
+        "properties": [
+          "id"
+        ],
+        "propertyType": null,
+        "type": "NODE_PROPERTY_UNIQUENESS"
+      },
+      {
+        "classification": "undesignated",
+        "createStatement": "CREATE CONSTRAINT `tool_name_unique` FOR (n:`Tool`) REQUIRE (n.`name`) IS UNIQUE",
+        "enforcedLabel": null,
+        "entityType": "NODE",
+        "id": 13,
+        "labelsOrTypes": [
+          "Tool"
+        ],
+        "name": "tool_name_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "ownedIndex": "tool_name_unique",
+        "properties": [
+          "name"
+        ],
+        "propertyType": null,
+        "type": "NODE_PROPERTY_UNIQUENESS"
+      }
+    ],
+    "embedded_recovery_pattern_count": 0,
+    "indexes": [
+      {
+        "createStatement": "CREATE CONSTRAINT `action_id_unique` FOR (n:`Action`) REQUIRE (n.`id`) IS UNIQUE",
+        "entityType": "NODE",
+        "failureMessage": "",
+        "id": 6,
+        "indexProvider": "range-1.0",
+        "labelsOrTypes": [
+          "Action"
+        ],
+        "lastRead": "2026-09-14T11:48:05.852000000+00:00",
+        "name": "action_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "owningConstraint": "action_id_unique",
+        "populationPercent": 100.0,
+        "properties": [
+          "id"
+        ],
+        "readCount": 1094,
+        "state": "ONLINE",
+        "trackedSince": "2026-08-18T11:12:18.104000000+00:00",
+        "type": "RANGE"
+      },
+      {
+        "createStatement": "CREATE CONSTRAINT `environment_id_unique` FOR (n:`Environment`) REQUIRE (n.`id`) IS UNIQUE",
+        "entityType": "NODE",
+        "failureMessage": "",
+        "id": 14,
+        "indexProvider": "range-1.0",
+        "labelsOrTypes": [
+          "Environment"
+        ],
+        "lastRead": "2026-09-14T11:46:48.709000000+00:00",
+        "name": "environment_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "owningConstraint": "environment_id_unique",
+        "populationPercent": 100.0,
+        "properties": [
+          "id"
+        ],
+        "readCount": 367,
+        "state": "ONLINE",
+        "trackedSince": "2026-08-18T11:12:19.187000000+00:00",
+        "type": "RANGE"
+      },
+      {
+        "createStatement": "CREATE CONSTRAINT `failure_id_unique` FOR (n:`FailureEpisode`) REQUIRE (n.`id`) IS UNIQUE",
+        "entityType": "NODE",
+        "failureMessage": "",
+        "id": 8,
+        "indexProvider": "range-1.0",
+        "labelsOrTypes": [
+          "FailureEpisode"
+        ],
+        "lastRead": "2026-09-14T11:46:51.675000000+00:00",
+        "name": "failure_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "owningConstraint": "failure_id_unique",
+        "populationPercent": 100.0,
+        "properties": [
+          "id"
+        ],
+        "readCount": 620,
+        "state": "ONLINE",
+        "trackedSince": "2026-08-18T11:12:18.362000000+00:00",
+        "type": "RANGE"
+      },
+      {
+        "createStatement": "CREATE LOOKUP INDEX `index_1b9dcc97` FOR ()-[r]-() ON EACH type(r)",
+        "entityType": "RELATIONSHIP",
+        "failureMessage": "",
+        "id": 1,
+        "indexProvider": "token-lookup-1.0",
+        "labelsOrTypes": null,
+        "lastRead": "2026-09-14T11:46:17.455000000+00:00",
+        "name": "index_1b9dcc97",
+        "options": {
+          "indexConfig": {}
+        },
+        "owningConstraint": null,
+        "populationPercent": 100.0,
+        "properties": null,
+        "readCount": 58,
+        "state": "ONLINE",
+        "trackedSince": "2026-08-17T06:13:03.593000000+00:00",
+        "type": "LOOKUP"
+      },
+      {
+        "createStatement": "CREATE LOOKUP INDEX `index_460996c0` FOR (n) ON EACH labels(n)",
+        "entityType": "NODE",
+        "failureMessage": "",
+        "id": 0,
+        "indexProvider": "token-lookup-1.0",
+        "labelsOrTypes": null,
+        "lastRead": "2026-09-14T11:47:24.664000000+00:00",
+        "name": "index_460996c0",
+        "options": {
+          "indexConfig": {}
+        },
+        "owningConstraint": null,
+        "populationPercent": 100.0,
+        "properties": null,
+        "readCount": 48,
+        "state": "ONLINE",
+        "trackedSince": "2026-08-17T06:13:03.592000000+00:00",
+        "type": "LOOKUP"
+      },
+      {
+        "createStatement": "CREATE CONSTRAINT `outcome_id_unique` FOR (n:`Outcome`) REQUIRE (n.`id`) IS UNIQUE",
+        "entityType": "NODE",
+        "failureMessage": "",
+        "id": 16,
+        "indexProvider": "range-1.0",
+        "labelsOrTypes": [
+          "Outcome"
+        ],
+        "lastRead": "2026-09-14T11:46:49.144000000+00:00",
+        "name": "outcome_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "owningConstraint": "outcome_id_unique",
+        "populationPercent": 100.0,
+        "properties": [
+          "id"
+        ],
+        "readCount": 259,
+        "state": "ONLINE",
+        "trackedSince": "2026-08-18T11:12:19.516000000+00:00",
+        "type": "RANGE"
+      },
+      {
+        "createStatement": "CREATE VECTOR INDEX `recovery_pattern_embedding_idx` FOR (n:`RecoveryPattern`) ON (n.`embedding`) OPTIONS {indexConfig: {`vector.default_search_expansion_factor`: 3.0,`vector.dimensions`: 384,`vector.hnsw.ef_construction`: 100,`vector.hnsw.m`: 16,`vector.quantization.type`: 'BINARY',`vector.similarity_function`: 'COSINE'}}",
+        "entityType": "NODE",
+        "failureMessage": "",
+        "id": 18,
+        "indexProvider": "vector-2026.08",
+        "labelsOrTypes": [
+          "RecoveryPattern"
+        ],
+        "lastRead": "2026-09-14T11:46:52.451000000+00:00",
+        "name": "recovery_pattern_embedding_idx",
+        "options": {
+          "indexConfig": {
+            "vector.default_search_expansion_factor": 3.0,
+            "vector.dimensions": 384,
+            "vector.hnsw.ef_construction": 100,
+            "vector.hnsw.m": 16,
+            "vector.quantization.type": "BINARY",
+            "vector.similarity_function": "COSINE"
+          }
+        },
+        "owningConstraint": null,
+        "populationPercent": 100.0,
+        "properties": [
+          "embedding"
+        ],
+        "readCount": 6,
+        "state": "ONLINE",
+        "trackedSince": "2026-09-12T16:57:17.495000000+00:00",
+        "type": "VECTOR"
+      },
+      {
+        "createStatement": "CREATE CONSTRAINT `resolution_id_unique` FOR (n:`Resolution`) REQUIRE (n.`id`) IS UNIQUE",
+        "entityType": "NODE",
+        "failureMessage": "",
+        "id": 10,
+        "indexProvider": "range-1.0",
+        "labelsOrTypes": [
+          "Resolution"
+        ],
+        "lastRead": "2026-09-14T11:46:50.421000000+00:00",
+        "name": "resolution_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "owningConstraint": "resolution_id_unique",
+        "populationPercent": 100.0,
+        "properties": [
+          "id"
+        ],
+        "readCount": 388,
+        "state": "ONLINE",
+        "trackedSince": "2026-08-18T11:12:18.621000000+00:00",
+        "type": "RANGE"
+      },
+      {
+        "createStatement": "CREATE CONSTRAINT `run_id_unique` FOR (n:`Run`) REQUIRE (n.`id`) IS UNIQUE",
+        "entityType": "NODE",
+        "failureMessage": "",
+        "id": 2,
+        "indexProvider": "range-1.0",
+        "labelsOrTypes": [
+          "Run"
+        ],
+        "lastRead": "2026-09-14T11:46:50.219000000+00:00",
+        "name": "run_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "owningConstraint": "run_id_unique",
+        "populationPercent": 100.0,
+        "properties": [
+          "id"
+        ],
+        "readCount": 456,
+        "state": "ONLINE",
+        "trackedSince": "2026-08-18T11:12:17.490000000+00:00",
+        "type": "RANGE"
+      },
+      {
+        "createStatement": "CREATE CONSTRAINT `task_id_unique` FOR (n:`Task`) REQUIRE (n.`id`) IS UNIQUE",
+        "entityType": "NODE",
+        "failureMessage": "",
+        "id": 4,
+        "indexProvider": "range-1.0",
+        "labelsOrTypes": [
+          "Task"
+        ],
+        "lastRead": "2026-09-14T11:46:49.785000000+00:00",
+        "name": "task_id_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "owningConstraint": "task_id_unique",
+        "populationPercent": 100.0,
+        "properties": [
+          "id"
+        ],
+        "readCount": 460,
+        "state": "ONLINE",
+        "trackedSince": "2026-08-18T11:12:17.750000000+00:00",
+        "type": "RANGE"
+      },
+      {
+        "createStatement": "CREATE CONSTRAINT `tool_name_unique` FOR (n:`Tool`) REQUIRE (n.`name`) IS UNIQUE",
+        "entityType": "NODE",
+        "failureMessage": "",
+        "id": 12,
+        "indexProvider": "range-1.0",
+        "labelsOrTypes": [
+          "Tool"
+        ],
+        "lastRead": "2026-09-14T11:46:50.005000000+00:00",
+        "name": "tool_name_unique",
+        "options": {
+          "indexConfig": {}
+        },
+        "owningConstraint": "tool_name_unique",
+        "populationPercent": 100.0,
+        "properties": [
+          "name"
+        ],
+        "readCount": 465,
+        "state": "ONLINE",
+        "trackedSince": "2026-08-18T11:12:18.909000000+00:00",
+        "type": "RANGE"
+      }
+    ],
+    "label_counts": {
+      "Action": 3,
+      "FailureEpisode": 1,
+      "Outcome": 1,
+      "Resolution": 1,
+      "Tool": 4
+    },
+    "node_count": 10,
+    "recovery_pattern_count": 0,
+    "relationship_count": 6,
+    "relationship_type_counts": {
+      "PART_OF_FAILURE": 1,
+      "RESOLVED_BY": 1,
+      "USED": 3,
+      "VERIFIED_BY": 1
+    },
+    "server": [
+      {
+        "edition": "enterprise",
+        "name": "Neo4j Kernel",
+        "versions": [
+          "5.27-aura"
+        ]
+      },
+      {
+        "edition": "",
+        "name": "Cypher",
+        "versions": [
+          "5",
+          "25"
+        ]
+      }
+    ]
+  },
+  "starting_sha": "625b24e95221b82a57fcf6f43b47c48a62dc604b",
+  "verification": {
+    "checksums_match": true,
+    "credentials_absent": true,
+    "embedded_recovery_pattern_count_matches": true,
+    "export_outside_temp": true,
+    "json_and_jsonl_parse": true,
+    "manifest_branch_and_sha_present": true,
+    "node_count_matches": true,
+    "records_not_truncated": true,
+    "recovery_pattern_count_matches": true,
+    "relationship_count_matches": true
+  }
+}
