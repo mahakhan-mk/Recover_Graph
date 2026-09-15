@@ -25,7 +25,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
@@ -188,6 +188,8 @@ class FrozenSWEsmithObjective:
                 f"type=bind,source={workspace.resolve()},target=/workspace",
                 "--workdir",
                 "/workspace",
+                "--env",
+                "PYTHONPATH=/workspace/src:/workspace",
                 environment.container_image,
                 container_python,
                 *pytest_arguments,
@@ -263,7 +265,12 @@ class FrozenSWEsmithObjective:
         if observation.status != "test_failure" or observation.return_code == 0:
             raise BenchmarkPreflightError(
                 f"SWE-smith preflight for {task.id} did not produce the expected "
-                "mutated test failure"
+                "mutated test failure:\n"
+                f"return_code={observation.return_code}\n"
+                f"status={observation.status}\n"
+                f"command={observation.command!r}\n"
+                f"stdout:\n{observation.stdout[-4000:] or '<empty>'}\n"
+                f"stderr:\n{observation.stderr[-4000:] or '<empty>'}"
             )
         self.environments[task.id].mark_validated()
         if len(self.observations) != before + 1:  # pragma: no cover - defensive invariant
@@ -275,6 +282,8 @@ class FrozenSWEsmithObjective:
 
 def load_frozen_swesmith_cases(
     instance_ids: Sequence[str],
+    *,
+    allow_network: bool = True,
 ) -> dict[str, FrozenSWEsmithCase]:
     """Load only frozen objective test IDs from the published benchmark data."""
     target_ids = {instance_id.lower() for instance_id in instance_ids}
@@ -303,8 +312,18 @@ def load_frozen_swesmith_cases(
                         tests,
                         patch,
                     )
+        missing = sorted(target_ids - set(cases))
+        if missing:
+            raise BenchmarkPreflightError(
+                "frozen SWE-smith objective data is incomplete: " + ", ".join(missing)
+            )
         return cases
 
+    if not allow_network:
+        raise BenchmarkPreflightError(
+            "frozen SWE-smith objective data is not available locally; "
+            "acquire the frozen benchmark data before benchmark_preflight"
+        )
     datasets_module: Any = importlib.import_module("datasets")
     load_dataset: Any = datasets_module.load_dataset
     dataset: Any = load_dataset(
@@ -321,6 +340,11 @@ def load_frozen_swesmith_cases(
         patch = row.get("patch")
         if tests and isinstance(patch, str) and patch.strip():
             cases[instance_id.lower()] = FrozenSWEsmithCase(instance_id, tests, patch)
+    missing = sorted(target_ids - set(cases))
+    if missing:
+        raise BenchmarkPreflightError(
+            "frozen SWE-smith objective data is incomplete: " + ", ".join(missing)
+        )
     return cases
 
 
@@ -842,37 +866,49 @@ def _prepared_dockerfile(
         raise BenchmarkPreflightError(
             f"base container image digest is invalid for {repository.name}: {base_image_digest}"
         )
-    commands = ["set -eu"]
-    for key, value in plan.environment:
-        commands.append(f"export {key}={shlex.quote(value)}")
     python = shlex.quote(python_executable)
-    commands.append(
-        f"{python} -m pip install --disable-pip-version-check pytest"
-    )
-    for requirement_file in plan.requirement_files:
-        relative = requirement_file.resolve().relative_to(repository.resolve()).as_posix()
-        commands.append(
-            f"{python} -m pip install --disable-pip-version-check "
-            f"--requirement {shlex.quote('/workspace/' + relative)}"
+    pip = f"{python} -m pip install --disable-pip-version-check"
+    pip_cache = "--mount=type=cache,target=/root/.cache/pip"
+    lines = [
+        "# syntax=docker/dockerfile:1.7",
+        f"FROM {base_image}@{digest}",
+        *[f"ENV {key}={json.dumps(value)}" for key, value in plan.environment],
+        "WORKDIR /workspace",
+        # Keep the test runner independent from repository dependency changes.
+        f"RUN {pip_cache} {pip} pytest",
+    ]
+
+    requirement_relatives = [
+        requirement_file.resolve().relative_to(repository.resolve()).as_posix()
+        for requirement_file in plan.requirement_files
+    ]
+    for relative in requirement_relatives:
+        # Copy requirement manifests before the full source tree so a later
+        # package-install failure does not invalidate successful requirements.
+        lines.append(f"COPY {shlex.quote(relative)} /workspace/{relative}")
+    if requirement_relatives:
+        requirement_commands = " && ".join(
+            f"{pip} --requirement {shlex.quote('/workspace/' + relative)}"
+            for relative in requirement_relatives
         )
+        lines.append(f"RUN {pip_cache} {requirement_commands}")
+    else:
+        lines.append("RUN true")
+
+    # The package layer is intentionally after the repository requirements.
+    # Source edits therefore invalidate only this layer and later overlays.
+    lines.append("COPY . /workspace")
     extras = ",".join(plan.package_extras)
     package_spec = f"/workspace[{extras}]" if extras else "/workspace"
-    commands.append(
-        f"{python} -m pip install --disable-pip-version-check {shlex.quote(package_spec)}"
-    )
-    for overlay in plan.overlays:
-        commands.append(
-            f"{python} -m pip install --disable-pip-version-check {shlex.quote(overlay)}"
+    lines.append(f"RUN {pip_cache} {pip} {shlex.quote(package_spec)}")
+    if plan.overlays:
+        overlay_commands = " && ".join(
+            f"{pip} {shlex.quote(overlay)}" for overlay in plan.overlays
         )
-    return "\n".join(
-        [
-            f"FROM {base_image}@{digest}",
-            *[f"ENV {key}={json.dumps(value)}" for key, value in plan.environment],
-            "WORKDIR /workspace",
-            "COPY . /workspace",
-            "RUN " + " && ".join(commands),
-        ]
-    ) + "\n"
+        lines.append(f"RUN {pip_cache} {overlay_commands}")
+    else:
+        lines.append("RUN true")
+    return "\n".join(lines) + "\n"
 
 
 def _prepare_docker_image(
@@ -921,6 +957,8 @@ def _container_environment(
     plan: DependencyInstallPlan,
     benchmark_policy: BenchmarkEnvironmentPolicy,
     benchmark_manifest_path: Path | None = None,
+    *,
+    prepare: bool = True,
 ) -> IsolatedTaskEnvironment:
     available, detail = _docker_engine_status()
     if not available:
@@ -929,6 +967,17 @@ def _container_environment(
             "no host-Python fallback is permitted"
         )
     docker = shutil.which("docker") or "docker"
+    if not prepare:
+        return _load_prepared_container_environment(
+            environment_root=environment_root,
+            task_id=task_id,
+            repository=repository,
+            image=image,
+            plan=plan,
+            benchmark_policy=benchmark_policy,
+            benchmark_manifest_path=benchmark_manifest_path,
+            docker=docker,
+        )
     base_image_digest = _docker_base_image_digest(image, task_id)
     repository_constraints = _python_constraints(repository)
     try:
@@ -946,15 +995,6 @@ def _container_environment(
             f"{task_policy.python_constraint_assertion or 'any Python version'}"
         ),
     )
-    compatible = (container_interpreter,)
-    if not compatible:
-        raise BenchmarkPreflightError(
-            f"no compatible Python interpreter in container for {task_id}: "
-            f"requires {constraints or 'any Python version'}; available: "
-            + ", ".join(
-                f"{item.executable} ({item.version})" for item in container_interpreters
-            )
-        )
     container_python_executable = str(container_interpreter.executable).replace("\\", "/")
     version = container_interpreter.version
     interpreter = PythonInterpreter(
@@ -982,7 +1022,7 @@ def _container_environment(
             metadata = None
         if (
             isinstance(metadata, dict)
-            and cast(dict[str, Any], metadata).get("validated") is True
+            and cast(dict[str, Any], metadata).get("validated") in (False, True)
             and cast(dict[str, Any], metadata).get("environment_fingerprint") == fingerprint
             and cast(dict[str, Any], metadata).get("python_version") == version
             and cast(dict[str, Any], metadata).get("runtime_type") == "docker"
@@ -1069,6 +1109,101 @@ def _container_environment(
     )
 
 
+def _load_prepared_container_environment(
+    *,
+    environment_root: Path,
+    task_id: str,
+    repository: Path,
+    image: str,
+    plan: DependencyInstallPlan,
+    benchmark_policy: BenchmarkEnvironmentPolicy,
+    benchmark_manifest_path: Path | None,
+    docker: str,
+) -> IsolatedTaskEnvironment:
+    """Load an existing prepared image without base-image execution or builds."""
+    for marker in sorted((environment_root / task_id).glob("*/environment.json")):
+        try:
+            raw: Any = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        metadata = cast(dict[str, Any], raw)
+        if (
+            metadata.get("task_id") != task_id
+            or metadata.get("runtime_type") != "docker"
+            or metadata.get("validated") not in (False, True)
+            or metadata.get("base_container_image") != image
+            or not isinstance(metadata.get("base_image_digest"), str)
+            or not isinstance(metadata.get("container_python_executable"), str)
+            or not isinstance(metadata.get("python_version"), str)
+        ):
+            continue
+        version = str(metadata["python_version"])
+        try:
+            repository_constraints = _python_constraints(repository)
+            task_policy = benchmark_policy.task(task_id)
+            constraints = effective_python_constraints(task_policy, repository_constraints)
+            if Version(version) not in constraints:
+                continue
+        except (BenchmarkEnvironmentConfigurationError, BenchmarkPreflightError):
+            continue
+        interpreter = PythonInterpreter(
+            Path(
+                "docker://"
+                + image
+                + str(metadata["container_python_executable"])
+            ),
+            version,
+        )
+        try:
+            fingerprint = _dependency_fingerprint(
+                repository,
+                interpreter,
+                plan,
+                runtime_type="docker",
+                base_image_digest=str(metadata["base_image_digest"]),
+                benchmark_policy=benchmark_policy,
+                benchmark_manifest_path=benchmark_manifest_path,
+            )
+        except BenchmarkPreflightError:
+            continue
+        prepared_image_tag = f"graph-swarm/sprint3b-{task_id.lower()}:{fingerprint}"
+        if (
+            metadata.get("environment_fingerprint") != fingerprint
+            or metadata.get("container_image") != prepared_image_tag
+            or marker.parent.name != fingerprint
+        ):
+            continue
+        inspected = subprocess.run(
+            [docker, "image", "inspect", prepared_image_tag],
+            check=False,
+            capture_output=True,
+            timeout=60,
+        )
+        if inspected.returncode != 0:
+            continue
+        return IsolatedTaskEnvironment(
+            task_id,
+            Path(docker).resolve(),
+            marker,
+            version,
+            fingerprint,
+            "docker",
+            prepared_image_tag,
+            plan,
+            repository,
+            str(metadata["container_python_executable"]),
+            image,
+            benchmark_policy.path,
+            benchmark_manifest_path,
+        )
+    raise BenchmarkPreflightError(
+        f"{task_id} prepared benchmark environment is missing.\n"
+        "Run benchmark_prepare before benchmark_preflight."
+    )
+
+
 def _isolated_python(
     environment_root: Path,
     task_id: str,
@@ -1114,7 +1249,7 @@ def _isolated_python(
             raw_metadata = None
         if (
             isinstance(raw_metadata, dict)
-            and cast(dict[str, Any], raw_metadata).get("validated") is True
+            and cast(dict[str, Any], raw_metadata).get("validated") in (False, True)
             and cast(dict[str, Any], raw_metadata).get("environment_fingerprint") == fingerprint
             and cast(dict[str, Any], raw_metadata).get("python_version") == interpreter.version
             and cast(dict[str, Any], raw_metadata).get("python_executable") == str(executable)
@@ -1184,66 +1319,66 @@ def _prepare_task_environments(
     container_images: Mapping[str, str] | None = None,
     benchmark_policy: BenchmarkEnvironmentPolicy | None = None,
     benchmark_manifest_path: Path | None = None,
+    mode: Literal["prepare", "preflight"] = "prepare",
 ) -> dict[str, IsolatedTaskEnvironment]:
     if benchmark_policy is None:
         raise BenchmarkPreflightError("validated benchmark environment policy is required")
     environments: dict[str, IsolatedTaskEnvironment] = {}
     for case in cases:
         repository = (source_root / case.task.repository).resolve()
-        try:
-            constraints = _python_constraints(repository)
-            task_policy = reconcile_task_policy(benchmark_policy, case.task.id, constraints)
-            plan = _dependency_install_plan(
-                repository,
-                task_id=case.task.id,
-                overlays=dependency_overlays,
-                required_extras=task_policy.required_extras,
-            )
-            if task_policy.runtime == "manifest_container_required":
+        constraints = _python_constraints(repository)
+        task_policy = reconcile_task_policy(benchmark_policy, case.task.id, constraints)
+        plan = _dependency_install_plan(
+            repository,
+            task_id=case.task.id,
+            overlays=dependency_overlays,
+            required_extras=task_policy.required_extras,
+        )
+        image = (container_images or {}).get(case.task.id)
+        if task_policy.runtime == "manifest_container_required":
+            if not image:
                 raise BenchmarkPreflightError(
-                    f"benchmark policy requires the manifest container for {case.task.id}"
+                    f"frozen manifest container image is missing for {case.task.id}"
                 )
-            interpreter = _select_python_interpreter(repository, case.task.id)
-            executable, marker = _isolated_python(
+            environments[case.task.id] = _container_environment(
                 environment_root,
                 case.task.id,
                 repository,
-                dependency_overlays=dependency_overlays,
+                image,
+                plan,
+                benchmark_policy,
+                benchmark_manifest_path,
+                prepare=mode == "prepare",
+            )
+            continue
+
+        if mode == "preflight":
+            raise BenchmarkPreflightError(
+                f"{case.task.id} has no prepared manifest container environment"
+            )
+        interpreter = _select_python_interpreter(repository, case.task.id)
+        executable, marker = _isolated_python(
+            environment_root,
+            case.task.id,
+            repository,
+            dependency_overlays=dependency_overlays,
+            benchmark_policy=benchmark_policy,
+            benchmark_manifest_path=benchmark_manifest_path,
+            required_extras=task_policy.required_extras,
+        )
+        environments[case.task.id] = IsolatedTaskEnvironment(
+            case.task.id,
+            executable,
+            marker,
+            interpreter.version,
+            _dependency_fingerprint(
+                repository,
+                interpreter,
+                plan,
                 benchmark_policy=benchmark_policy,
                 benchmark_manifest_path=benchmark_manifest_path,
-                required_extras=task_policy.required_extras,
-            )
-            environments[case.task.id] = IsolatedTaskEnvironment(
-                case.task.id,
-                executable,
-                marker,
-                interpreter.version,
-                _dependency_fingerprint(
-                    repository,
-                    interpreter,
-                    plan,
-                    benchmark_policy=benchmark_policy,
-                    benchmark_manifest_path=benchmark_manifest_path,
-                ),
-            )
-        except BenchmarkPreflightError as local_error:
-            image = (container_images or {}).get(case.task.id)
-            if not image:
-                raise
-            try:
-                environments[case.task.id] = _container_environment(
-                    environment_root,
-                    case.task.id,
-                    repository,
-                    image,
-                    plan,
-                    benchmark_policy,
-                    benchmark_manifest_path,
-                )
-            except BenchmarkPreflightError as container_error:
-                raise BenchmarkPreflightError(
-                    f"{local_error}; approved container path also failed: {container_error}"
-                ) from container_error
+            ),
+        )
     return environments
 
 
@@ -1345,14 +1480,53 @@ def _apply_patch(
         patch_path.unlink(missing_ok=True)
 
 
-def run_preflight(
+def _require_validated_environments(
+    cases: Sequence[BenchmarkTaskCase],
+    environments: Mapping[str, IsolatedTaskEnvironment],
+) -> None:
+    """Enforce the prepared-and-validated barrier before B0/O1 can run."""
+    for case in cases:
+        environment = environments.get(case.task.id)
+        metadata: Any = None
+        if environment is not None and environment.validation_marker is not None:
+            try:
+                metadata = json.loads(
+                    environment.validation_marker.read_text(encoding="utf-8")
+                )
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                metadata = None
+        prepared = (
+            environment is not None
+            and environment.runtime_type == "docker"
+            and isinstance(metadata, dict)
+            and metadata.get("validated") in (False, True)
+            and metadata.get("environment_fingerprint")
+            == environment.environment_fingerprint
+        )
+        if not (
+            prepared
+            and isinstance(metadata, dict)
+            and metadata.get("validated") is True
+        ):
+            instruction = (
+                "Run benchmark_preflight."
+                if prepared and isinstance(metadata, dict) and metadata.get("validated") is False
+                else "Run benchmark_prepare before benchmark_preflight."
+            )
+            raise BenchmarkPreflightError(
+                f"{case.task.id} benchmark environment is missing or unvalidated.\n"
+                + instruction
+            )
+
+
+def run_prepare(
     *,
     project_root: Path,
     baseline_root: Path,
     execution_root: Path,
     artifact_root: Path,
 ) -> Path:
-    """Prepare and preflight T006-T015 without invoking any experiment runner."""
+    """Build or reuse prepared T006-T015 environments without objective work."""
     b0_config = _configured_runtime(
         load_experiment_configuration(
             project_root / "configs/experiments/rollout_3a_pilot.yaml",
@@ -1383,12 +1557,10 @@ def run_preflight(
         b0_config.task_manifest_path,
         [case.task.id for case in cases],
     )
-    frozen_by_instance = load_frozen_swesmith_cases(tuple(instance_ids.values()))
-    frozen_cases = {
-        case.task.id: frozen_by_instance[instance_ids[case.task.id].lower()]
-        for case in cases
-    }
-    _verify_frozen_patches(cases, baseline_root, frozen_cases)
+    # The selectors and mutation patches remain researcher-only. Loading the
+    # frozen rows here makes preflight validation independent of network/data
+    # downloads while still keeping preparation free of objective execution.
+    load_frozen_swesmith_cases(tuple(instance_ids.values()))
     environments = _prepare_task_environments(
         cases,
         environment_root=execution_root / "sprint3-task-environments",
@@ -1397,7 +1569,114 @@ def run_preflight(
         container_images=container_images,
         benchmark_policy=benchmark_policy,
         benchmark_manifest_path=b0_config.task_manifest_path,
+        mode="prepare",
     )
+    prepared: list[dict[str, Any]] = []
+    for case in cases:
+        environment = environments[case.task.id]
+        validated = False
+        if environment.validation_marker is not None:
+            try:
+                metadata: Any = json.loads(
+                    environment.validation_marker.read_text(encoding="utf-8")
+                )
+                validated = isinstance(metadata, dict) and metadata.get("validated") is True
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                validated = False
+        prepared.append(
+            {
+                "task_id": case.task.id,
+                "runtime_type": environment.runtime_type,
+                "python_version": environment.python_version,
+                "python_executable": str(environment.python_executable),
+                "container_python_executable": environment.container_python_executable,
+                "container_image": environment.container_image,
+                "base_container_image": environment.base_container_image,
+                "environment_fingerprint": environment.environment_fingerprint,
+                "validated": validated,
+            }
+        )
+    result_root = artifact_root / "GS-E003" / "sprint3b"
+    result_root.mkdir(parents=True, exist_ok=True)
+    result_path = result_root / (
+        "preparation-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + ".json"
+    )
+    result_path.write_text(
+        json.dumps(
+            {
+                "status": "BENCHMARK_ENVIRONMENTS_PREPARED",
+                "provider_calls": 0,
+                "b0_launched": False,
+                "o1_launched": False,
+                "objective_calls": 0,
+                "tasks": prepared,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return result_path
+
+
+def run_preflight(
+    *,
+    project_root: Path,
+    baseline_root: Path,
+    execution_root: Path,
+    artifact_root: Path,
+) -> Path:
+    """Validate prepared T006-T015 environments without installing anything."""
+    b0_config = _configured_runtime(
+        load_experiment_configuration(
+            project_root / "configs/experiments/rollout_3a_pilot.yaml",
+            project_root=project_root,
+        ),
+        baseline_root,
+        execution_root,
+    )
+    try:
+        benchmark_policy = load_benchmark_environment_policy(
+            project_root / "configs/research/benchmark_environments.toml"
+        )
+    except BenchmarkEnvironmentConfigurationError as error:
+        raise BenchmarkPreflightError(str(error)) from error
+    all_cases = load_task_cases(
+        b0_config.task_manifest_path,
+        problem_statements_path=b0_config.task_problems_path,
+    )
+    cases = [case for case in all_cases if case.task.id in TRANSFER_TASKS]
+    if tuple(case.task.id for case in cases) != TRANSFER_TASKS:
+        raise BenchmarkPreflightError("frozen T006-T015 cases are incomplete or out of order")
+    _verify_baselines(cases, baseline_root)
+    instance_ids = _manifest_instance_ids(
+        b0_config.task_manifest_path,
+        [case.task.id for case in cases],
+    )
+    container_images = _manifest_image_names(
+        b0_config.task_manifest_path,
+        [case.task.id for case in cases],
+    )
+    environments = _prepare_task_environments(
+        cases,
+        environment_root=execution_root / "sprint3-task-environments",
+        source_root=baseline_root,
+        dependency_overlays=TASK_DEPENDENCY_OVERLAYS,
+        container_images=container_images,
+        benchmark_policy=benchmark_policy,
+        benchmark_manifest_path=b0_config.task_manifest_path,
+        mode="preflight",
+    )
+    frozen_by_instance = load_frozen_swesmith_cases(
+        tuple(instance_ids.values()),
+        allow_network=False,
+    )
+    frozen_cases = {
+        case.task.id: frozen_by_instance[instance_ids[case.task.id].lower()]
+        for case in cases
+    }
+    _verify_frozen_patches(cases, baseline_root, frozen_cases)
     objective = FrozenSWEsmithObjective(frozen_cases, environments)
     observations: list[dict[str, Any]] = []
     for case in cases:
@@ -1493,7 +1772,10 @@ def run_diagnostic(
         b0_config.task_manifest_path,
         [case.task.id for case in cases],
     )
-    frozen_cases_by_instance = load_frozen_swesmith_cases(tuple(instance_ids.values()))
+    frozen_cases_by_instance = load_frozen_swesmith_cases(
+        tuple(instance_ids.values()),
+        allow_network=False,
+    )
     frozen_cases = {
         case.task.id: frozen_cases_by_instance[instance_ids[case.task.id].lower()] for case in cases
     }
@@ -1508,17 +1790,10 @@ def run_diagnostic(
         container_images=container_images,
         benchmark_policy=benchmark_policy,
         benchmark_manifest_path=b0_config.task_manifest_path,
+        mode="preflight",
     )
+    _require_validated_environments(cases, environments)
     objective = FrozenSWEsmithObjective(frozen_cases, environments)
-    for case in cases:
-        preflight_workspace = _materialize_workspace(
-            source_root=baseline_root,
-            execution_root=execution_root,
-            frozen_cases=frozen_cases,
-            condition="preflight",
-            task=case.task,
-        )
-        objective.preflight(case.task, preflight_workspace)
     recurrence = make_recurrence_matcher(frozen_cases)
     oracle = FrozenOracleResolver.from_frozen_files(
         o1_config.task_manifest_path,
@@ -1614,7 +1889,10 @@ def run_smoke(
     _verify_baselines([case], baseline_root)
     instance_ids = _manifest_instance_ids(b0_config.task_manifest_path, [task_id])
     container_images = _manifest_image_names(b0_config.task_manifest_path, [task_id])
-    frozen_by_instance = load_frozen_swesmith_cases(tuple(instance_ids.values()))
+    frozen_by_instance = load_frozen_swesmith_cases(
+        tuple(instance_ids.values()),
+        allow_network=False,
+    )
     frozen = frozen_by_instance.get(instance_ids[task_id].lower())
     if frozen is None:
         raise RuntimeError(f"objective SWE-smith data is incomplete for {task_id}")
@@ -1628,16 +1906,10 @@ def run_smoke(
         container_images=container_images,
         benchmark_policy=benchmark_policy,
         benchmark_manifest_path=b0_config.task_manifest_path,
+        mode="preflight",
     )
+    _require_validated_environments([case], environments)
     objective = FrozenSWEsmithObjective(frozen_cases, environments)
-    preflight_workspace = _materialize_workspace(
-        source_root=baseline_root,
-        execution_root=execution_root,
-        frozen_cases=frozen_cases,
-        condition="preflight",
-        task=case.task,
-    )
-    preflight = objective.preflight(case.task, preflight_workspace)
     oracle = FrozenOracleResolver.from_frozen_files(
         o1_config.task_manifest_path,
         o1_config.task_problems_path,
@@ -1674,7 +1946,7 @@ def run_smoke(
         {
             "sprint": "3A",
             "smoke_task": task_id,
-            "preflight": preflight.__dict__,
+            "preflight": "required-before-run",
             "gate_b1_evaluation": "deferred_to_sprint3b",
         }
     )

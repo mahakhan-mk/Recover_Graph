@@ -434,7 +434,7 @@ def test_prepared_container_environment_reuses_validated_image(
     assert first.container_python_executable == "/usr/bin/python3.10"
 
 
-def test_container_objective_has_no_dependency_install_command(
+def test_container_objective_uses_source_first_workspace_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -464,7 +464,50 @@ def test_container_objective_has_no_dependency_install_command(
     objective(task_case.task, tmp_path)
 
     assert commands
-    assert "pip" not in " ".join(commands[0])
+    command = commands[0]
+    assert "pip" not in " ".join(command)
+    assert command[3:5] == ("--network", "none")
+    assert "--mount" in command
+    assert command[command.index("--workdir") + 1] == "/workspace"
+    environment_index = command.index("--env")
+    image_index = command.index("prepared:image")
+    assert command[environment_index + 1] == "PYTHONPATH=/workspace/src:/workspace"
+    assert ":" in command[environment_index + 1]
+    assert environment_index < image_index
+    assert command[image_index] == "prepared:image"
+    assert command[image_index + 1] == "/usr/bin/python3.10"
+
+
+def test_local_venv_objective_command_is_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_case = _case(2)
+    objective = FrozenSWEsmithObjective(
+        {"GS-T006": FrozenSWEsmithCase("example", ("test_missing.py",), "")},
+        {
+            "GS-T006": IsolatedTaskEnvironment(
+                "GS-T006",
+                Path("venv-python"),
+                runtime_type="local_venv",
+            )
+        },
+    )
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
+        commands.append(command)
+        return type(
+            "Completed", (), {"returncode": 1, "stdout": "FAILED test_missing.py", "stderr": ""}
+        )()
+
+    monkeypatch.setattr(sprint3.subprocess, "run", fake_run)
+
+    objective(task_case.task, tmp_path)
+
+    assert commands == [
+        ("venv-python", "-m", "pytest", "test_missing.py", "-q")
+    ]
 
 
 def test_preflight_does_not_validate_unexpectedly_passing_mutation(
@@ -493,8 +536,14 @@ def test_preflight_does_not_validate_unexpectedly_passing_mutation(
         fake_passing_run,
     )
 
-    with pytest.raises(BenchmarkPreflightError, match="expected mutated test failure"):
+    with pytest.raises(BenchmarkPreflightError, match="expected mutated test failure") as error:
         objective.preflight(task_case.task, tmp_path)
+    message = str(error.value)
+    assert "return_code=0" in message
+    assert "status=passed" in message
+    assert repr(str(sys.executable)) in message
+    assert "1 passed" in message
+    assert "stderr:\n<empty>" in message
     assert not marker.exists()
 
 

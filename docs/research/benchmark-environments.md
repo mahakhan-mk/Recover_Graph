@@ -61,6 +61,46 @@ dependency files and metadata, selected extras, overlays, tox requirements and
 `setenv`, and the benchmark policy. Thus changing any relevant runtime input
 invalidates reuse.
 
+## Fresh-clone workflow
+
+From a fresh clone, use the following sequence:
+
+1. Install Graph Swarm using the development-only commands above.
+2. Acquire and verify the exact frozen SWE-smith base images using the
+   manifest image references and the Docker commands above.
+3. Run `benchmark_prepare` to build or reuse the prepared images.
+4. Run `benchmark_preflight` to validate the frozen mutation and objective.
+5. Proceed to B0/O1 only after `READY_FOR_B0_O1` is emitted.
+
+Preparation is the slow, network-dependent phase. It acquires any missing
+frozen SWE-smith objective rows and installs repository-authoritative
+dependencies in fingerprinted Docker images; it is normally needed only once
+for each environment fingerprint. It never materializes a frozen mutation,
+executes FAIL_TO_PASS tests, or calls a provider/model.
+
+## Preparation
+
+Run this command from the repository root after Docker is available and the
+manifest images have been verified:
+
+```powershell
+& .\.venv\Scripts\python.exe -m graph_swarm.research.benchmark_prepare `
+  --project-root (Get-Location).Path `
+  --baseline-root (Join-Path (Get-Location).Path 'benchmark\workspaces') `
+  --execution-root (Join-Path (Get-Location).Path 'research\evidence\workspaces') `
+  --artifact-root (Join-Path (Get-Location).Path 'research\evidence\results')
+```
+
+Successful output is:
+
+```text
+BENCHMARK_ENVIRONMENTS_PREPARED <evidence-path>
+```
+
+Prepared environments have a matching environment fingerprint and image;
+their `validated` marker may still be `false`. A matching prepared image is
+reused regardless of that validation state.
+
 ## Preflight-only procedure
 
 Run this command from the repository root after Docker is available and the
@@ -74,11 +114,13 @@ manifest images have been verified:
   --artifact-root (Join-Path (Get-Location).Path 'research\evidence\results')
 ```
 
-Preflight prepares or reuses all ten isolated environments, applies the frozen
-mutations, collects each frozen FAIL_TO_PASS selector, and executes each
-objective. It makes zero provider/model calls and does not launch B0, O1, or
-the treatment. Every stage must pass, including distinguishing the expected
-mutated-test failure from infrastructure failure. Successful output is:
+Preflight only loads already prepared environments. It performs no Docker
+build, package installation, dependency download, or base-image pull. It
+applies the frozen mutations, collects each frozen FAIL_TO_PASS selector, and
+executes each objective with network disabled. It makes zero provider/model
+calls and does not launch B0, O1, or the treatment. Every stage must pass,
+including distinguishing the expected mutated-test failure from infrastructure
+failure. Successful output is:
 
 ```text
 READY_FOR_B0_O1 <evidence-path>
@@ -86,6 +128,11 @@ READY_FOR_B0_O1 <evidence-path>
 
 Any setup, mutation, collection, or objective infrastructure failure stops the
 barrier and reports `BLOCKED`; no readiness marker is created.
+
+B0/O1 require the same prepared environments to have `validated=true`. They
+never prepare benchmark environments implicitly. If either phase reports a
+missing or unvalidated environment, run `benchmark_prepare` followed by
+`benchmark_preflight` before retrying.
 
 ## Troubleshooting
 
