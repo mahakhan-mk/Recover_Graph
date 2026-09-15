@@ -70,7 +70,9 @@ From a fresh clone, use the following sequence:
    manifest image references and the Docker commands above.
 3. Run `benchmark_prepare` to build or reuse the prepared images.
 4. Run `benchmark_preflight` to validate the frozen mutation and objective.
-5. Proceed to B0/O1 only after `READY_FOR_B0_O1` is emitted.
+5. Run the zero-provider `benchmark_runtime_smoke` to validate the actual
+   Track B agent process tools in the prepared container.
+6. Proceed to B0/O1 only after `AGENT_RUNTIME_SMOKE_READY` is emitted.
 
 Preparation is the slow, network-dependent phase. It acquires any missing
 frozen SWE-smith objective rows and installs repository-authoritative
@@ -133,6 +135,41 @@ B0/O1 require the same prepared environments to have `validated=true`. They
 never prepare benchmark environments implicitly. If either phase reports a
 missing or unvalidated environment, run `benchmark_prepare` followed by
 `benchmark_preflight` before retrying.
+
+## Agent runtime smoke
+
+Run this zero-provider check after `benchmark_preflight` and before the first
+provider-backed B0/O1 smoke:
+
+```powershell
+& .\.venv\Scripts\python.exe -m graph_swarm.research.benchmark_runtime_smoke `
+  --project-root (Get-Location).Path `
+  --baseline-root (Join-Path (Get-Location).Path 'benchmark\workspaces') `
+  --execution-root (Join-Path (Get-Location).Path 'research\evidence\workspaces') `
+  --artifact-root (Join-Path (Get-Location).Path 'research\evidence\results') `
+  --task-id GS-T007
+```
+
+The smoke task is intentionally fixed to `GS-T007`: its src-layout mutation
+gives the check a direct workspace-vs-site-packages precedence probe. The
+smoke requires that task's environment marker to have `validated=true`; it only
+loads and
+inspects the existing prepared image, then materializes a fresh mutated
+workspace. It does not build, pull, install, call a provider/model, launch
+B0/O1, or modify baselines, prepared images, validation markers, or frozen
+task definitions. It runs both agent process tools through the container,
+checks the `/workspace` mount and source-first Jinja import, and accepts only
+the expected frozen `FAIL_TO_PASS` mutation failure from `run_tests`.
+
+Successful output is:
+
+```text
+AGENT_RUNTIME_SMOKE_READY <evidence-path>
+```
+
+Runtime-smoke evidence is written append-only under
+`research/evidence/results/GS-E003/sprint3b/` with a distinct timestamped
+`runtime-smoke-*.json` filename.
 
 ## Troubleshooting
 

@@ -32,7 +32,8 @@ from packaging.version import Version
 
 from experiments.oracle import FrozenOracleResolver
 from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
-from graph_swarm.agent.tools.run_command import workspace_process_environment
+from graph_swarm.agent.tools.run_command import run_command, workspace_process_environment
+from graph_swarm.agent.tools.run_tests import run_tests
 from graph_swarm.domain.behavior import BehaviorChangeEvidence
 from graph_swarm.domain.events import AgentEvent
 from graph_swarm.research.benchmark_environments import (
@@ -42,6 +43,12 @@ from graph_swarm.research.benchmark_environments import (
     load_benchmark_environment_policy,
     policy_fingerprint_payload,
     reconcile_task_policy,
+)
+from graph_swarm.research.benchmark_runtime_smoke import (
+    RuntimeSmokeValidationError,
+    validate_mutated_test_failure,
+    validate_run_command_evidence,
+    write_runtime_smoke_evidence,
 )
 from graph_swarm.research.contracts import ExperimentCondition, ExperimentRunArtifact
 from graph_swarm.research.runner import (
@@ -1741,6 +1748,170 @@ def run_preflight(
         encoding="utf-8",
     )
     return result_path
+
+
+def run_runtime_smoke(
+    *,
+    project_root: Path,
+    baseline_root: Path,
+    execution_root: Path,
+    artifact_root: Path,
+    task_id: str = "GS-T007",
+) -> Path:
+    """Exercise Track B process tools in one already validated container."""
+    if task_id != "GS-T007":
+        raise BenchmarkPreflightError(
+            f"Sprint 3C-B runtime smoke is frozen to GS-T007: {task_id}"
+        )
+    b0_config = _configured_runtime(
+        load_experiment_configuration(
+            project_root / "configs/experiments/rollout_3a_pilot.yaml",
+            project_root=project_root,
+        ),
+        baseline_root,
+        execution_root,
+    )
+    try:
+        benchmark_policy = load_benchmark_environment_policy(
+            project_root / "configs/research/benchmark_environments.toml"
+        )
+    except BenchmarkEnvironmentConfigurationError as error:
+        raise BenchmarkPreflightError(str(error)) from error
+
+    cases = [
+        case
+        for case in load_task_cases(
+            b0_config.task_manifest_path,
+            problem_statements_path=b0_config.task_problems_path,
+        )
+        if case.task.id == task_id
+    ]
+    if len(cases) != 1:
+        raise BenchmarkPreflightError(f"runtime smoke task {task_id} is missing or not unique")
+    case = cases[0]
+    _verify_baselines(cases, baseline_root)
+    instance_ids = _manifest_instance_ids(b0_config.task_manifest_path, [task_id])
+    container_images = _manifest_image_names(b0_config.task_manifest_path, [task_id])
+    frozen_by_instance = load_frozen_swesmith_cases(
+        tuple(instance_ids.values()),
+        allow_network=False,
+    )
+    frozen = frozen_by_instance.get(instance_ids[task_id].lower())
+    if frozen is None:
+        raise BenchmarkPreflightError(f"frozen SWE-smith data is incomplete for {task_id}")
+    frozen_cases = {task_id: frozen}
+    _verify_frozen_patches(cases, baseline_root, frozen_cases)
+
+    # ``mode=preflight`` only loads and inspects an existing image; it cannot
+    # enter the preparation/build path. The validation barrier stays ahead of
+    # workspace materialization and every agent tool call.
+    environments = _prepare_task_environments(
+        cases,
+        environment_root=execution_root / "sprint3-task-environments",
+        source_root=baseline_root,
+        dependency_overlays=TASK_DEPENDENCY_OVERLAYS,
+        container_images=container_images,
+        benchmark_policy=benchmark_policy,
+        benchmark_manifest_path=b0_config.task_manifest_path,
+        mode="preflight",
+    )
+    _require_validated_environments(cases, environments)
+    environment = environments[task_id]
+    runtime = environment.agent_execution_runtime()
+    if runtime.runtime_type != "docker":
+        raise BenchmarkPreflightError(f"runtime smoke requires Docker for {task_id}")
+    if runtime.container_image != environment.container_image:
+        raise BenchmarkPreflightError(f"runtime smoke image contract mismatch for {task_id}")
+    container_python = runtime.container_python_executable
+    if container_python is None:
+        raise BenchmarkPreflightError(f"runtime smoke Python is missing for {task_id}")
+
+    workspace = _materialize_workspace(
+        source_root=baseline_root,
+        execution_root=execution_root,
+        frozen_cases=frozen_cases,
+        condition="runtime-smoke",
+        task=case.task,
+    )
+    sentinel = "AGENT_RUNTIME_SMOKE_SENTINEL"
+    (workspace / ".agent-runtime-smoke-sentinel").write_text(
+        sentinel + "\n",
+        encoding="utf-8",
+    )
+    dependencies = AgentDependencies(
+        workspace,
+        "GS-E003-runtime-smoke-" + uuid.uuid4().hex,
+        task_id,
+        task=case.task,
+        execution_runtime=runtime,
+    )
+    runtime_contract = {
+        "docker_executable": str(runtime.docker_executable),
+        "prepared_image": runtime.container_image,
+        "network": "none",
+        "mount": f"type=bind,source={workspace.resolve()},target=/workspace",
+        "workdir": "/workspace",
+        "pythonpath": "/workspace/src:/workspace",
+    }
+    command_result = run_command(
+        dependencies,
+        [
+            container_python,
+            "-c",
+            (
+                "import os\n"
+                "from pathlib import Path\n"
+                "import jinja2\n"
+                "assert Path.cwd() == Path('/workspace')\n"
+                "assert os.environ['PYTHONPATH'] == '/workspace/src:/workspace'\n"
+                "print(Path('/workspace/.agent-runtime-smoke-sentinel').read_text())\n"
+                "print('JINJA2_SOURCE=' + str(Path(jinja2.__file__).resolve()))\n"
+            ),
+        ],
+        timeout_seconds=120,
+    )
+    try:
+        source_evidence = validate_run_command_evidence(
+            command_result,
+            sentinel=sentinel,
+        )
+    except RuntimeSmokeValidationError as error:
+        raise BenchmarkPreflightError(str(error)) from error
+
+    expected_selectors = tuple(
+        dict.fromkeys(
+            (*frozen.fail_to_pass, *(_pytest_target(test_id) for test_id in frozen.fail_to_pass))
+        )
+    )
+    tests_result = run_tests(dependencies, timeout_seconds=900)
+    try:
+        tests_evidence = validate_mutated_test_failure(tests_result, expected_selectors)
+    except RuntimeSmokeValidationError as error:
+        raise BenchmarkPreflightError(str(error)) from error
+
+    evidence = {
+        "status": "AGENT_RUNTIME_SMOKE_READY",
+        "task_id": task_id,
+        "runtime_type": environment.runtime_type,
+        "prepared_image": runtime.container_image,
+        "container_image": runtime.container_image,
+        "container_python": container_python,
+        "container_python_executable": container_python,
+        "environment_fingerprint": environment.environment_fingerprint,
+        "workspace": str(workspace),
+        "runtime_contract": runtime_contract,
+        "run_command": command_result.model_dump(mode="json"),
+        "source_import": source_evidence,
+        "run_tests": {
+            **tests_evidence,
+            "result": tests_result.model_dump(mode="json"),
+            "exit_code": tests_result.exit_code,
+        },
+        "provider_calls": 0,
+        "b0_launched": False,
+        "o1_launched": False,
+    }
+    return write_runtime_smoke_evidence(artifact_root, evidence)
 
 
 def run_diagnostic(
