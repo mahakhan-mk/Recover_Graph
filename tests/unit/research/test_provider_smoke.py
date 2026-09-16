@@ -244,6 +244,11 @@ def test_summary_accepts_one_b0_and_one_o1_without_requiring_task_success(
     assert summary["o1_oracle_review_id"] == "GS-R014"
     assert summary["o1_oracle_intervention"]["recovery_summary"] == PATTERN
     assert summary["prompt_config_identity"]["prompt_version"] == "v1"
+    assert summary["prompt_config_identity"]["limits"] == {
+        "max_actions": 20,
+        "max_requests": 24,
+        "timeout_seconds": 300,
+    }
     assert summary["environment_fingerprint"] == "fingerprint-1"
 
 

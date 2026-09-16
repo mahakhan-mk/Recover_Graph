@@ -10,6 +10,6 @@ artifact_root: research/evidence/results
 conditions:
   - B0
 limits:
-  max_actions: 15
-  max_requests: 16
+  max_actions: 20
+  max_requests: 24
   timeout_seconds: 300

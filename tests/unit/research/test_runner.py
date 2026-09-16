@@ -70,8 +70,8 @@ def test_gs_e003_pilot_configuration_is_b0_only() -> None:
     assert configuration.config.development is True
     assert configuration.config.pilot is True
     assert configuration.config.conditions == (ExperimentCondition.B0,)
-    assert configuration.config.limits.max_actions == 15
-    assert configuration.config.limits.max_requests == 16
+    assert configuration.config.limits.max_actions == 20
+    assert configuration.config.limits.max_requests == 24
     assert configuration.config.limits.timeout_seconds == 300
     assert configuration.config.model_config_path == "configs/models/groq.yaml"
     assert configuration.model.model == "openai/gpt-oss-120b"
@@ -79,14 +79,14 @@ def test_gs_e003_pilot_configuration_is_b0_only() -> None:
 
 
 def test_experiment_limits_request_budget_is_optional_and_positive() -> None:
-    assert ExperimentLimits(max_actions=15, timeout_seconds=300).max_requests is None
+    assert ExperimentLimits(max_actions=20, timeout_seconds=300).max_requests is None
     assert (
         ExperimentLimits(
-            max_actions=15,
-            max_requests=16,
+            max_actions=20,
+            max_requests=24,
             timeout_seconds=300,
         ).max_requests
-        == 16
+        == 24
     )
 
 
@@ -97,7 +97,7 @@ def test_existing_experiment_configuration_without_request_budget_remains_valid(
             "rollout": "legacy_rollout",
             "model_config": "configs/models/groq.yaml",
             "conditions": ["B0"],
-            "limits": {"max_actions": 15, "timeout_seconds": 300},
+            "limits": {"max_actions": 20, "timeout_seconds": 300},
         }
     )
 
@@ -110,7 +110,7 @@ def test_b0_and_o1_rollout_3_configs_use_identical_resource_budgets() -> None:
         for path in (PILOT_CONFIG, O1_CONFIG, ACTIVE_B0_CONFIG, ACTIVE_O1_CONFIG)
     ]
 
-    expected = ExperimentLimits(max_actions=15, max_requests=16, timeout_seconds=300)
+    expected = ExperimentLimits(max_actions=20, max_requests=24, timeout_seconds=300)
     assert [configuration.config.limits for configuration in configurations] == [
         expected,
         expected,
@@ -264,8 +264,8 @@ def test_runner_wires_configured_action_timeout_and_model_limits(
 
     runner.run_task(make_task("GS-T001", 1))
 
-    assert captured["max_actions"] == 15
-    assert captured["max_requests"] == 16
+    assert captured["max_actions"] == 20
+    assert captured["max_requests"] == 24
     assert captured["timeout_seconds"] == 300
     assert captured["model_settings"] == {"temperature": 0}
 

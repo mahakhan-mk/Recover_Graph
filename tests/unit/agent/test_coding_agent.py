@@ -64,13 +64,13 @@ def test_run_coding_agent_passes_explicit_public_usage_limits(
         settings,
         dependencies,
         "Use the configured limits.",
-        max_actions=15,
-        max_requests=16,
+        max_actions=20,
+        max_requests=24,
     )
 
     usage_limits = cast(UsageLimits, captured["usage_limits"])
-    assert usage_limits.request_limit == 16
-    assert usage_limits.tool_calls_limit == 15
+    assert usage_limits.request_limit == 24
+    assert usage_limits.tool_calls_limit == 20
 
 
 async def test_run_coding_agent_async_falls_back_to_settings_request_limit(
