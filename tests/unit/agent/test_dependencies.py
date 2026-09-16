@@ -62,6 +62,63 @@ def test_valid_nested_workspace_path_resolves(tmp_path: Path) -> None:
     assert dependencies.resolve_workspace_path("src/module.py") == nested.resolve()
 
 
+def make_docker_dependencies(tmp_path: Path) -> AgentDependencies:
+    workspace = tmp_path / "workspace"
+    return AgentDependencies(
+        workspace,
+        "run-001",
+        "task-001",
+        execution_runtime=ExecutionRuntime(
+            runtime_type="docker",
+            docker_executable=Path("docker.exe"),
+            container_image="prepared:image",
+            container_python_executable="/usr/bin/python3.12",
+        ),
+    )
+
+
+def test_docker_container_workspace_path_resolves_to_host_workspace(
+    tmp_path: Path,
+) -> None:
+    dependencies = make_docker_dependencies(tmp_path)
+
+    assert dependencies.resolve_workspace_path("/workspace/src/example.py") == (
+        dependencies.workspace_root / "src" / "example.py"
+    ).resolve()
+
+
+def test_docker_relative_workspace_path_still_resolves(tmp_path: Path) -> None:
+    dependencies = make_docker_dependencies(tmp_path)
+
+    assert dependencies.resolve_workspace_path("src/example.py") == (
+        dependencies.workspace_root / "src" / "example.py"
+    ).resolve()
+
+
+def test_docker_container_workspace_root_resolves_to_workspace_root(tmp_path: Path) -> None:
+    dependencies = make_docker_dependencies(tmp_path)
+
+    assert dependencies.resolve_workspace_path("/workspace") == dependencies.workspace_root
+
+
+@pytest.mark.parametrize("path", ["/etc/passwd", r"C:\outside.txt"])
+def test_docker_host_absolute_paths_are_rejected(tmp_path: Path, path: str) -> None:
+    with pytest.raises(WorkspacePathError, match="absolute path|outside workspace"):
+        make_docker_dependencies(tmp_path).resolve_workspace_path(path)
+
+
+def test_docker_container_workspace_traversal_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(WorkspacePathError, match="outside workspace"):
+        make_docker_dependencies(tmp_path).resolve_workspace_path("/workspace/../outside")
+
+
+def test_local_runtime_does_not_accept_container_workspace_namespace(tmp_path: Path) -> None:
+    dependencies = AgentDependencies(tmp_path / "workspace", "run-001", "task-001")
+
+    with pytest.raises(WorkspacePathError, match="outside workspace"):
+        dependencies.resolve_workspace_path("/workspace/src/example.py")
+
+
 def test_parent_traversal_outside_workspace_is_rejected(tmp_path: Path) -> None:
     dependencies = AgentDependencies(tmp_path / "workspace", "run-001", "task-001")
 

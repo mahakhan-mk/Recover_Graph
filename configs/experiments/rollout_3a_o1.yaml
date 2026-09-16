@@ -13,4 +13,5 @@ conditions:
   - O1
 limits:
   max_actions: 15
+  max_requests: 16
   timeout_seconds: 300

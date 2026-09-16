@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from pydantic_ai import FunctionToolset
+from pydantic_ai import AgentRunResult, FunctionToolset, UsageLimits
 from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.models.test import TestModel
 
@@ -11,6 +11,7 @@ from graph_swarm.agent.coding_agent import (
     AgentConfigurationError,
     create_coding_agent,
     run_coding_agent,
+    run_coding_agent_async,
 )
 from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.agent.prompts import ROLLOUT1_SYSTEM_PROMPT
@@ -42,6 +43,61 @@ def make_offline_agent() -> tuple[Settings, TestModel]:
     settings = make_settings()
     model = TestModel(call_tools=["read_file"], custom_output_text="offline complete")
     return settings, model
+
+
+def test_run_coding_agent_passes_explicit_public_usage_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings, model = make_offline_agent()
+    dependencies = make_dependencies(tmp_path)
+    agent = create_coding_agent(settings, model=model)
+    captured: dict[str, object] = {}
+
+    def fake_run_sync(*_args: object, **kwargs: object) -> AgentRunResult[str]:
+        captured["usage_limits"] = kwargs["usage_limits"]
+        return cast(AgentRunResult[str], object())
+
+    monkeypatch.setattr(agent, "run_sync", fake_run_sync)
+    run_coding_agent(
+        agent,
+        settings,
+        dependencies,
+        "Use the configured limits.",
+        max_actions=15,
+        max_requests=16,
+    )
+
+    usage_limits = cast(UsageLimits, captured["usage_limits"])
+    assert usage_limits.request_limit == 16
+    assert usage_limits.tool_calls_limit == 15
+
+
+async def test_run_coding_agent_async_falls_back_to_settings_request_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings, model = make_offline_agent()
+    dependencies = make_dependencies(tmp_path)
+    agent = create_coding_agent(settings, model=model)
+    captured: dict[str, object] = {}
+
+    async def fake_run(*_args: object, **kwargs: object) -> AgentRunResult[str]:
+        captured["usage_limits"] = kwargs["usage_limits"]
+        return cast(AgentRunResult[str], object())
+
+    monkeypatch.setattr(agent, "run", fake_run)
+    await run_coding_agent_async(
+        agent,
+        settings,
+        dependencies,
+        "Use the configured limits.",
+        max_actions=7,
+    )
+
+    usage_limits = cast(UsageLimits, captured["usage_limits"])
+    assert usage_limits.request_limit == settings.agent_request_limit
+    assert usage_limits.tool_calls_limit == 7
 
 
 def test_live_factory_requires_explicit_groq_configuration() -> None:

@@ -23,6 +23,8 @@ from graph_swarm.research.runner import (
     BaselineWorkspaceManager,
     BenchmarkEvaluation,
     BenchmarkTaskCase,
+    ExperimentConfiguration,
+    ExperimentLimits,
     ExperimentRunArtifactStore,
     ExperimentRunner,
     RecurrenceEvaluationRequired,
@@ -35,6 +37,9 @@ from graph_swarm.settings import Settings
 
 ROOT = Path(__file__).resolve().parents[3]
 PILOT_CONFIG = ROOT / "configs" / "experiments" / "rollout_3_pilot.yaml"
+O1_CONFIG = ROOT / "configs" / "experiments" / "rollout_3_o1.yaml"
+ACTIVE_B0_CONFIG = ROOT / "configs" / "experiments" / "rollout_3a_pilot.yaml"
+ACTIVE_O1_CONFIG = ROOT / "configs" / "experiments" / "rollout_3a_o1.yaml"
 
 
 def make_settings() -> Settings:
@@ -66,10 +71,52 @@ def test_gs_e003_pilot_configuration_is_b0_only() -> None:
     assert configuration.config.pilot is True
     assert configuration.config.conditions == (ExperimentCondition.B0,)
     assert configuration.config.limits.max_actions == 15
+    assert configuration.config.limits.max_requests == 16
     assert configuration.config.limits.timeout_seconds == 300
     assert configuration.config.model_config_path == "configs/models/groq.yaml"
     assert configuration.model.model == "openai/gpt-oss-120b"
     assert configuration.model.prompt_version == "v1"
+
+
+def test_experiment_limits_request_budget_is_optional_and_positive() -> None:
+    assert ExperimentLimits(max_actions=15, timeout_seconds=300).max_requests is None
+    assert (
+        ExperimentLimits(
+            max_actions=15,
+            max_requests=16,
+            timeout_seconds=300,
+        ).max_requests
+        == 16
+    )
+
+
+def test_existing_experiment_configuration_without_request_budget_remains_valid() -> None:
+    configuration = ExperimentConfiguration.model_validate(
+        {
+            "experiment_id": "legacy",
+            "rollout": "legacy_rollout",
+            "model_config": "configs/models/groq.yaml",
+            "conditions": ["B0"],
+            "limits": {"max_actions": 15, "timeout_seconds": 300},
+        }
+    )
+
+    assert configuration.limits.max_requests is None
+
+
+def test_b0_and_o1_rollout_3_configs_use_identical_resource_budgets() -> None:
+    configurations = [
+        load_experiment_configuration(path, project_root=ROOT)
+        for path in (PILOT_CONFIG, O1_CONFIG, ACTIVE_B0_CONFIG, ACTIVE_O1_CONFIG)
+    ]
+
+    expected = ExperimentLimits(max_actions=15, max_requests=16, timeout_seconds=300)
+    assert [configuration.config.limits for configuration in configurations] == [
+        expected,
+        expected,
+        expected,
+        expected,
+    ]
 
 
 def test_pilot_tasks_are_loaded_in_chronological_order_without_research_fields() -> None:
@@ -218,6 +265,7 @@ def test_runner_wires_configured_action_timeout_and_model_limits(
     runner.run_task(make_task("GS-T001", 1))
 
     assert captured["max_actions"] == 15
+    assert captured["max_requests"] == 16
     assert captured["timeout_seconds"] == 300
     assert captured["model_settings"] == {"temperature": 0}
 

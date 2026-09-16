@@ -69,6 +69,7 @@ class ExperimentLimits(BaseModel):
     """Resource limits shared by comparable Track B conditions."""
 
     max_actions: int = Field(gt=0)
+    max_requests: int | None = Field(default=None, gt=0)
     timeout_seconds: float = Field(gt=0)
 
 
@@ -721,6 +722,7 @@ class ExperimentRunner:
                 dependencies,
                 build_task_prompt(task),
                 max_actions=self.configuration.config.limits.max_actions,
+                max_requests=self.configuration.config.limits.max_requests,
                 timeout_seconds=self.configuration.config.limits.timeout_seconds,
                 model_settings=cast(ModelSettings, self.configuration.model.settings),
             )

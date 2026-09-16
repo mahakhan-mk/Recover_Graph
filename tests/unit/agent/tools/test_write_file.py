@@ -2,13 +2,29 @@ from pathlib import Path
 
 import pytest
 
-from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.agent.tools.write_file import write_file
 from graph_swarm.domain.action import ActionResult
 
 
 def make_dependencies(tmp_path: Path) -> AgentDependencies:
     dependencies = AgentDependencies(tmp_path / "workspace", "run-001", "task-001")
+    dependencies.workspace_root.mkdir(parents=True, exist_ok=True)
+    return dependencies
+
+
+def make_docker_dependencies(tmp_path: Path) -> AgentDependencies:
+    dependencies = AgentDependencies(
+        tmp_path / "workspace",
+        "run-001",
+        "task-001",
+        execution_runtime=ExecutionRuntime(
+            runtime_type="docker",
+            docker_executable=Path("docker.exe"),
+            container_image="prepared:image",
+            container_python_executable="/usr/bin/python3.12",
+        ),
+    )
     dependencies.workspace_root.mkdir(parents=True, exist_ok=True)
     return dependencies
 
@@ -70,6 +86,62 @@ def test_absolute_outside_path_returns_failed_result(tmp_path: Path) -> None:
     outside_path = tmp_path / "outside.txt"
 
     result = write_file(make_dependencies(tmp_path), str(outside_path), "blocked")
+
+    assert result.success is False
+    assert result.error == "path is outside the workspace"
+
+
+def test_docker_write_accepts_container_workspace_path(tmp_path: Path) -> None:
+    dependencies = make_docker_dependencies(tmp_path)
+    (dependencies.workspace_root / "src").mkdir()
+
+    result = write_file(
+        dependencies,
+        "/workspace/src/example.py",
+        "print('example')",
+    )
+
+    assert result.success is True
+    assert (dependencies.workspace_root / "src" / "example.py").read_text(
+        encoding="utf-8"
+    ) == "print('example')"
+
+
+def test_docker_write_keeps_relative_workspace_paths(tmp_path: Path) -> None:
+    dependencies = make_docker_dependencies(tmp_path)
+    (dependencies.workspace_root / "src").mkdir()
+
+    result = write_file(dependencies, "src/example.py", "print('example')")
+
+    assert result.success is True
+    assert (dependencies.workspace_root / "src" / "example.py").read_text(
+        encoding="utf-8"
+    ) == "print('example')"
+
+
+@pytest.mark.parametrize("path", ["/workspace/../outside", "/etc/passwd", r"C:\outside.txt"])
+def test_docker_write_rejects_paths_outside_container_workspace(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    result = write_file(make_docker_dependencies(tmp_path), path, "blocked")
+
+    assert result.success is False
+    assert result.error == "path is outside the workspace"
+
+
+def test_docker_write_rejects_host_absolute_workspace_path(tmp_path: Path) -> None:
+    dependencies = make_docker_dependencies(tmp_path)
+    host_path = dependencies.workspace_root / "host-visible.txt"
+
+    result = write_file(dependencies, str(host_path), "blocked")
+
+    assert result.success is False
+    assert result.error == "path is outside the workspace"
+
+
+def test_local_write_keeps_rejecting_container_workspace_paths(tmp_path: Path) -> None:
+    result = write_file(make_dependencies(tmp_path), "/workspace/src/example.py", "blocked")
 
     assert result.success is False
     assert result.error == "path is outside the workspace"

@@ -168,6 +168,7 @@ def run_coding_agent(
     user_prompt: str,
     *,
     max_actions: int | None = None,
+    max_requests: int | None = None,
     timeout_seconds: float | None = None,
     model_settings: ModelSettings | None = None,
 ) -> AgentRunResult[str]:
@@ -180,6 +181,7 @@ def run_coding_agent(
                 dependencies,
                 user_prompt,
                 max_actions=max_actions,
+                max_requests=max_requests,
                 timeout_seconds=timeout_seconds,
                 model_settings=model_settings,
             )
@@ -192,7 +194,7 @@ def run_coding_agent(
             conversation_id=dependencies.run_id,
             run_id=dependencies.run_id,
             model_settings=model_settings,
-            usage_limits=_usage_limits(settings, max_actions),
+            usage_limits=_usage_limits(settings, max_actions, max_requests),
         )
     finally:
         finalize_pending_advice(dependencies)
@@ -205,6 +207,7 @@ async def run_coding_agent_async(
     user_prompt: str,
     *,
     max_actions: int | None = None,
+    max_requests: int | None = None,
     timeout_seconds: float | None = None,
     model_settings: ModelSettings | None = None,
 ) -> AgentRunResult[str]:
@@ -217,7 +220,7 @@ async def run_coding_agent_async(
             conversation_id=dependencies.run_id,
             run_id=dependencies.run_id,
             model_settings=model_settings,
-            usage_limits=_usage_limits(settings, max_actions),
+            usage_limits=_usage_limits(settings, max_actions, max_requests),
         )
         if timeout_seconds is None:
             return await run
@@ -227,8 +230,16 @@ async def run_coding_agent_async(
         finalize_pending_advice(dependencies)
 
 
-def _usage_limits(settings: Settings, max_actions: int | None) -> UsageLimits:
+def _usage_limits(
+    settings: Settings,
+    max_actions: int | None,
+    max_requests: int | None = None,
+) -> UsageLimits:
     return UsageLimits(
-        request_limit=settings.agent_request_limit,
+        request_limit=(
+            max_requests
+            if max_requests is not None
+            else settings.agent_request_limit
+        ),
         tool_calls_limit=max_actions,
     )

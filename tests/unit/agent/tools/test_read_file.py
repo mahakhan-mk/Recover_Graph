@@ -2,13 +2,28 @@ from pathlib import Path
 
 import pytest
 
-from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.agent.tools.read_file import read_file
 from graph_swarm.domain.action import ActionResult
 
 
 def make_dependencies(tmp_path: Path) -> AgentDependencies:
     return AgentDependencies(tmp_path / "workspace", "run-001", "task-001")
+
+
+def make_docker_dependencies(tmp_path: Path) -> AgentDependencies:
+    workspace = tmp_path / "workspace"
+    return AgentDependencies(
+        workspace,
+        "run-001",
+        "task-001",
+        execution_runtime=ExecutionRuntime(
+            runtime_type="docker",
+            docker_executable=Path("docker.exe"),
+            container_image="prepared:image",
+            container_python_executable="/usr/bin/python3.12",
+        ),
+    )
 
 
 def test_reads_text_file_inside_workspace(tmp_path: Path) -> None:
@@ -33,6 +48,29 @@ def test_reads_text_file_inside_workspace(tmp_path: Path) -> None:
     assert len(dependencies.events) == 1
     assert dependencies.events[0].result == result
     assert dependencies.events[0].action_id == result.action_id
+
+
+def test_docker_read_accepts_container_workspace_path(tmp_path: Path) -> None:
+    dependencies = make_docker_dependencies(tmp_path)
+    file_path = dependencies.workspace_root / "src" / "example.py"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text("print('example')", encoding="utf-8")
+
+    result = read_file(dependencies, "/workspace/src/example.py")
+
+    assert result.success is True
+    assert result.output == "print('example')"
+
+
+@pytest.mark.parametrize("path", ["/workspace/../outside", "/etc/passwd", r"C:\outside.txt"])
+def test_docker_read_rejects_paths_outside_container_workspace(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    result = read_file(make_docker_dependencies(tmp_path), path)
+
+    assert result.success is False
+    assert result.error == "path is outside the workspace"
 
 
 def test_repeated_reads_receive_different_action_ids(tmp_path: Path) -> None:
