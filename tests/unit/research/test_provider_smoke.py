@@ -16,6 +16,7 @@ from experiments.sprint3 import (
     PreparedProviderSmokeContext,
     make_recurrence_matcher,
 )
+from graph_swarm.agent.coding_agent import AgentWallClockTimeoutError
 from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
@@ -250,6 +251,10 @@ def test_summary_accepts_one_b0_and_one_o1_without_requiring_task_success(
         "timeout_seconds": 300,
     }
     assert summary["environment_fingerprint"] == "fingerprint-1"
+    assert summary["timeout_contract"]["experiment_timeout_seconds"] == 300.0
+    assert summary["timeout_contract_by_condition"]["B0"] == summary[
+        "timeout_contract_by_condition"
+    ]["O1"]
 
 
 def test_frozen_t007_mapping_retains_gs_r014_and_advice_serialization_is_unchanged() -> None:
@@ -465,6 +470,35 @@ def test_summary_records_provider_failure_without_replacement_or_retry(tmp_path:
     assert summary["o1_retries"] == 0
     assert summary["error_classification"]["O1"]["classification"] == "infrastructure"
     assert summary["gate_b1_evaluated"] is False
+
+
+def test_summary_preserves_timeout_layer_provenance(tmp_path: Path) -> None:
+    executions, configuration, environment, case = _summary_inputs(tmp_path)
+    executions[1] = _execution(
+        tmp_path,
+        ExperimentCondition.O1,
+        error=AgentWallClockTimeoutError(300),
+        run_id="o1-timeout",
+    )
+
+    summary = build_provider_smoke_summary(
+        executions,
+        objective_observations=[],
+        runtime_artifact=_runtime_artifact(),
+        configuration=configuration,
+        environment=environment,
+        task=case,
+        expected_oracle_review_id="GS-R014",
+        expected_recovery_pattern=PATTERN,
+    )
+
+    assert summary["error_classification"]["O1"] == {
+        "type": "AgentWallClockTimeoutError",
+        "classification": "infrastructure",
+        "message": "agent wall-clock deadline expired after 300 seconds",
+        "timeout_layer": "agent_wall_clock",
+        "timeout_seconds": 300,
+    }
 
 
 def test_missing_runtime_smoke_prerequisite_fails_before_execution(tmp_path: Path) -> None:

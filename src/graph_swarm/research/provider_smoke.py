@@ -328,6 +328,11 @@ def build_provider_smoke_summary(
         "effective_model": _effective_model(configuration),
         "model_settings": dict(configuration.model.settings),
         "temperature": configuration.model.settings.get("temperature"),
+        "timeout_contract": b0.artifact.timeout_contract.model_dump(mode="json"),
+        "timeout_contract_by_condition": {
+            "B0": b0.artifact.timeout_contract.model_dump(mode="json"),
+            "O1": o1.artifact.timeout_contract.model_dump(mode="json"),
+        },
         "prompt_config_identity": {
             "config_path": str(configuration.config_path),
             "model_config_path": configuration.config.model_config_path,
@@ -540,7 +545,7 @@ def _usage(execution: ExperimentExecution) -> dict[str, int | None]:
     }
 
 
-def _execution_error(execution: ExperimentExecution) -> dict[str, str] | None:
+def _execution_error(execution: ExperimentExecution) -> dict[str, object] | None:
     error = execution.error
     if error is None:
         return None
@@ -551,7 +556,13 @@ def _execution_error(execution: ExperimentExecution) -> dict[str, str] | None:
         classification = "agent_control"
     else:
         classification = "infrastructure"
-    return {"type": name, "classification": classification, "message": str(error)}
+    return {
+        "type": name,
+        "classification": classification,
+        "message": str(error),
+        "timeout_layer": getattr(error, "timeout_layer", None),
+        "timeout_seconds": getattr(error, "timeout_seconds", None),
+    }
 
 
 def _resolve_cli_path(path: Path, project_root: Path) -> Path:

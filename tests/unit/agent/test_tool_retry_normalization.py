@@ -198,3 +198,49 @@ def test_argument_validation_failure_still_respects_three_tool_retries(
         )
 
     assert dependencies.events == []
+
+
+def test_paginated_read_arguments_are_schema_valid_and_do_not_retry(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings()
+    dependencies = make_dependencies(tmp_path)
+    (dependencies.workspace_root / "source.py").write_text(
+        "one\ntwo\nthree\n", encoding="utf-8"
+    )
+
+    def respond(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        if any(
+            isinstance(part, ToolReturnPart) and part.tool_name == "read_file"
+            for message in messages
+            for part in message.parts
+        ):
+            return ModelResponse(parts=[TextPart("page received")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    "read_file",
+                    {"path": "source.py", "offset": 1, "length": 1},
+                )
+            ]
+        )
+
+    agent = create_coding_agent(settings, model=FunctionModel(respond))
+    result = run_coding_agent(
+        agent,
+        settings,
+        dependencies,
+        "Read one page.",
+        max_actions=20,
+        max_requests=24,
+    )
+
+    assert result.output == "page received"
+    assert len(dependencies.events) == 1
+    assert dependencies.events[0].result.success is True
+    assert not [
+        part
+        for message in result.all_messages()
+        for part in message.parts
+        if isinstance(part, RetryPromptPart)
+    ]

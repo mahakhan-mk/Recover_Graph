@@ -7,6 +7,7 @@ credentials or makes a network request.
 
 import asyncio
 from collections.abc import Sequence
+from typing import cast
 
 from pydantic_ai import (
     Agent,
@@ -29,7 +30,13 @@ from graph_swarm.agent.advisory import (
 )
 from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.agent.prompts import ROLLOUT1_SYSTEM_PROMPT
-from graph_swarm.agent.tools.read_file import read_file as controlled_read_file
+from graph_swarm.agent.tools.read_file import (
+    DEFAULT_READ_FILE_LENGTH,
+    DEFAULT_READ_FILE_OFFSET,
+)
+from graph_swarm.agent.tools.read_file import (
+    read_file as controlled_read_file,
+)
 from graph_swarm.agent.tools.run_command import run_command as controlled_run_command
 from graph_swarm.agent.tools.run_tests import run_tests as controlled_run_tests
 from graph_swarm.agent.tools.write_file import write_file as controlled_write_file
@@ -42,6 +49,27 @@ class AgentConfigurationError(ValueError):
 
 
 _CODING_AGENT_TOOL_RETRIES = 3
+MODEL_REQUEST_TIMEOUT_SECONDS = 300
+
+
+class AgentWallClockTimeoutError(TimeoutError):
+    """The configured overall agent wall-clock deadline expired."""
+
+    timeout_layer = "agent_wall_clock"
+
+    def __init__(self, timeout_seconds: float) -> None:
+        self.timeout_seconds = timeout_seconds
+        super().__init__(f"agent wall-clock deadline expired after {timeout_seconds} seconds")
+
+
+class ModelRequestTimeoutError(TimeoutError):
+    """A model request raised a timeout before the agent deadline expired."""
+
+    timeout_layer = "model_request"
+
+    def __init__(self, timeout_seconds: float) -> None:
+        self.timeout_seconds = timeout_seconds
+        super().__init__(f"model request timeout expired after {timeout_seconds} seconds")
 
 
 def _build_groq_model(settings: Settings) -> GroqModel:
@@ -100,10 +128,27 @@ def create_coding_agent(
     def read_file(
         ctx: RunContext[AgentDependencies],
         path: str,
+        offset: int = DEFAULT_READ_FILE_OFFSET,
+        length: int = DEFAULT_READ_FILE_LENGTH,
     ) -> ActionResult:
-        """Read a UTF-8 text file within the workspace."""
-        action = prepare_tool_action(ctx.deps, "read_file", "read_file", {"path": path})
-        result = controlled_read_file(ctx.deps, path, action_id=action.id)
+        """Read regular UTF-8 files only; use run_command/listing behavior for directories.
+
+        Offset is a zero-based line offset. Length is a positive line count capped at
+        400. Use offset and length to inspect large source files page by page.
+        """
+        action = prepare_tool_action(
+            ctx.deps,
+            "read_file",
+            "read_file",
+            {"path": path, "offset": offset, "length": length},
+        )
+        result = controlled_read_file(
+            ctx.deps,
+            path,
+            offset=offset,
+            length=length,
+            action_id=action.id,
+        )
         record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
         return result
 
@@ -197,7 +242,7 @@ def run_coding_agent(
             message_history=None,
             conversation_id=dependencies.run_id,
             run_id=dependencies.run_id,
-            model_settings=model_settings,
+            model_settings=_effective_model_settings(model_settings),
             usage_limits=_usage_limits(settings, max_actions, max_requests),
         )
     finally:
@@ -223,13 +268,19 @@ async def run_coding_agent_async(
             message_history=None,
             conversation_id=dependencies.run_id,
             run_id=dependencies.run_id,
-            model_settings=model_settings,
+            model_settings=_effective_model_settings(model_settings),
             usage_limits=_usage_limits(settings, max_actions, max_requests),
         )
         if timeout_seconds is None:
             return await run
-        async with asyncio.timeout(timeout_seconds):
-            return await run
+        deadline = asyncio.timeout(timeout_seconds)
+        try:
+            async with deadline:
+                return await run
+        except TimeoutError as error:
+            if deadline.expired():
+                raise AgentWallClockTimeoutError(timeout_seconds) from error
+            raise ModelRequestTimeoutError(MODEL_REQUEST_TIMEOUT_SECONDS) from error
     finally:
         finalize_pending_advice(dependencies)
 
@@ -247,3 +298,24 @@ def _usage_limits(
         ),
         tool_calls_limit=max_actions,
     )
+
+
+def _effective_model_settings(model_settings: ModelSettings | None) -> ModelSettings:
+    """Apply the explicit per-request timeout without changing research settings."""
+    effective = dict(model_settings or {})
+    effective["timeout"] = MODEL_REQUEST_TIMEOUT_SECONDS
+    return cast(ModelSettings, effective)
+
+
+def timeout_provenance(error: BaseException | None) -> dict[str, object] | None:
+    """Return structured timeout provenance for persisted run evidence."""
+    if error is None or not isinstance(error, TimeoutError):
+        return None
+    layer = getattr(error, "timeout_layer", "unknown")
+    seconds = getattr(error, "timeout_seconds", None)
+    return {
+        "layer": str(layer),
+        "timeout_seconds": seconds,
+        "error_type": type(error).__name__,
+        "message": str(error),
+    }

@@ -29,8 +29,10 @@ from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 
 from graph_swarm.agent.coding_agent import (
+    MODEL_REQUEST_TIMEOUT_SECONDS,
     create_coding_agent,
     run_coding_agent,
+    timeout_provenance,
 )
 from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.domain.action import ActionResult
@@ -41,7 +43,11 @@ from graph_swarm.domain.events import AgentEvent
 from graph_swarm.domain.failures import FailureType
 from graph_swarm.domain.tasks import Task
 from graph_swarm.research.artifacts import JsonlResearchArtifactWriter
-from graph_swarm.research.contracts import ExperimentCondition, ExperimentRunArtifact
+from graph_swarm.research.contracts import (
+    ExperimentCondition,
+    ExperimentRunArtifact,
+    TimeoutContract,
+)
 from graph_swarm.settings import Settings, get_settings
 
 
@@ -503,6 +509,8 @@ class ExperimentRunArtifactStore:
             "conversation_id": None if result is None else result.conversation_id,
             "agent_run_id": None if result is None else result.run_id,
             "usage": None if result is None else dataclasses.asdict(result.usage),
+            "timeout_contract": artifact.timeout_contract.model_dump(mode="json"),
+            "timeout_provenance": timeout_provenance(error),
         }
         if artifact.condition is ExperimentCondition.O1:
             evidence.update(
@@ -703,8 +711,10 @@ class ExperimentRunner:
         started_counter = time.perf_counter()
         result: AgentRunResult[str] | None = None
         error: Exception | None = None
+        run_settings: Settings | None = None
         try:
             settings = self._settings_for_model()
+            run_settings = settings
             step_persistence = StepPersistence(
                 store=SqliteStepStore(database=step_database_path),
                 agent_name="graph_swarm_coding_agent",
@@ -757,6 +767,7 @@ class ExperimentRunner:
             started=started,
             elapsed_ms=(time.perf_counter() - started_counter) * 1000,
             dependencies=dependencies,
+            settings=run_settings,
             result=result,
             error=error,
             task_success=task_success,
@@ -852,6 +863,7 @@ class ExperimentRunner:
         started: datetime,
         elapsed_ms: float,
         dependencies: AgentDependencies,
+        settings: Settings | None,
         result: AgentRunResult[str] | None,
         error: Exception | None,
         task_success: bool,
@@ -921,6 +933,11 @@ class ExperimentRunner:
             latency_ms=latency_ms,
             retrieved_incident_id=None,
             retrieval_score=None,
+            timeout_contract=_timeout_contract(
+                self.configuration.config.limits.timeout_seconds,
+                settings,
+            ),
+            timeout_provenance=timeout_provenance(error),
         )
 
     def _artifact_model_name(self) -> str:
@@ -978,6 +995,21 @@ def _advice_received(dependencies: AgentDependencies) -> AdviceResult | None:
     if not dependencies.advice_events:
         return None
     return AdviceResult(advice=dependencies.advice_events[0].advice)
+
+
+def _timeout_contract(
+    experiment_timeout_seconds: float,
+    settings: Settings | None,
+) -> TimeoutContract:
+    return TimeoutContract(
+        agent_wall_clock_seconds=experiment_timeout_seconds,
+        model_request_timeout_seconds=MODEL_REQUEST_TIMEOUT_SECONDS,
+        tool_timeout_seconds={
+            "run_command": 30 if settings is None else settings.agent_command_timeout_seconds,
+            "run_tests": 120 if settings is None else settings.agent_tests_timeout_seconds,
+        },
+        experiment_timeout_seconds=experiment_timeout_seconds,
+    )
 
 
 def benchmark_recurrence_determination(

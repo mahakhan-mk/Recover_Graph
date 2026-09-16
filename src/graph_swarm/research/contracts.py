@@ -31,6 +31,15 @@ EXPERIMENT_CONDITIONS: tuple[ExperimentCondition, ...] = (
 )
 
 
+class TimeoutContract(BaseModel):
+    """Effective timeout boundaries recorded with every experiment run."""
+
+    agent_wall_clock_seconds: float = Field(gt=0)
+    model_request_timeout_seconds: float = Field(gt=0)
+    tool_timeout_seconds: dict[str, float] = Field(default_factory=dict)
+    experiment_timeout_seconds: float = Field(gt=0)
+
+
 class ExperimentRunArtifact(BaseModel):
     """Typed, serializable record for one experiment run.
 
@@ -62,6 +71,15 @@ class ExperimentRunArtifact(BaseModel):
     latency_ms: float | None = None
     retrieved_incident_id: str | None = None
     retrieval_score: float | None = None
+    timeout_contract: TimeoutContract = Field(
+        default_factory=lambda: TimeoutContract(
+            agent_wall_clock_seconds=300,
+            model_request_timeout_seconds=300,
+            tool_timeout_seconds={"run_command": 30, "run_tests": 120},
+            experiment_timeout_seconds=300,
+        )
+    )
+    timeout_provenance: dict[str, object] | None = None
 
     @field_validator(
         "experiment_id",
@@ -91,4 +109,5 @@ __all__ = [
     "PerRunArtifact",
     "RunArtifact",
     "T",
+    "TimeoutContract",
 ]

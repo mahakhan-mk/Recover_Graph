@@ -13,6 +13,7 @@ from pydantic_ai.providers.groq import GroqProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from graph_swarm.agent.coding_agent import (
+    MODEL_REQUEST_TIMEOUT_SECONDS,
     AgentConfigurationError,
     create_coding_agent,
     run_coding_agent,
@@ -76,6 +77,26 @@ def test_run_coding_agent_passes_explicit_public_usage_limits(
     usage_limits = cast(UsageLimits, captured["usage_limits"])
     assert usage_limits.request_limit == 24
     assert usage_limits.tool_calls_limit == 20
+
+
+def test_run_coding_agent_forces_explicit_model_request_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings, model = make_offline_agent()
+    dependencies = make_dependencies(tmp_path)
+    agent = create_coding_agent(settings, model=model)
+    captured: dict[str, object] = {}
+
+    def fake_run_sync(*_args: object, **kwargs: object) -> AgentRunResult[str]:
+        captured["model_settings"] = kwargs["model_settings"]
+        return cast(AgentRunResult[str], object())
+
+    monkeypatch.setattr(agent, "run_sync", fake_run_sync)
+    run_coding_agent(agent, settings, dependencies, "Use explicit timeout settings.")
+
+    model_settings = cast(dict[str, object], captured["model_settings"])
+    assert model_settings["timeout"] == MODEL_REQUEST_TIMEOUT_SECONDS
 
 
 async def test_run_coding_agent_async_falls_back_to_settings_request_limit(

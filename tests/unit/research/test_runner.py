@@ -11,7 +11,11 @@ from pydantic_ai import Agent, AgentCapability, AgentRunResult
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from graph_swarm.agent.coding_agent import create_coding_agent
+from graph_swarm.agent.coding_agent import (
+    MODEL_REQUEST_TIMEOUT_SECONDS,
+    AgentWallClockTimeoutError,
+    create_coding_agent,
+)
 from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.detection.failure_detector import detect_failure
 from graph_swarm.domain.action import ActionResult
@@ -268,6 +272,72 @@ def test_runner_wires_configured_action_timeout_and_model_limits(
     assert captured["max_requests"] == 24
     assert captured["timeout_seconds"] == 300
     assert captured["model_settings"] == {"temperature": 0}
+
+
+def test_runner_records_the_effective_timeout_contract(tmp_path: Path) -> None:
+    configuration = load_experiment_configuration(PILOT_CONFIG, project_root=ROOT)
+    runner = ExperimentRunner(
+        configuration,
+        settings=make_settings(),
+        agent_factory=lambda settings, capabilities: create_coding_agent(
+            settings,
+            model=FunctionModel(
+                lambda _messages, _info: ModelResponse(parts=[TextPart("done")])
+            ),
+            capabilities=capabilities,
+        ),
+        workspace_resolver=lambda _task: tmp_path / "workspace",
+        artifact_store=ExperimentRunArtifactStore(tmp_path / "results"),
+        objective_evaluator=lambda _task, _workspace: True,
+        recurrence_evaluator=lambda _case, _events, _result, _workspace: False,
+    )
+
+    execution = runner.run_task(make_task("GS-T001", 1))
+
+    assert execution.artifact.timeout_contract.model_dump(mode="json") == {
+        "agent_wall_clock_seconds": 300.0,
+        "model_request_timeout_seconds": float(MODEL_REQUEST_TIMEOUT_SECONDS),
+        "tool_timeout_seconds": {"run_command": 30.0, "run_tests": 120.0},
+        "experiment_timeout_seconds": 300.0,
+    }
+    assert '"timeout_contract"' in execution.raw_evidence_path.read_text(encoding="utf-8")
+
+
+def test_runner_records_timeout_layer_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configuration = load_experiment_configuration(PILOT_CONFIG, project_root=ROOT)
+
+    def fake_run(*_args: object, **_kwargs: object) -> None:
+        raise AgentWallClockTimeoutError(300)
+
+    monkeypatch.setattr("graph_swarm.research.runner.run_coding_agent", fake_run)
+    runner = ExperimentRunner(
+        configuration,
+        settings=make_settings(),
+        agent_factory=lambda settings, capabilities: create_coding_agent(
+            settings,
+            model=FunctionModel(
+                lambda _messages, _info: ModelResponse(parts=[TextPart("done")])
+            ),
+            capabilities=capabilities,
+        ),
+        workspace_resolver=lambda _task: tmp_path / "workspace",
+        artifact_store=ExperimentRunArtifactStore(tmp_path / "results"),
+        objective_evaluator=lambda _task, _workspace: True,
+        recurrence_evaluator=lambda _case, _events, _result, _workspace: False,
+    )
+
+    execution = runner.run_task(make_task("GS-T001", 1))
+
+    assert execution.artifact.timeout_provenance == {
+        "layer": "agent_wall_clock",
+        "timeout_seconds": 300,
+        "error_type": "AgentWallClockTimeoutError",
+        "message": "agent wall-clock deadline expired after 300 seconds",
+    }
+    assert '"timeout_provenance"' in execution.raw_evidence_path.read_text(encoding="utf-8")
 
 
 def test_runner_passes_docker_runtime_contract_without_host_python(
