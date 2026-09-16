@@ -4,15 +4,17 @@ import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
-from pydantic_ai import Agent, AgentCapability
+from pydantic_ai import Agent, AgentCapability, ModelRetry
 from pydantic_ai.messages import ModelMessage, ModelResponse, RetryPromptPart, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from experiments.oracle import FrozenOracleResolver
 from graph_swarm.advisory.service import AdvisoryService
+from graph_swarm.agent.advisory import prepare_tool_action
 from graph_swarm.agent.coding_agent import create_coding_agent
 from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.domain.actions import PlannedAction
@@ -100,6 +102,91 @@ def test_frozen_oracle_maps_only_transfer_tasks_and_renders_guidance_only() -> N
     assert "frozen_transfer_mapping" not in rendered
     assert "oracle-failure" not in rendered
     assert "oracle-resolution" not in rendered
+
+
+def test_frozen_oracle_ignores_unrelated_filesystem_exploration() -> None:
+    resolver = FrozenOracleResolver({"GS-T007": PATTERN})
+    task = make_task("GS-T007", 7)
+    environment = EnvironmentContext(
+        id="environment-current",
+        repository=task.repository,
+        runtime="python",
+    )
+    unrelated_action = PlannedAction(
+        id="read-action",
+        run_id="run-current",
+        task_id=task.id,
+        tool="read_file",
+        operation="read_file",
+        arguments={"path": "/workspace/jinja2"},
+        planned_at=datetime.now(UTC),
+    )
+
+    advice = resolver.evaluate_action(task, unrelated_action, environment)
+
+    assert advice.has_advice is False
+
+
+def test_b0_receives_no_oracle_advice(tmp_path: Path) -> None:
+    task = make_task("GS-T007", 7)
+    dependencies = AgentDependencies(
+        tmp_path,
+        "run-current",
+        task.id,
+        task=task,
+        environment=EnvironmentContext(
+            id="environment-current",
+            repository=task.repository,
+            runtime="python",
+        ),
+    )
+    assert prepare_tool_action(
+        dependencies,
+        "run_tests",
+        "run_tests",
+        {},
+    ).tool == "run_tests"
+    assert dependencies.advice_events == []
+
+
+def test_o1_oracle_delivers_once_before_the_frozen_test_action(tmp_path: Path) -> None:
+    resolver = FrozenOracleResolver({"GS-T007": PATTERN})
+    task = make_task("GS-T007", 7)
+    dependencies = AgentDependencies(
+        tmp_path,
+        "run-current",
+        task.id,
+        task=task,
+        environment=EnvironmentContext(
+            id="environment-current",
+            repository=task.repository,
+            runtime="python",
+        ),
+        advisory_service=cast(AdvisoryService, resolver),
+    )
+
+    unrelated = PlannedAction(
+        id="read-action",
+        run_id=dependencies.run_id,
+        task_id=task.id,
+        tool="read_file",
+        operation="read_file",
+        arguments={"path": "/workspace/jinja2"},
+        planned_at=datetime.now(UTC),
+    )
+    assert prepare_tool_action(
+        dependencies,
+        unrelated.tool,
+        unrelated.operation,
+        unrelated.arguments,
+    ).tool == "read_file"
+    assert dependencies.advice_events == []
+
+    with pytest.raises(ModelRetry, match=PATTERN):
+        prepare_tool_action(dependencies, "run_tests", "run_tests", {})
+    assert prepare_tool_action(dependencies, "run_tests", "run_tests", {}).tool == "run_tests"
+    assert len(dependencies.advice_events) == 1
+    assert dependencies.advice_events[0].planned_action.tool == "run_tests"
 
 
 def test_o1_injects_guidance_before_action_and_records_o1_evidence(tmp_path: Path) -> None:

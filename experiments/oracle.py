@@ -43,6 +43,7 @@ class FrozenOracleResolver:
     """Resolve O1 guidance from validated transfer evidence only."""
 
     one_shot = True
+    _TRANSFER_ACTION = ("run_tests", "run_tests")
 
     def __init__(self, transfers: Mapping[str, str | OracleTransferEvidence]) -> None:
         normalized: dict[str, OracleTransferEvidence] = {}
@@ -161,6 +162,10 @@ class FrozenOracleResolver:
         evidence = self._transfers.get(task.id)
         if evidence is None:
             return AdviceResult.no_advice("task is not a frozen Oracle transfer opportunity")
+        if (planned_action.tool, planned_action.operation) != self._TRANSFER_ACTION:
+            return AdviceResult.no_advice(
+                "frozen Oracle guidance applies only before the transfer test action"
+            )
 
         return AdviceResult.historical_recovery(
             matched_failure_episode_id=f"oracle-failure-{task.id}",
