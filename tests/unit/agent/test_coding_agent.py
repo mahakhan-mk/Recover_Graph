@@ -5,7 +5,12 @@ from typing import cast
 import pytest
 from pydantic_ai import AgentRunResult, FunctionToolset, UsageLimits
 from pydantic_ai.messages import ToolReturnPart
+from pydantic_ai.models.groq import GroqModel
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.providers.groq import GroqProvider
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from graph_swarm.agent.coding_agent import (
     AgentConfigurationError,
@@ -105,6 +110,25 @@ def test_live_factory_requires_explicit_groq_configuration() -> None:
         create_coding_agent(make_settings(load_env_file=False))
 
 
+def test_groq_factory_preserves_groq_model_and_provider() -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={
+            "model_provider": "groq",
+            "groq_model": "llama-3.3-70b-versatile",
+            "groq_api_key": "offline-key",
+        }
+    )
+
+    agent = create_coding_agent(settings)
+
+    model = cast(GroqModel, agent.model)
+    assert type(model) is GroqModel
+    assert isinstance(model, GroqModel)
+    assert model.model_name == "llama-3.3-70b-versatile"
+    assert model.system == "groq"
+    assert isinstance(model._provider, GroqProvider)  # pyright: ignore[reportPrivateUsage]
+
+
 def test_openrouter_factory_requires_key_only_when_selected() -> None:
     settings = make_settings(load_env_file=False).model_copy(
         update={"model_provider": "openrouter", "openrouter_model": "qwen/test"}
@@ -119,6 +143,41 @@ def test_openrouter_factory_requires_model_only_when_selected() -> None:
     )
     with pytest.raises(AgentConfigurationError, match="OPENROUTER_MODEL"):
         create_coding_agent(settings)
+
+
+def test_openrouter_factory_uses_dedicated_model_and_preserves_configuration() -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={
+            "model_provider": "openrouter",
+            "openrouter_model": "qwen/test",
+            "openrouter_api_key": "offline-key",
+        }
+    )
+
+    agent = create_coding_agent(settings)
+
+    model = cast(OpenRouterModel, agent.model)
+    assert type(model) is OpenRouterModel
+    assert type(model) is not OpenAIChatModel
+    assert model.model_name == "qwen/test"
+    assert isinstance(model, OpenRouterModel)
+    assert isinstance(model._provider, OpenRouterProvider)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_coding_agent_freezes_tool_retries_at_three() -> None:
+    settings, model = make_offline_agent()
+
+    agent = create_coding_agent(settings, model=model)
+
+    assert agent._max_tool_retries == 3  # pyright: ignore[reportPrivateUsage]
+
+
+def test_coding_agent_accepts_offline_model_injection() -> None:
+    settings, model = make_offline_agent()
+
+    agent = create_coding_agent(settings, model=model)
+
+    assert agent.model is model
 
 
 async def test_agent_has_rollout_prompt_and_exactly_four_controlled_tools(

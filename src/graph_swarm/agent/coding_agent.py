@@ -18,7 +18,7 @@ from pydantic_ai import (
 )
 from pydantic_ai.models import Model
 from pydantic_ai.models.groq import GroqModel
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.groq import GroqProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
@@ -41,6 +41,9 @@ class AgentConfigurationError(ValueError):
     """Raised when live coding-agent provider configuration is incomplete."""
 
 
+_CODING_AGENT_TOOL_RETRIES = 3
+
+
 def _build_groq_model(settings: Settings) -> GroqModel:
     if not settings.groq_model or not settings.groq_model.strip():
         raise AgentConfigurationError("groq_model must be supplied through Settings or GROQ_MODEL")
@@ -53,7 +56,7 @@ def _build_groq_model(settings: Settings) -> GroqModel:
     return GroqModel(settings.groq_model, provider=provider)
 
 
-def _build_openrouter_model(settings: Settings) -> OpenAIChatModel:
+def _build_openrouter_model(settings: Settings) -> OpenRouterModel:
     if not settings.openrouter_model or not settings.openrouter_model.strip():
         raise AgentConfigurationError(
             "openrouter_model must be supplied through Settings or OPENROUTER_MODEL"
@@ -62,7 +65,7 @@ def _build_openrouter_model(settings: Settings) -> OpenAIChatModel:
         raise AgentConfigurationError(
             "openrouter_api_key must be supplied through Settings or OPENROUTER_API_KEY"
         )
-    return OpenAIChatModel(
+    return OpenRouterModel(
         settings.openrouter_model,
         provider=OpenRouterProvider(api_key=settings.openrouter_api_key),
     )
@@ -90,6 +93,7 @@ def create_coding_agent(
         deps_type=AgentDependencies,
         output_type=str,
         system_prompt=ROLLOUT1_SYSTEM_PROMPT,
+        retries={"tools": _CODING_AGENT_TOOL_RETRIES},
         capabilities=capabilities,
     )
 
