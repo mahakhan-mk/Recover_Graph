@@ -1,6 +1,7 @@
 """Canonical contracts shared by the research experiment tracks."""
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -47,6 +48,14 @@ class ProviderRequestPacingContract(BaseModel):
     max_nominal_requests_per_minute: float = Field(gt=0)
 
 
+class BoundedTermination(BaseModel):
+    """A normal termination caused by one configured frozen run budget."""
+
+    type: Literal["budget_exhausted"] = "budget_exhausted"
+    budget: Literal["tool_calls", "requests"]
+    configured_limit: int = Field(gt=0)
+
+
 class ExperimentRunArtifact(BaseModel):
     """Typed, serializable record for one experiment run.
 
@@ -67,6 +76,10 @@ class ExperimentRunArtifact(BaseModel):
     planned_action: PlannedAction
     executed_action: ActionResult
     advice_received: AdviceResult | None = None
+    advice_count: int = Field(default=0, ge=0)
+    advice_intervention_boundary: str | None = None
+    advice_delivery_timing: str | None = None
+    advice_review_id: str | None = None
     advice_accepted: bool = False
     failure_type: FailureType | None = None
     task_success: bool
@@ -94,6 +107,7 @@ class ExperimentRunArtifact(BaseModel):
         )
     )
     provider_pacing_wait_seconds: float = Field(default=0.0, ge=0)
+    termination: BoundedTermination | None = None
 
     @field_validator(
         "experiment_id",
@@ -117,6 +131,7 @@ PerRunArtifact = ExperimentRunArtifact
 __all__ = [
     "EXPERIMENT_CONDITIONS",
     "B0",
+    "BoundedTermination",
     "ExperimentCondition",
     "ExperimentRunArtifact",
     "O1",

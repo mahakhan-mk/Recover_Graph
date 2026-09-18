@@ -136,6 +136,13 @@ never prepare benchmark environments implicitly. If either phase reports a
 missing or unvalidated environment, run `benchmark_prepare` followed by
 `benchmark_preflight` before retrying.
 
+The Sprint 3D-A freeze is a pre-Gate-B1 plumbing check. B0 receives no
+guidance; O1 receives exactly one frozen GS-R014 recovery intervention at
+`task_start`, before its first model request. The later T condition will use
+the same boundary for retrieved guidance. Reaching the frozen action or
+request budget is recorded as bounded termination, not a provider or
+infrastructure failure, and is allowed by the provider-smoke completion rule.
+
 ## Agent runtime smoke
 
 Run this zero-provider check after `benchmark_preflight` and before the first
@@ -204,9 +211,12 @@ provider smoke with the currently selected model configuration:
 The command succeeds only when the prepared environment marker is validated,
 the matching runtime-smoke artifact exists, both immutable run artifacts were
 written, B0 received zero Oracle advice, and O1 received its expected frozen
-one-shot intervention. Provider or infrastructure failures are recorded and
-the smoke fails without an automatic rerun. Objective success is reported but
-is not required for this development smoke. Summary files are append-only
+one-shot intervention before the first model request. Provider or
+infrastructure failures are recorded and the smoke fails without an automatic
+rerun. Correctly recorded fixed-budget exhaustion is allowed. Objective
+success is reported but is not required for this development smoke. This is
+development evidence only, not a Gate B1 result; every summary keeps
+`gate_b1_evaluated` false. Summary files are append-only
 `provider-smoke-*.json` documents under
 `research/evidence/results/GS-E003/sprint3b/`; every summary explicitly keeps
 `gate_b1_evaluated` false.

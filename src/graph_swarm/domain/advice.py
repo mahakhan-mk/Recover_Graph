@@ -19,6 +19,13 @@ class EvaluateActionRequest(BaseModel):
     environment: EnvironmentContext
 
 
+class EvaluateTaskStartRequest(BaseModel):
+    """Inputs for guidance delivered at the frozen task-start boundary."""
+
+    task: Task
+    environment: EnvironmentContext
+
+
 class ApplicabilityAssessment(BaseModel):
     """Structured facts that made a historical recovery applicable."""
 

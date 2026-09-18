@@ -22,12 +22,14 @@ from uuid import uuid4
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_ai import Agent, AgentCapability, AgentRunResult, ModelSettings
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import RetryPromptPart
 from pydantic_ai.models import Model
 from pydantic_ai_harness.step_persistence import SqliteStepStore, StepPersistence
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 
+from graph_swarm.agent.advisory import prepare_task_start_guidance
 from graph_swarm.agent.coding_agent import (
     MODEL_REQUEST_TIMEOUT_SECONDS,
     create_coding_agent,
@@ -45,6 +47,7 @@ from graph_swarm.domain.failures import FailureType
 from graph_swarm.domain.tasks import Task
 from graph_swarm.research.artifacts import JsonlResearchArtifactWriter
 from graph_swarm.research.contracts import (
+    BoundedTermination,
     ExperimentCondition,
     ExperimentRunArtifact,
     ProviderRequestPacingContract,
@@ -271,9 +274,16 @@ def load_tasks(
     ]
 
 
-def build_task_prompt(task: Task) -> str:
-    """Build the only task-specific model input used by B0."""
-    return f"Task problem statement:\n\n{task.problem_statement}"
+def build_task_prompt(task: Task, *, task_start_guidance: str | None = None) -> str:
+    """Build the task input, keeping optional guidance outside the problem statement."""
+    prompt = f"Task problem statement:\n\n{task.problem_statement}"
+    if task_start_guidance:
+        prompt += (
+            "\n\n--- Recovery guidance intervention (task_start) ---\n\n"
+            f"{task_start_guidance}\n"
+            "--- End recovery guidance intervention ---"
+        )
+    return prompt
 
 
 class BaselineWorkspaceManager:
@@ -366,6 +376,15 @@ class OracleAdviceResolver(Protocol):
         environment: EnvironmentContext,
     ) -> AdviceResult:
         """Return Oracle advice for a planned action, without changing it."""
+        ...
+
+    def evaluate_task_start(
+        self,
+        task: Task,
+        environment: EnvironmentContext,
+        planned_action: PlannedAction,
+    ) -> AdviceResult:
+        """Return one guidance item for the pre-first-request boundary."""
         ...
 
     def render_advice(self, advice: AdviceResult) -> str:
@@ -515,6 +534,17 @@ class ExperimentRunArtifactStore:
             "timeout_provenance": timeout_provenance(error),
             "provider_request_pacing": artifact.provider_request_pacing.model_dump(mode="json"),
             "provider_pacing_wait_seconds": artifact.provider_pacing_wait_seconds,
+            "advice_count": artifact.advice_count,
+            "advice_review_id": artifact.advice_review_id,
+            "advice_intervention_boundary": artifact.advice_intervention_boundary,
+            "advice_delivery_timing": artifact.advice_delivery_timing,
+            "termination": (
+                None
+                if artifact.termination is None
+                else artifact.termination.model_dump(mode="json")
+            ),
+            "budget_exhausted": artifact.termination is not None,
+            "objective_result": artifact.task_success,
         }
         if artifact.condition is ExperimentCondition.O1:
             evidence.update(
@@ -717,6 +747,7 @@ class ExperimentRunner:
         started_counter = time.perf_counter()
         result: AgentRunResult[str] | None = None
         error: Exception | None = None
+        task_start_guidance: str | None = None
         run_settings: Settings | None = None
         try:
             settings = self._settings_for_model()
@@ -732,11 +763,12 @@ class ExperimentRunner:
                 },
             )
             agent = self._build_agent(settings, step_persistence)
+            task_start_guidance = prepare_task_start_guidance(dependencies)
             result = run_coding_agent(
                 agent,
                 settings,
                 dependencies,
-                build_task_prompt(task),
+                build_task_prompt(task, task_start_guidance=task_start_guidance),
                 max_actions=self.configuration.config.limits.max_actions,
                 max_requests=self.configuration.config.limits.max_requests,
                 timeout_seconds=self.configuration.config.limits.timeout_seconds,
@@ -780,6 +812,8 @@ class ExperimentRunner:
             task_success=task_success,
             known_failure_repeated=known_failure_repeated,
             advice_received=_advice_received(dependencies),
+            task_start_guidance=task_start_guidance,
+            termination=_budget_termination(error, self.configuration.config.limits),
         )
         raw_path = self.artifact_store.write_raw_evidence(
             artifact=artifact,
@@ -876,6 +910,8 @@ class ExperimentRunner:
         task_success: bool,
         known_failure_repeated: bool,
         advice_received: AdviceResult | None,
+        task_start_guidance: str | None,
+        termination: BoundedTermination | None,
     ) -> ExperimentRunArtifact:
         if dependencies.events:
             event = dependencies.events[-1]
@@ -929,6 +965,14 @@ class ExperimentRunner:
             planned_action=planned_action,
             executed_action=executed_action,
             advice_received=advice_received,
+            advice_count=len(dependencies.advice_events),
+            advice_intervention_boundary=(
+                "task_start" if task_start_guidance is not None else None
+            ),
+            advice_delivery_timing=(
+                "pre_first_model_request" if task_start_guidance is not None else None
+            ),
+            advice_review_id=self._advice_review_id(condition, task),
             advice_accepted=False,
             failure_type=failure_type,
             task_success=task_success,
@@ -952,6 +996,7 @@ class ExperimentRunner:
                 ),
             ),
             provider_pacing_wait_seconds=self.request_pacing.wait_seconds_for_run(run_id),
+            termination=termination,
         )
 
     def _artifact_model_name(self) -> str:
@@ -963,6 +1008,19 @@ class ExperimentRunner:
                 or self.configuration.model.model
             )
         return self.configuration.model.model
+
+    def _advice_review_id(
+        self,
+        condition: ExperimentCondition,
+        task: Task,
+    ) -> str | None:
+        if condition is not ExperimentCondition.O1 or self.oracle_resolver is None:
+            return None
+        reviewer = cast(
+            Callable[[str], str | None] | None,
+            getattr(self.oracle_resolver, "review_id_for", None),
+        )
+        return None if reviewer is None else reviewer(task.id)
 
 
 def _planned_action(event: AgentEvent) -> PlannedAction:
@@ -984,6 +1042,21 @@ def _failure_type(result: ActionResult) -> FailureType | None:
         "run_tests": FailureType.TEST_FAILURE,
         "run_command": FailureType.COMMAND_FAILURE,
     }.get(result.tool_name, FailureType.TOOL_PARAMETER_ERROR)
+
+
+def _budget_termination(
+    error: Exception | None,
+    limits: ExperimentLimits,
+) -> BoundedTermination | None:
+    """Recognize only the configured action/request budget exceptions."""
+    if not isinstance(error, UsageLimitExceeded):
+        return None
+    message = str(error)
+    if f"tool_calls_limit of {limits.max_actions}" in message:
+        return BoundedTermination(budget="tool_calls", configured_limit=limits.max_actions)
+    if limits.max_requests is not None and f"request_limit of {limits.max_requests}" in message:
+        return BoundedTermination(budget="requests", configured_limit=limits.max_requests)
+    return None
 
 
 def _configured_condition(

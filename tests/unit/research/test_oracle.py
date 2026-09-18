@@ -8,7 +8,7 @@ from typing import cast
 
 import pytest
 from pydantic_ai import Agent, AgentCapability, ModelRetry
-from pydantic_ai.messages import ModelMessage, ModelResponse, RetryPromptPart, TextPart
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
@@ -216,28 +216,32 @@ def test_o1_injects_guidance_before_action_and_records_o1_evidence(tmp_path: Pat
     assert execution.artifact.advice_received is not None
     assert execution.artifact.advice_received.recovery_summary == PATTERN
     assert len(execution.dependencies.advice_events) == 1
-    assert len(execution.dependencies.behavior_evidence) == 1
+    assert execution.artifact.advice_intervention_boundary == "task_start"
+    assert execution.artifact.advice_delivery_timing == "pre_first_model_request"
 
     assert execution.agent_result is not None
-    retry_text = "\n".join(
+    first_prompt = "\n".join(
         str(part.content)
         for message in execution.agent_result.all_messages()
         for part in message.parts
-        if isinstance(part, RetryPromptPart)
+        if isinstance(part, UserPromptPart)
     )
-    assert PATTERN in retry_text
-    assert "GS-F001" not in retry_text
-    assert "gold" not in retry_text.lower()
-    assert "expected_patch" not in retry_text
-    assert "frozen_transfer_mapping" not in retry_text
-    assert "oracle-failure" not in retry_text
-    assert "oracle-resolution" not in retry_text
+    assert PATTERN in first_prompt
+    assert "Recovery guidance intervention (task_start)" in first_prompt
+    assert "Task problem statement:" in first_prompt
+    assert "GS-F001" not in first_prompt
+    assert "gold" not in first_prompt.lower()
+    assert "expected_patch" not in first_prompt
+    assert "frozen_transfer_mapping" not in first_prompt
+    assert "oracle-failure" not in first_prompt
+    assert "oracle-resolution" not in first_prompt
 
     raw = json.loads(execution.raw_evidence_path.read_text(encoding="utf-8"))
     assert raw["condition"] == "O1"
     assert raw["advice_source"] == "O1"
     assert len(raw["advice_events"]) == 1
-    assert len(raw["behavior_evidence"]) == 1
+    assert raw["advice_intervention_boundary"] == "task_start"
+    assert raw["advice_delivery_timing"] == "pre_first_model_request"
 
 
 def test_non_transfer_o1_has_no_oracle_advice_and_isolated_history(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ from graph_swarm.research.contracts import (
     B0,
     EXPERIMENT_CONDITIONS,
     O1,
+    BoundedTermination,
     ExperimentCondition,
     ExperimentRunArtifact,
     PerRunArtifact,
@@ -42,6 +43,7 @@ from graph_swarm.research.runner import (
 __all__ = [
     "EXPERIMENT_CONDITIONS",
     "B0",
+    "BoundedTermination",
     "ExperimentCondition",
     "ExperimentRunArtifact",
     "O1",

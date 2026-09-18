@@ -249,15 +249,19 @@ def build_provider_smoke_summary(
         failures.append("O1 did not receive the expected frozen Oracle intervention")
     else:
         delivered_advice = o1_result.advice
-        actual_oracle_review_id = expected_oracle_review_id
+        actual_oracle_review_id = o1.artifact.advice_review_id or expected_oracle_review_id
+        if actual_oracle_review_id != expected_oracle_review_id:
+            failures.append("O1 intervention provenance does not match GS-R014")
         if delivered_advice.recovery_summary != expected_recovery_pattern:
             failures.append(
                 "O1 delivered recovery pattern does not match frozen Oracle recovery pattern"
             )
     if len(o1.dependencies.advice_events) != 1:
         failures.append("O1 did not receive exactly one Oracle intervention")
-    if any(execution.error is not None for execution in executions):
-        failures.append("a provider/agent execution error was recorded")
+    if o1.artifact.advice_intervention_boundary != "task_start":
+        failures.append("O1 intervention did not occur at task_start")
+    if o1.artifact.advice_delivery_timing != "pre_first_model_request":
+        failures.append("O1 intervention was not delivered before the first model request")
     for condition, execution in (("B0", b0), ("O1", o1)):
         if not execution.artifact_path.is_file():
             failures.append(f"{condition} canonical artifact is missing")
@@ -301,7 +305,7 @@ def build_provider_smoke_summary(
         failures.extend(
             f"{condition} error classified as {value['classification']}"
             for condition, value in provider_or_agent_errors.items()
-            if value is not None
+            if value is not None and value["classification"] != "bounded_termination"
         )
 
     summary = {
@@ -386,6 +390,10 @@ def build_provider_smoke_summary(
         "o1_oracle_advice_count": len(o1.dependencies.advice_events),
         "o1_oracle_review_id": actual_oracle_review_id,
         "frozen_recovery_pattern": expected_recovery_pattern,
+        "o1_intervention_timing": {
+            "boundary": o1.artifact.advice_intervention_boundary,
+            "delivery": o1.artifact.advice_delivery_timing,
+        },
         "o1_oracle_intervention": (
             None
             if delivered_advice is None
@@ -407,6 +415,22 @@ def build_provider_smoke_summary(
         },
         "latency_ms": {"b0": b0.artifact.latency_ms, "o1": o1.artifact.latency_ms},
         "error_classification": provider_or_agent_errors,
+        "termination": {
+            "b0": (
+                None
+                if b0.artifact.termination is None
+                else b0.artifact.termination.model_dump(mode="json")
+            ),
+            "o1": (
+                None
+                if o1.artifact.termination is None
+                else o1.artifact.termination.model_dump(mode="json")
+            ),
+        },
+        "budget_exhausted": {
+            "b0": b0.artifact.termination is not None,
+            "o1": o1.artifact.termination is not None,
+        },
         "artifact_paths": {
             "b0_artifact": str(b0.artifact_path),
             "b0_raw_evidence": str(b0.raw_evidence_path),
@@ -563,7 +587,9 @@ def _execution_error(execution: ExperimentExecution) -> dict[str, object] | None
     if error is None:
         return None
     name = str(getattr(error, "error_type", type(error).__name__))
-    if name.endswith("HTTPError") or name.endswith("APIError"):
+    if execution.artifact.termination is not None:
+        classification = "bounded_termination"
+    elif name.endswith("HTTPError") or name.endswith("APIError"):
         classification = "provider"
     elif name in {"UnexpectedModelBehavior", "UsageLimitExceeded"}:
         classification = "agent_control"

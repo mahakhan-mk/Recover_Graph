@@ -44,6 +44,7 @@ class FrozenOracleResolver:
 
     one_shot = True
     _TRANSFER_ACTION = ("run_tests", "run_tests")
+    _TASK_START_ACTION = ("task_start", "task_start")
 
     def __init__(self, transfers: Mapping[str, str | OracleTransferEvidence]) -> None:
         normalized: dict[str, OracleTransferEvidence] = {}
@@ -196,6 +197,42 @@ class FrozenOracleResolver:
         if not advice.has_advice or not advice.recovery_summary:
             raise OracleEvidenceRequired("Oracle advice has no recovery guidance")
         return f"Recovery guidance: {advice.recovery_summary}"
+
+    def evaluate_task_start(
+        self,
+        task: Task,
+        environment: EnvironmentContext,
+        planned_action: PlannedAction,
+    ) -> AdviceResult:
+        """Return the frozen Oracle guidance at task start."""
+        if (planned_action.tool, planned_action.operation) != self._TASK_START_ACTION:
+            return AdviceResult.no_advice("guidance action is not the task-start boundary")
+        evidence = self._transfers.get(task.id)
+        if evidence is None:
+            return AdviceResult.no_advice("task is not a frozen Oracle transfer opportunity")
+        return AdviceResult.historical_recovery(
+            matched_failure_episode_id=f"oracle-failure-{task.id}",
+            matched_resolution_id=f"oracle-resolution-{task.id}",
+            failed_tool=planned_action.tool,
+            failed_operation=planned_action.operation,
+            recovery_summary=evidence.recovery_pattern,
+            resolution_status=ResolutionStatus.OBSERVED_SUCCESSFUL,
+            recovery_evidence=RecoveryEvidence(
+                successful_observations=1,
+                failed_observations=0,
+            ),
+            applicability=ApplicabilityAssessment(
+                matched_fields=("frozen_transfer_mapping",),
+                repository=environment.repository,
+                runtime=environment.runtime,
+            ),
+            provenance=RecoveryProvenance(
+                failure_episode_id=f"oracle-failure-{task.id}",
+                resolution_id=f"oracle-resolution-{task.id}",
+                failed_action_id=planned_action.id,
+                environment_id=environment.id,
+            ),
+        )
 
 
 def _required_text(record: dict[str, Any], field: str) -> str:

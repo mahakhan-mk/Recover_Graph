@@ -122,6 +122,10 @@ def _execution(
             if advice
             else None
         ),
+        advice_count=1 if advice else 0,
+        advice_intervention_boundary="task_start" if advice else None,
+        advice_delivery_timing="pre_first_model_request" if advice else None,
+        advice_review_id=review_id if advice else None,
         task_success=False,
         known_failure_repeated=False,
         tool_calls=1,

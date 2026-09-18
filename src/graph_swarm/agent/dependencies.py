@@ -75,6 +75,7 @@ class AgentDependencies:
         default_factory=lambda: list[AdviceEvent](), repr=False
     )
     oracle_advice_issued: bool = field(default=False, repr=False)
+    task_start_guidance_evaluated: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
         self.workspace_root = self.workspace_root.expanduser().resolve()

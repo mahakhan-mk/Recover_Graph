@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from pydantic_ai import Agent, AgentCapability, AgentRunResult
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
@@ -338,6 +339,75 @@ def test_runner_records_timeout_layer_provenance(
         "message": "agent wall-clock deadline expired after 300 seconds",
     }
     assert '"timeout_provenance"' in execution.raw_evidence_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("message", "budget", "limit"),
+    [
+        (
+            "The next tool call(s) would exceed the tool_calls_limit of 20 (21).",
+            "tool_calls",
+            20,
+        ),
+        (
+            "The next request would exceed the request_limit of 24.",
+            "requests",
+            24,
+        ),
+    ],
+)
+def test_runner_records_configured_usage_limit_as_bounded_termination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    budget: str,
+    limit: int,
+) -> None:
+    configuration = load_experiment_configuration(PILOT_CONFIG, project_root=ROOT)
+
+    def fake_run(*_args: object, **_kwargs: object) -> None:
+        raise UsageLimitExceeded(message)
+
+    monkeypatch.setattr("graph_swarm.research.runner.run_coding_agent", fake_run)
+    runner = ExperimentRunner(
+        configuration,
+        settings=make_settings(),
+        agent_factory=lambda settings, capabilities: create_coding_agent(
+            settings,
+            model=FunctionModel(
+                lambda _messages, _info: ModelResponse(parts=[TextPart("done")])
+            ),
+            capabilities=capabilities,
+        ),
+        workspace_resolver=lambda _task: tmp_path / budget,
+        artifact_store=ExperimentRunArtifactStore(tmp_path / "results"),
+        objective_evaluator=lambda _task, _workspace: False,
+        recurrence_evaluator=lambda _case, _events, _result, _workspace: False,
+    )
+
+    execution = runner.run_task(make_task("GS-T001", 1))
+
+    assert execution.artifact.termination is not None
+    assert execution.artifact.termination.budget == budget
+    assert execution.artifact.termination.configured_limit == limit
+    raw = execution.raw_evidence_path.read_text(encoding="utf-8")
+    assert '"budget_exhausted":true' in raw
+    assert '"type":"budget_exhausted"' in raw
+
+
+def test_runner_does_not_normalize_unrelated_usage_limit(tmp_path: Path) -> None:
+    from graph_swarm.research.runner import (
+        _budget_termination,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    limits = ExperimentLimits(max_actions=20, max_requests=24, timeout_seconds=300)
+    assert (
+        _budget_termination(
+            UsageLimitExceeded("Exceeded the output_tokens_limit of 20"),
+            limits,
+        )
+        is None
+    )
 
 
 def test_runner_passes_docker_runtime_contract_without_host_python(

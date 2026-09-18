@@ -1,6 +1,7 @@
 """The single agent-side boundary for pre-tool advisory evaluation."""
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
@@ -13,7 +14,9 @@ from graph_swarm.agent.hooks import emit_advice_event
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.advice import AdviceResult
 from graph_swarm.domain.behavior import BehaviorChangeEvidence
+from graph_swarm.domain.environment import EnvironmentContext
 from graph_swarm.domain.events import AgentEvent
+from graph_swarm.domain.tasks import Task
 
 
 def prepare_tool_action(
@@ -76,6 +79,50 @@ def prepare_tool_action(
         dependencies.oracle_advice_issued = True
     dependencies.queue_advice_event(event)
     raise ModelRetry(rendered)
+
+
+def prepare_task_start_guidance(dependencies: AgentDependencies) -> str | None:
+    """Resolve and record one guidance intervention before the first model request."""
+    if dependencies.task_start_guidance_evaluated:
+        return None
+    dependencies.task_start_guidance_evaluated = True
+
+    service = dependencies.advisory_service
+    task = dependencies.task
+    environment = dependencies.environment
+    evaluator = cast(
+        Callable[[Task, EnvironmentContext, PlannedAction], AdviceResult] | None,
+        getattr(service, "evaluate_task_start", None),
+    )
+    if service is None or task is None or environment is None or not callable(evaluator):
+        return None
+    if dependencies.oracle_advice_issued:
+        return None
+
+    action = PlannedAction(
+        id=str(uuid4()),
+        run_id=dependencies.run_id,
+        task_id=dependencies.task_id,
+        tool="task_start",
+        operation="task_start",
+        arguments={},
+        planned_at=datetime.now(UTC),
+    )
+    try:
+        advice = evaluator(task, environment, action)
+        if not advice.has_advice:
+            return None
+        renderer = getattr(service, "render_advice", None)
+        rendered = cast(str, renderer(advice)) if callable(renderer) else format_advice(advice)
+        if not rendered:
+            raise ValueError("applicable task-start advice rendered as empty text")
+        emit_advice_event(dependencies, action, advice, rendered)
+    except Exception as error:  # noqa: BLE001 - advisory failure must not mutate execution
+        dependencies.advisory_errors.append(f"task-start guidance failed: {error}")
+        return None
+
+    dependencies.oracle_advice_issued = True
+    return rendered
 
 
 def record_post_advice_action(
