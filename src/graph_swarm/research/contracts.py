@@ -40,6 +40,13 @@ class TimeoutContract(BaseModel):
     experiment_timeout_seconds: float = Field(gt=0)
 
 
+class ProviderRequestPacingContract(BaseModel):
+    """Deterministic minimum interval between provider request starts."""
+
+    min_interval_seconds: float = Field(gt=0)
+    max_nominal_requests_per_minute: float = Field(gt=0)
+
+
 class ExperimentRunArtifact(BaseModel):
     """Typed, serializable record for one experiment run.
 
@@ -80,6 +87,13 @@ class ExperimentRunArtifact(BaseModel):
         )
     )
     timeout_provenance: dict[str, object] | None = None
+    provider_request_pacing: ProviderRequestPacingContract = Field(
+        default_factory=lambda: ProviderRequestPacingContract(
+            min_interval_seconds=5.0,
+            max_nominal_requests_per_minute=12.0,
+        )
+    )
+    provider_pacing_wait_seconds: float = Field(default=0.0, ge=0)
 
     @field_validator(
         "experiment_id",
@@ -107,6 +121,7 @@ __all__ = [
     "ExperimentRunArtifact",
     "O1",
     "PerRunArtifact",
+    "ProviderRequestPacingContract",
     "RunArtifact",
     "T",
     "TimeoutContract",

@@ -35,6 +35,7 @@ from graph_swarm.agent.coding_agent import (
     timeout_provenance,
 )
 from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
+from graph_swarm.agent.pacing import ProviderRequestPacing
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.advice import AdviceResult
@@ -46,6 +47,7 @@ from graph_swarm.research.artifacts import JsonlResearchArtifactWriter
 from graph_swarm.research.contracts import (
     ExperimentCondition,
     ExperimentRunArtifact,
+    ProviderRequestPacingContract,
     TimeoutContract,
 )
 from graph_swarm.settings import Settings, get_settings
@@ -511,6 +513,8 @@ class ExperimentRunArtifactStore:
             "usage": None if result is None else dataclasses.asdict(result.usage),
             "timeout_contract": artifact.timeout_contract.model_dump(mode="json"),
             "timeout_provenance": timeout_provenance(error),
+            "provider_request_pacing": artifact.provider_request_pacing.model_dump(mode="json"),
+            "provider_pacing_wait_seconds": artifact.provider_pacing_wait_seconds,
         }
         if artifact.condition is ExperimentCondition.O1:
             evidence.update(
@@ -573,6 +577,7 @@ class ExperimentRunner:
         oracle_resolver: OracleAdviceResolver | None = None,
         condition: ExperimentCondition | None = None,
         artifact_store: ExperimentRunArtifactStore | None = None,
+        request_pacing: ProviderRequestPacing | None = None,
     ) -> None:
         if not configuration.config.development or not configuration.config.pilot:
             raise ExperimentConfigurationError(
@@ -623,6 +628,7 @@ class ExperimentRunner:
         self.artifact_store = artifact_store or ExperimentRunArtifactStore(
             configuration.artifact_root_path
         )
+        self.request_pacing = request_pacing or ProviderRequestPacing()
 
     def run_all(self, tasks: Sequence[Task] | None = None) -> list[ExperimentExecution]:
         """Run each selected task once, strictly in chronological order."""
@@ -735,6 +741,7 @@ class ExperimentRunner:
                 max_requests=self.configuration.config.limits.max_requests,
                 timeout_seconds=self.configuration.config.limits.timeout_seconds,
                 model_settings=cast(ModelSettings, self.configuration.model.settings),
+                request_pacing=self.request_pacing,
             )
         except Exception as caught:  # preserve bounded-run failures in evidence
             error = caught
@@ -938,6 +945,13 @@ class ExperimentRunner:
                 settings,
             ),
             timeout_provenance=timeout_provenance(error),
+            provider_request_pacing=ProviderRequestPacingContract(
+                min_interval_seconds=self.request_pacing.config.min_interval_seconds,
+                max_nominal_requests_per_minute=(
+                    self.request_pacing.config.max_nominal_requests_per_minute
+                ),
+            ),
+            provider_pacing_wait_seconds=self.request_pacing.wait_seconds_for_run(run_id),
         )
 
     def _artifact_model_name(self) -> str:

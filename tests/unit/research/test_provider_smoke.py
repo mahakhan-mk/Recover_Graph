@@ -255,6 +255,14 @@ def test_summary_accepts_one_b0_and_one_o1_without_requiring_task_success(
     assert summary["timeout_contract_by_condition"]["B0"] == summary[
         "timeout_contract_by_condition"
     ]["O1"]
+    assert summary["provider_request_pacing"] == {
+        "min_interval_seconds": 5.0,
+        "max_nominal_requests_per_minute": 12.0,
+    }
+    assert summary["provider_request_pacing_by_condition"]["B0"] == summary[
+        "provider_request_pacing_by_condition"
+    ]["O1"]
+    assert summary["provider_pacing_wait_seconds"] == {"B0": 0.0, "O1": 0.0}
 
 
 def test_frozen_t007_mapping_retains_gs_r014_and_advice_serialization_is_unchanged() -> None:

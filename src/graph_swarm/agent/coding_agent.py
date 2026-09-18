@@ -29,6 +29,7 @@ from graph_swarm.agent.advisory import (
     record_post_advice_action,
 )
 from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.pacing import ProviderRequestPacing, attach_provider_request_pacing
 from graph_swarm.agent.prompts import ROLLOUT1_SYSTEM_PROMPT
 from graph_swarm.agent.tools.read_file import (
     DEFAULT_READ_FILE_LENGTH,
@@ -220,6 +221,7 @@ def run_coding_agent(
     max_requests: int | None = None,
     timeout_seconds: float | None = None,
     model_settings: ModelSettings | None = None,
+    request_pacing: ProviderRequestPacing | None = None,
 ) -> AgentRunResult[str]:
     """Run a constructed agent with isolated identity and optional bounds."""
     if timeout_seconds is not None:
@@ -233,8 +235,11 @@ def run_coding_agent(
                 max_requests=max_requests,
                 timeout_seconds=timeout_seconds,
                 model_settings=model_settings,
+                request_pacing=request_pacing,
             )
         )
+    if request_pacing is not None:
+        attach_provider_request_pacing(agent, request_pacing, dependencies.run_id)
     try:
         return agent.run_sync(
             user_prompt,
@@ -259,8 +264,11 @@ async def run_coding_agent_async(
     max_requests: int | None = None,
     timeout_seconds: float | None = None,
     model_settings: ModelSettings | None = None,
+    request_pacing: ProviderRequestPacing | None = None,
 ) -> AgentRunResult[str]:
     """Async bounded variant used by the sequential Track B runner."""
+    if request_pacing is not None:
+        attach_provider_request_pacing(agent, request_pacing, dependencies.run_id)
     try:
         run = agent.run(
             user_prompt,

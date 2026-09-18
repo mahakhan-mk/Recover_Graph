@@ -24,6 +24,7 @@ from experiments.sprint3 import (
     IsolatedTaskEnvironment,
     prepare_provider_smoke_context,
 )
+from graph_swarm.agent.pacing import ProviderRequestPacing
 from graph_swarm.domain.advice import HistoricalRecoveryAdvice
 from graph_swarm.research.contracts import ExperimentCondition
 from graph_swarm.research.runner import (
@@ -156,6 +157,7 @@ def run_provider_smoke(
             f"provider smoke Oracle mapping for {task_id} has no frozen recovery pattern"
         )
     executions: list[ExperimentExecution] = []
+    request_pacing = ProviderRequestPacing()
 
     # Each runner owns its run ID, workspace copy, conversation ID, and SQLite
     # step database.  The same task/model/runtime/objective contract is shared
@@ -175,6 +177,7 @@ def run_provider_smoke(
             ),
             workspace_resolver=prepared.workspace_resolver_for(condition),
             artifact_store=ExperimentRunArtifactStore(artifacts),
+            request_pacing=request_pacing,
         )
         executions.append(runner.run_case(case))
 
@@ -268,6 +271,7 @@ def build_provider_smoke_summary(
         "model",
         "model_settings",
         "prompt_version",
+        "provider_request_pacing",
     ):
         if getattr(b0.artifact, field) != getattr(o1.artifact, field):
             failures.append(f"B0/O1 contract field differs: {field}")
@@ -332,6 +336,15 @@ def build_provider_smoke_summary(
         "timeout_contract_by_condition": {
             "B0": b0.artifact.timeout_contract.model_dump(mode="json"),
             "O1": o1.artifact.timeout_contract.model_dump(mode="json"),
+        },
+        "provider_request_pacing": b0.artifact.provider_request_pacing.model_dump(mode="json"),
+        "provider_request_pacing_by_condition": {
+            "B0": b0.artifact.provider_request_pacing.model_dump(mode="json"),
+            "O1": o1.artifact.provider_request_pacing.model_dump(mode="json"),
+        },
+        "provider_pacing_wait_seconds": {
+            "B0": b0.artifact.provider_pacing_wait_seconds,
+            "O1": o1.artifact.provider_pacing_wait_seconds,
         },
         "prompt_config_identity": {
             "config_path": str(configuration.config_path),
