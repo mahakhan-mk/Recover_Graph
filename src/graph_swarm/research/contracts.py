@@ -1,6 +1,7 @@
 """Canonical contracts shared by the research experiment tracks."""
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -31,6 +32,30 @@ EXPERIMENT_CONDITIONS: tuple[ExperimentCondition, ...] = (
 )
 
 
+class TimeoutContract(BaseModel):
+    """Effective timeout boundaries recorded with every experiment run."""
+
+    agent_wall_clock_seconds: float = Field(gt=0)
+    model_request_timeout_seconds: float = Field(gt=0)
+    tool_timeout_seconds: dict[str, float] = Field(default_factory=dict)
+    experiment_timeout_seconds: float = Field(gt=0)
+
+
+class ProviderRequestPacingContract(BaseModel):
+    """Deterministic minimum interval between provider request starts."""
+
+    min_interval_seconds: float = Field(gt=0)
+    max_nominal_requests_per_minute: float = Field(gt=0)
+
+
+class BoundedTermination(BaseModel):
+    """A normal termination caused by one configured frozen run budget."""
+
+    type: Literal["budget_exhausted"] = "budget_exhausted"
+    budget: Literal["tool_calls", "requests"]
+    configured_limit: int = Field(gt=0)
+
+
 class ExperimentRunArtifact(BaseModel):
     """Typed, serializable record for one experiment run.
 
@@ -40,6 +65,8 @@ class ExperimentRunArtifact(BaseModel):
     """
 
     experiment_id: str
+    gate_id: str | None = None
+    execution_manifest_id: str | None = None
     condition: ExperimentCondition
     run_id: str
     task_id: str
@@ -51,6 +78,10 @@ class ExperimentRunArtifact(BaseModel):
     planned_action: PlannedAction
     executed_action: ActionResult
     advice_received: AdviceResult | None = None
+    advice_count: int = Field(default=0, ge=0)
+    advice_intervention_boundary: str | None = None
+    advice_delivery_timing: str | None = None
+    advice_review_id: str | None = None
     advice_accepted: bool = False
     failure_type: FailureType | None = None
     task_success: bool
@@ -62,6 +93,23 @@ class ExperimentRunArtifact(BaseModel):
     latency_ms: float | None = None
     retrieved_incident_id: str | None = None
     retrieval_score: float | None = None
+    timeout_contract: TimeoutContract = Field(
+        default_factory=lambda: TimeoutContract(
+            agent_wall_clock_seconds=300,
+            model_request_timeout_seconds=300,
+            tool_timeout_seconds={"run_command": 30, "run_tests": 120},
+            experiment_timeout_seconds=300,
+        )
+    )
+    timeout_provenance: dict[str, object] | None = None
+    provider_request_pacing: ProviderRequestPacingContract = Field(
+        default_factory=lambda: ProviderRequestPacingContract(
+            min_interval_seconds=5.0,
+            max_nominal_requests_per_minute=12.0,
+        )
+    )
+    provider_pacing_wait_seconds: float = Field(default=0.0, ge=0)
+    termination: BoundedTermination | None = None
 
     @field_validator(
         "experiment_id",
@@ -85,10 +133,13 @@ PerRunArtifact = ExperimentRunArtifact
 __all__ = [
     "EXPERIMENT_CONDITIONS",
     "B0",
+    "BoundedTermination",
     "ExperimentCondition",
     "ExperimentRunArtifact",
     "O1",
     "PerRunArtifact",
+    "ProviderRequestPacingContract",
     "RunArtifact",
     "T",
+    "TimeoutContract",
 ]

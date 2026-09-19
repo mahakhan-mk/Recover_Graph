@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import TYPE_CHECKING
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import TYPE_CHECKING, Literal
 
 from graph_swarm.domain.behavior import BehaviorChangeEvidence
 from graph_swarm.domain.events import AdviceEvent, AgentEvent
@@ -20,6 +20,36 @@ class WorkspacePathError(ValueError):
     """Raised when a path resolves outside the configured workspace."""
 
 
+@dataclass(frozen=True)
+class ExecutionRuntime:
+    """Process runtime used by agent tools.
+
+    A local runtime executes its command directly. A Docker runtime keeps the
+    host Docker CLI separate from the Python executable that exists in the
+    prepared container.
+    """
+
+    runtime_type: Literal["local", "docker"] = "local"
+    python_executable: Path | None = None
+    docker_executable: Path | None = None
+    container_image: str | None = None
+    container_python_executable: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.runtime_type == "local":
+            if self.docker_executable is not None:
+                raise ValueError("local runtimes must not define docker_executable")
+            return
+        if self.python_executable is not None:
+            raise ValueError("docker runtimes must not define python_executable")
+        if self.docker_executable is None:
+            raise ValueError("docker runtimes require docker_executable")
+        if not self.container_image:
+            raise ValueError("docker runtimes require container_image")
+        if not self.container_python_executable:
+            raise ValueError("docker runtimes require container_python_executable")
+
+
 @dataclass
 class AgentDependencies:
     """Minimal in-memory runtime context shared by future agent tools."""
@@ -32,20 +62,20 @@ class AgentDependencies:
     environment: EnvironmentContext | None = None
     advisory_service: AdvisoryService | None = None
     artifact_writer: JsonlResearchArtifactWriter | None = None
-    advice_events: list[AdviceEvent] = field(
-        default_factory=lambda: list[AdviceEvent]()
-    )
+    python_executable: Path | None = None
+    execution_runtime: ExecutionRuntime | None = None
+    advice_events: list[AdviceEvent] = field(default_factory=lambda: list[AdviceEvent]())
     behavior_evidence: list[BehaviorChangeEvidence] = field(
         default_factory=lambda: list[BehaviorChangeEvidence]()
     )
     advisory_errors: list[str] = field(default_factory=lambda: list[str]())
     artifact_errors: list[str] = field(default_factory=lambda: list[str]())
-    _advised_action_keys: set[str] = field(
-        default_factory=lambda: set[str](), repr=False
-    )
+    _advised_action_keys: set[str] = field(default_factory=lambda: set[str](), repr=False)
     _pending_advice_events: list[AdviceEvent] = field(
         default_factory=lambda: list[AdviceEvent](), repr=False
     )
+    oracle_advice_issued: bool = field(default=False, repr=False)
+    task_start_guidance_evaluated: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
         self.workspace_root = self.workspace_root.expanduser().resolve()
@@ -96,17 +126,58 @@ class AgentDependencies:
         self._pending_advice_events.clear()
         return pending
 
-    def resolve_workspace_path(self, relative_path: str | Path) -> Path:
-        """Resolve a path and reject traversal or symlink escapes."""
+    def resolve_workspace_path(
+        self,
+        relative_path: str | Path,
+    ) -> Path:
+        """Resolve a workspace path and reject traversal or symlink escapes.
+
+        Docker commands expose the task workspace at ``/workspace``. Translate
+        that container path to the host-side workspace before applying the
+        normal containment checks.
+        """
+        path_to_resolve: str | Path = relative_path
+        is_container_workspace_path = False
+        if self._uses_docker_runtime():
+            container_path = PurePosixPath(str(relative_path))
+            workspace_namespace = PurePosixPath("/workspace")
+            try:
+                relative_posix = container_path.relative_to(workspace_namespace)
+                path_to_resolve = Path(*relative_posix.parts)
+            except ValueError:
+                pass
+            else:
+                is_container_workspace_path = True
+
+        if (
+            self._uses_docker_runtime()
+            and not is_container_workspace_path
+            and self._is_absolute_or_drive_path(path_to_resolve)
+        ):
+            raise WorkspacePathError(f"absolute path is not allowed: {relative_path!s}")
+
         try:
-            resolved_path = (self.workspace_root / Path(relative_path)).resolve()
+            resolved_path = (self.workspace_root / Path(path_to_resolve)).resolve()
         except (OSError, RuntimeError) as error:
             raise WorkspacePathError(
                 f"could not resolve workspace path: {relative_path!s}"
             ) from error
 
         if not resolved_path.is_relative_to(self.workspace_root):
-            raise WorkspacePathError(
-                f"path resolves outside workspace: {relative_path!s}"
-            )
+            raise WorkspacePathError(f"path resolves outside workspace: {relative_path!s}")
         return resolved_path
+
+    def _uses_docker_runtime(self) -> bool:
+        return (
+            self.execution_runtime is not None
+            and self.execution_runtime.runtime_type == "docker"
+        )
+
+    @staticmethod
+    def _is_absolute_or_drive_path(path: str | Path) -> bool:
+        path_text = str(path)
+        return (
+            Path(path_text).is_absolute()
+            or PurePosixPath(path_text).is_absolute()
+            or bool(PureWindowsPath(path_text).anchor)
+        )

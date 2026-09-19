@@ -1,0 +1,26 @@
+experiment_id: GS-E003
+gate: B1
+provider: openrouter
+model: runtime-selected-from-OPENROUTER_MODEL
+model_config: configs/models/openrouter.yaml
+prompt_version: v1
+temperature: 0
+conditions: [B0, O1]
+task_ids: [GS-T006, GS-T007, GS-T008, GS-T009, GS-T010, GS-T011, GS-T012, GS-T013, GS-T014, GS-T015]
+expected_runs: 20
+repetition_count: 1
+t_enabled: false
+limits:
+  max_actions: 20
+  max_requests: 24
+  tool_retries: 3
+  agent_timeout_seconds: 300
+  model_request_timeout_seconds: 300
+pacing:
+  min_request_start_interval_seconds: 5.0
+  nominal_requests_per_minute: 12
+oracle:
+  intervention_boundary: task_start
+  delivery: pre_first_model_request
+objective_evaluator: frozen_swesmith_fail_to_pass
+runtime_environment_manifest: configs/research/gate_b1_environments.json

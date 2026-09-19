@@ -1,0 +1,164 @@
+{
+  "experiment_id": "GS-E003",
+  "sprint": "3B",
+  "gate": "strict_readiness_gate",
+  "recorded_at": "2026-09-13T12:22:53Z",
+  "provider_readiness": {
+    "provider": "openrouter",
+    "model_source": "OPENROUTER_MODEL",
+    "credential_source": "OPENROUTER_API_KEY",
+    "configured_model": "cohere/north-mini-code:free",
+    "resolved_model": "cohere/north-mini-code:free",
+    "resolved_model_matches_configuration": true,
+    "availability": {
+      "method": "GET catalog lookup",
+      "endpoint": "https://openrouter.ai/api/v1/models",
+      "status_code": 200,
+      "catalog_entry_present": true,
+      "catalog_entry_id": "cohere/north-mini-code:free",
+      "catalog_entry_name": "Cohere: North Mini Code (free)",
+      "context_length": 256000,
+      "supported_parameters": [
+        "frequency_penalty",
+        "include_reasoning",
+        "max_tokens",
+        "presence_penalty",
+        "reasoning",
+        "seed",
+        "stop",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_k",
+        "top_p"
+      ]
+    },
+    "pydanticai_tool_calling": {
+      "status": "PASS",
+      "tool_name": "readiness_tool",
+      "tool_callback_values": ["sprint3b"],
+      "tool_call_count": 1,
+      "model_output": "READY"
+    },
+    "discovery_probes": "not_repeated; 8K/16K/32K results were completed externally",
+    "status": "PASS"
+  },
+  "benchmark_readiness": {
+    "status": "BLOCKED_INFRASTRUCTURE",
+    "baseline_root": "benchmark/workspaces",
+    "source_repositories_materialized": 8,
+    "clean_baselines_verified": true,
+    "chronological_cases_verified": [
+      "GS-T006",
+      "GS-T007",
+      "GS-T008",
+      "GS-T009",
+      "GS-T010",
+      "GS-T011",
+      "GS-T012",
+      "GS-T013",
+      "GS-T014",
+      "GS-T015"
+    ],
+    "frozen_patch_checks": "PASS for all 10 tasks",
+    "readiness_matrix": [
+      {
+        "task_id": "GS-T006",
+        "dependency_setup": "PASS",
+        "mutation_application": "PASS",
+        "fail_to_pass_collection": "PASS",
+        "objective_execution": "PASS",
+        "objective_status": "test_failure_expected_for_mutated_case",
+        "return_code": 1
+      },
+      {
+        "task_id": "GS-T007",
+        "dependency_setup": "PASS",
+        "mutation_application": "PASS",
+        "fail_to_pass_collection": "FAIL",
+        "objective_execution": "FAIL_INFRASTRUCTURE",
+        "blocker": "ModuleNotFoundError: trio while loading tests/conftest.py"
+      },
+      {
+        "task_id": "GS-T008",
+        "dependency_setup": "PASS",
+        "mutation_application": "PASS",
+        "fail_to_pass_collection": "PASS",
+        "objective_execution": "PASS",
+        "objective_status": "test_failure_expected_for_mutated_case",
+        "return_code": 1
+      },
+      {
+        "task_id": "GS-T009",
+        "dependency_setup": "PASS",
+        "mutation_application": "PASS",
+        "fail_to_pass_collection": "PASS",
+        "objective_execution": "FAIL_INFRASTRUCTURE",
+        "blocker": "Cubic spline functionality requires scipy"
+      },
+      {
+        "task_id": "GS-T010",
+        "dependency_setup": "PASS",
+        "mutation_application": "PASS",
+        "fail_to_pass_collection": "FAIL",
+        "objective_execution": "FAIL_INFRASTRUCTURE",
+        "blocker": "ModuleNotFoundError: duckdb while loading tests/test_optimizer.py"
+      },
+      {
+        "task_id": "GS-T011",
+        "dependency_setup": "PASS",
+        "mutation_application": "PASS",
+        "fail_to_pass_collection": "PASS",
+        "objective_execution": "PASS",
+        "objective_status": "test_failure_expected_for_mutated_case",
+        "return_code": 1
+      },
+      {
+        "task_id": "GS-T012",
+        "dependency_setup": "FAIL",
+        "mutation_application": "NOT_RUN",
+        "fail_to_pass_collection": "NOT_RUN",
+        "objective_execution": "NOT_RUN",
+        "blocker": "Package dspy requires Python >=3.9,<3.13; available interpreter is Python 3.13.7"
+      },
+      {
+        "task_id": "GS-T013",
+        "dependency_setup": "FAIL",
+        "mutation_application": "NOT_RUN",
+        "fail_to_pass_collection": "NOT_RUN",
+        "objective_execution": "NOT_RUN",
+        "blocker": "Package red-discordbot requires Python >=3.8.1,<3.12; available interpreter is Python 3.13.7"
+      },
+      {
+        "task_id": "GS-T014",
+        "dependency_setup": "FAIL",
+        "mutation_application": "NOT_RUN",
+        "fail_to_pass_collection": "NOT_RUN",
+        "objective_execution": "NOT_RUN",
+        "blocker": "fasttext dependency requires Microsoft Visual C++ 14.0 or greater"
+      },
+      {
+        "task_id": "GS-T015",
+        "dependency_setup": "FAIL",
+        "mutation_application": "NOT_RUN",
+        "fail_to_pass_collection": "NOT_RUN",
+        "objective_execution": "NOT_RUN",
+        "blocker": "Package dspy requires Python >=3.9,<3.13; available interpreter is Python 3.13.7"
+      }
+    ],
+    "all_required_checks_passed": false,
+    "reason": "Infrastructure preflight failures were observed; B0 and O1 are withheld."
+  },
+  "experiment": {
+    "status": "NOT_LAUNCHED",
+    "b0_model_calls": 0,
+    "o1_model_calls": 0,
+    "reruns": 0
+  },
+  "historical_evidence": {
+    "previous_provider_model": "qwen/qwen3-coder:free",
+    "previous_status": "BLOCKED",
+    "used_for_current_gate": false
+  },
+  "gate_b1": "BLOCKED_NOT_EVALUATED"
+}

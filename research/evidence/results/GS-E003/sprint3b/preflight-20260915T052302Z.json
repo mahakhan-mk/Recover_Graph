@@ -1,0 +1,108 @@
+{
+  "b0_launched": false,
+  "o1_launched": false,
+  "provider_calls": 0,
+  "status": "READY_FOR_B0_O1",
+  "tasks": [
+    {
+      "container_python_executable": "/opt/miniconda3/bin/python",
+      "environment_fingerprint": "3e2642bfedd2e004",
+      "python_executable": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "python_version": "3.12.1",
+      "return_code": 1,
+      "runtime_type": "docker",
+      "status": "test_failure",
+      "task_id": "GS-T006"
+    },
+    {
+      "container_python_executable": "/opt/miniconda3/bin/python",
+      "environment_fingerprint": "49435e4f1ceac046",
+      "python_executable": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "python_version": "3.12.1",
+      "return_code": 1,
+      "runtime_type": "docker",
+      "status": "test_failure",
+      "task_id": "GS-T007"
+    },
+    {
+      "container_python_executable": "/opt/miniconda3/bin/python",
+      "environment_fingerprint": "41e9dd1b233b4a7f",
+      "python_executable": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "python_version": "3.12.1",
+      "return_code": 1,
+      "runtime_type": "docker",
+      "status": "test_failure",
+      "task_id": "GS-T008"
+    },
+    {
+      "container_python_executable": "/opt/miniconda3/bin/python",
+      "environment_fingerprint": "a9d0659a39ef61e1",
+      "python_executable": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "python_version": "3.12.1",
+      "return_code": 1,
+      "runtime_type": "docker",
+      "status": "test_failure",
+      "task_id": "GS-T009"
+    },
+    {
+      "container_python_executable": "/opt/miniconda3/bin/python",
+      "environment_fingerprint": "41e9dd1b233b4a7f",
+      "python_executable": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "python_version": "3.12.1",
+      "return_code": 1,
+      "runtime_type": "docker",
+      "status": "test_failure",
+      "task_id": "GS-T010"
+    },
+    {
+      "container_python_executable": "/opt/miniconda3/bin/python",
+      "environment_fingerprint": "e4203aa3dc32008b",
+      "python_executable": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "python_version": "3.12.1",
+      "return_code": 1,
+      "runtime_type": "docker",
+      "status": "test_failure",
+      "task_id": "GS-T011"
+    },
+    {
+      "container_python_executable": "/opt/miniconda3/bin/python",
+      "environment_fingerprint": "92359a53c96275ab",
+      "python_executable": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "python_version": "3.12.1",
+      "return_code": 1,
+      "runtime_type": "docker",
+      "status": "test_failure",
+      "task_id": "GS-T012"
+    },
+    {
+      "container_python_executable": "/usr/bin/python3.10",
+      "environment_fingerprint": "0c7e47949071530c",
+      "python_executable": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "python_version": "3.10.12",
+      "return_code": 1,
+      "runtime_type": "docker",
+      "status": "test_failure",
+      "task_id": "GS-T013"
+    },
+    {
+      "container_python_executable": "/usr/bin/python3.10",
+      "environment_fingerprint": "0a5c5af12c231c7e",
+      "python_executable": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "python_version": "3.10.12",
+      "return_code": 1,
+      "runtime_type": "docker",
+      "status": "test_failure",
+      "task_id": "GS-T014"
+    },
+    {
+      "container_python_executable": "/opt/miniconda3/bin/python",
+      "environment_fingerprint": "92359a53c96275ab",
+      "python_executable": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "python_version": "3.12.1",
+      "return_code": 1,
+      "runtime_type": "docker",
+      "status": "test_failure",
+      "task_id": "GS-T015"
+    }
+  ]
+}

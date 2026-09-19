@@ -1,0 +1,95 @@
+[benchmark]
+name = "sprint3b-frozen-swesmith"
+task_order = ["GS-T006", "GS-T007", "GS-T008", "GS-T009", "GS-T010", "GS-T011", "GS-T012", "GS-T013", "GS-T014", "GS-T015"]
+network_during_execution = false
+container_image_source = "frozen_task_manifest"
+docker_build_timeout_seconds = 7200
+
+[tasks."GS-T006"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Authoritative Sprint 3B execution uses the exact frozen SWE-smith image."
+
+[tasks."GS-T007"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Authoritative Sprint 3B execution uses the exact frozen SWE-smith image."
+
+[tasks."GS-T008"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Authoritative Sprint 3B execution uses the exact frozen SWE-smith image."
+required_extras = ["dev"]
+
+[tasks."GS-T009"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Authoritative Sprint 3B execution uses the exact frozen SWE-smith image."
+required_extras = ["test"]
+
+[tasks."GS-T010"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Authoritative Sprint 3B execution uses the exact frozen SWE-smith image."
+required_extras = ["dev"]
+
+[tasks."GS-T011"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Authoritative Sprint 3B execution uses the exact frozen SWE-smith image."
+
+[tasks."GS-T012"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "DSPy requires a container interpreter below Python 3.13."
+python_constraint_assertion = ">=3.9,<3.13"
+required_extras = ["dev"]
+
+[tasks."GS-T013"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Red-DiscordBot requires a container interpreter below Python 3.12."
+python_constraint_assertion = ">=3.8,<3.12"
+
+[tasks."GS-T014"]
+runtime = "manifest_container_required"
+python_constraint_assertion = ">=3.7,<3.12"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "fasttext requires the faithful Linux/container benchmark environment."
+
+[tasks."GS-T015"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "DSPy requires a container interpreter below Python 3.13."
+python_constraint_assertion = ">=3.9,<3.13"
+required_extras = ["dev"]

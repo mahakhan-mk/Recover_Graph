@@ -3,14 +3,19 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from pydantic_ai import FunctionToolset
+from pydantic_ai import AgentRunResult, FunctionToolset, UsageLimits
 from pydantic_ai.messages import ToolReturnPart
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from graph_swarm.agent.coding_agent import (
+    MODEL_REQUEST_TIMEOUT_SECONDS,
     AgentConfigurationError,
     create_coding_agent,
     run_coding_agent,
+    run_coding_agent_async,
 )
 from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.agent.prompts import ROLLOUT1_SYSTEM_PROMPT
@@ -44,9 +49,143 @@ def make_offline_agent() -> tuple[Settings, TestModel]:
     return settings, model
 
 
-def test_live_factory_requires_explicit_groq_configuration() -> None:
-    with pytest.raises(AgentConfigurationError, match="groq_model"):
+def test_run_coding_agent_passes_explicit_public_usage_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings, model = make_offline_agent()
+    dependencies = make_dependencies(tmp_path)
+    agent = create_coding_agent(settings, model=model)
+    captured: dict[str, object] = {}
+
+    def fake_run_sync(*_args: object, **kwargs: object) -> AgentRunResult[str]:
+        captured["usage_limits"] = kwargs["usage_limits"]
+        return cast(AgentRunResult[str], object())
+
+    monkeypatch.setattr(agent, "run_sync", fake_run_sync)
+    run_coding_agent(
+        agent,
+        settings,
+        dependencies,
+        "Use the configured limits.",
+        max_actions=20,
+        max_requests=24,
+    )
+
+    usage_limits = cast(UsageLimits, captured["usage_limits"])
+    assert usage_limits.request_limit == 24
+    assert usage_limits.tool_calls_limit == 20
+
+
+def test_run_coding_agent_forces_explicit_model_request_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings, model = make_offline_agent()
+    dependencies = make_dependencies(tmp_path)
+    agent = create_coding_agent(settings, model=model)
+    captured: dict[str, object] = {}
+
+    def fake_run_sync(*_args: object, **kwargs: object) -> AgentRunResult[str]:
+        captured["model_settings"] = kwargs["model_settings"]
+        return cast(AgentRunResult[str], object())
+
+    monkeypatch.setattr(agent, "run_sync", fake_run_sync)
+    run_coding_agent(agent, settings, dependencies, "Use explicit timeout settings.")
+
+    model_settings = cast(dict[str, object], captured["model_settings"])
+    assert model_settings["timeout"] == MODEL_REQUEST_TIMEOUT_SECONDS
+
+
+async def test_run_coding_agent_async_falls_back_to_settings_request_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings, model = make_offline_agent()
+    dependencies = make_dependencies(tmp_path)
+    agent = create_coding_agent(settings, model=model)
+    captured: dict[str, object] = {}
+
+    async def fake_run(*_args: object, **kwargs: object) -> AgentRunResult[str]:
+        captured["usage_limits"] = kwargs["usage_limits"]
+        return cast(AgentRunResult[str], object())
+
+    monkeypatch.setattr(agent, "run", fake_run)
+    await run_coding_agent_async(
+        agent,
+        settings,
+        dependencies,
+        "Use the configured limits.",
+        max_actions=7,
+    )
+
+    usage_limits = cast(UsageLimits, captured["usage_limits"])
+    assert usage_limits.request_limit == settings.agent_request_limit
+    assert usage_limits.tool_calls_limit == 7
+
+
+def test_live_factory_requires_explicit_openrouter_configuration() -> None:
+    with pytest.raises(AgentConfigurationError, match="OPENROUTER_MODEL"):
         create_coding_agent(make_settings(load_env_file=False))
+
+
+def test_live_factory_rejects_unsupported_provider() -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={"model_provider": "unsupported"}
+    )
+    with pytest.raises(AgentConfigurationError, match="supported live provider is openrouter"):
+        create_coding_agent(settings)
+
+
+def test_openrouter_factory_requires_key_only_when_selected() -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={"model_provider": "openrouter", "openrouter_model": "qwen/test"}
+    )
+    with pytest.raises(AgentConfigurationError, match="OPENROUTER_API_KEY"):
+        create_coding_agent(settings)
+
+
+def test_openrouter_factory_requires_model_only_when_selected() -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={"model_provider": "openrouter", "openrouter_api_key": "offline-key"}
+    )
+    with pytest.raises(AgentConfigurationError, match="OPENROUTER_MODEL"):
+        create_coding_agent(settings)
+
+
+def test_openrouter_factory_uses_dedicated_model_and_preserves_configuration() -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={
+            "model_provider": "openrouter",
+            "openrouter_model": "qwen/test",
+            "openrouter_api_key": "offline-key",
+        }
+    )
+
+    agent = create_coding_agent(settings)
+
+    model = cast(OpenRouterModel, agent.model)
+    assert type(model) is OpenRouterModel
+    assert type(model) is not OpenAIChatModel
+    assert model.model_name == "qwen/test"
+    assert isinstance(model, OpenRouterModel)
+    assert isinstance(model._provider, OpenRouterProvider)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_coding_agent_freezes_tool_retries_at_three() -> None:
+    settings, model = make_offline_agent()
+
+    agent = create_coding_agent(settings, model=model)
+
+    assert agent._max_tool_retries == 3  # pyright: ignore[reportPrivateUsage]
+
+
+def test_coding_agent_accepts_offline_model_injection() -> None:
+    settings, model = make_offline_agent()
+
+    agent = create_coding_agent(settings, model=model)
+
+    assert agent.model is model
 
 
 async def test_agent_has_rollout_prompt_and_exactly_four_controlled_tools(

@@ -1,80 +1,110 @@
 # Graph Swarm
 
-Graph Swarm is an experimental research system for studying **Verified Failure Memory**: whether empirically successful recovery experience from earlier agent runs can be retrieved before a related future action and reduce recurrence of known failures.
+Graph Swarm is an experimental research system for studying Verified Failure
+Memory: whether successful recovery experience can be retrieved before a
+related future action and reduce recurrence of known failures.
 
-## Current research scope
+## Active stack
 
-This repository is intentionally scoped to the eight-week research program:
-
-1. Observe and remember failures and recoveries.
-2. Advise before a known failure recurs.
-3. Evaluate the mechanism on a controlled recurring-failure benchmark.
-
-Production SaaS features, dashboards, multi-framework adapters, autonomous recovery, and large-scale infrastructure are deliberately out of scope.
-
-## Stack
-
-- Python 3.12+
-- PydanticAI experimental agent harness
-- Groq-hosted inference
+- Python 3.12 or 3.13 (`>=3.12,<3.14`)
+- PydanticAI agent harness
+- OpenRouter inference
 - Neo4j operational memory graph
-- pytest
-- Docker Compose
+- pytest and pyright/ruff
+- Docker for the isolated SWE-smith benchmark runtime
+
+OpenRouter is the only supported live provider. Earlier provider configurations
+and evidence remain only as historical research records.
+
+## Teammate setup
+
+From a clean clone, create the root development environment and configure only
+your own credentials:
+
+```powershell
+py -3.13 -m venv .venv
+.\\.venv\\Scripts\\python.exe -m pip install -e ".[dev]"
+Copy-Item .env.example .env
+```
+
+Fill in the Neo4j and OpenRouter values in `.env`. Never commit `.env`.
+Benchmark-specific dependencies belong in the prepared benchmark containers,
+not in the root virtual environment.
+
+`AGENT_REQUEST_LIMIT=10` in `.env.example` is the general application
+fallback/default for ordinary agent runs. Frozen research experiments do not
+inherit that fallback: Gate B1 uses the versioned
+`configs/experiments/gate_b1.yaml` contract with 24 model requests.
+
+Run the safe, read-only setup audit:
+
+```powershell
+.\\.venv\\Scripts\\python.exe -m graph_swarm.research.verify_setup
+```
+
+The audit does not install, clone, pull/build/run Docker, call OpenRouter,
+modify Neo4j or Git state, or run experiments. If benchmark repositories are
+missing, acquire them explicitly with:
+
+```powershell
+.\\.venv\\Scripts\\python.exe -m graph_swarm.research.bootstrap_setup --clone
+```
+
+This command clones only missing repositories and pins the exact commits in
+`benchmark/manifests/repositories.json`; it refuses existing dirty or
+mismatched paths.
+
+## Validation and benchmark flow
+
+Keep setup, tests, runtime checks, and provider-backed research as separate
+steps:
+
+1. Run unit/static checks: `pytest`, `ruff`, and `pyright`.
+2. Acquire the immutable SWE-smith base images and verify the entries in
+   `configs/research/docker_environments.json`.
+3. Run the existing `benchmark_prepare` tooling to build prepared images, or
+   load a separately supplied prepared-image archive.
+4. Run `benchmark_preflight` and then the zero-provider
+   `benchmark_runtime_smoke`.
+5. Run provider smoke only when explicitly needed to validate credentials and
+   the OpenRouter path.
+6. Run the frozen B0/O1 experiment only after all readiness barriers pass.
+
+The canonical experiment controls are in
+`configs/experiments/gate_b1.yaml`: OpenRouter, runtime-selected
+`OPENROUTER_MODEL`, temperature 0, 20 actions, 24 model requests, 3 tool
+retries, 300-second agent/model timeouts, five-second request-start pacing,
+nominal 12 RPM, task-start O1 guidance, B0 without recovery advice, and T
+disabled. These are research controls, not general-purpose defaults.
+
+Prepared-image handoff supports two paths. The reproducible path acquires the
+exact base images, verifies their digests, obtains the pinned repositories,
+runs preparation, and verifies fingerprints. The convenience path transfers
+an archive outside Git:
+
+```powershell
+# Sender
+docker save -o graph-swarm-prepared-images.tar <required-image-tags>
+
+# Receiver
+docker load -i graph-swarm-prepared-images.tar
+```
+
+Archives are transport conveniences, not experiment definitions, and must not
+be committed.
 
 ## Repository layout
 
 ```text
-graph-swarm/
-├── configs/            # Versioned model, graph, and experiment configuration
-├── src/graph_swarm/    # Core implementation
-├── migrations/neo4j/  # Explicit graph constraints and indexes
-├── benchmark/          # Canonical benchmark inputs, derived data, and fixtures
-├── experiments/        # Reproducible rollout runners
-├── analysis/           # Metrics and statistical analysis
-├── research/evidence/  # Versioned research evidence
-├── artifacts/          # Temporary/generated local run output
-├── tests/              # Unit, integration, and end-to-end tests
-├── scripts/            # Developer utilities
-└── docs/               # Architecture, protocol, and schema notes
+configs/                 Versioned model, experiment, and environment metadata
+src/graph_swarm/         Core implementation and research runners
+experiments/             Benchmark preparation and frozen evaluation boundaries
+benchmark/manifests/     Pinned external repository identities
+research/evidence/       Local/retained research evidence and runtime markers
+migrations/neo4j/        Explicit graph constraints and indexes
+tests/                   Unit and integration tests
+docs/                    Architecture, protocol, and benchmark handoff notes
 ```
 
-## Setup
-
-```bash
-cp .env.example .env
-python -m venv .venv
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
-.venv\Scripts\Activate.ps1
-pip install -e '.[dev]'
-docker compose up -d
-pytest
-```
-
-Add your `GROQ_API_KEY` to `.env` before running model-backed experiments.
-
-## Research implementation order
-
-Do not implement retrieval first. The intended sequence is:
-
-```text
-Domain models
-  -> minimal PydanticAI agent
-  -> controlled tools
-  -> typed event capture
-  -> deterministic failure detection
-  -> Neo4j persistence
-  -> resolution/outcome tracking
-  -> GS-E001 vertical slice
-  -> recurrence retrieval
-  -> pre-action advice
-  -> controlled evaluation
-```
-
-## Design rules
-
-- Domain models must not depend on Neo4j or PydanticAI.
-- Neo4j access stays behind a repository interface.
-- A later success creates recovery evidence, not automatic causal attribution.
-- Benchmark data stays separate from Graph Swarm implementation logic.
-- Raw experiment artifacts are append-only and should not be manually rewritten.
-- Graph Swarm remains advisory during the research phase. It must not silently rewrite or block tool actions.
+Generated workspaces, repositories, Docker archives, virtual environments,
+caches, raw run directories, and secrets are intentionally excluded by Git.

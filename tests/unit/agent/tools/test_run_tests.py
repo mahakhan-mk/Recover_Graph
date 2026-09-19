@@ -1,6 +1,10 @@
+import subprocess
 from pathlib import Path
+from typing import cast
 
-from graph_swarm.agent.dependencies import AgentDependencies
+import pytest
+
+from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.agent.tools.run_tests import run_tests
 from graph_swarm.domain.action import ActionResult
 
@@ -9,6 +13,22 @@ def make_dependencies(tmp_path: Path) -> AgentDependencies:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     return AgentDependencies(workspace, "run-001", "task-001")
+
+
+def make_docker_dependencies(tmp_path: Path) -> AgentDependencies:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    return AgentDependencies(
+        workspace,
+        "run-001",
+        "task-001",
+        execution_runtime=ExecutionRuntime(
+            runtime_type="docker",
+            docker_executable=Path("docker.exe"),
+            container_image="prepared:image",
+            container_python_executable="/usr/bin/python3.10",
+        ),
+    )
 
 
 def assert_timestamps_are_valid(result: ActionResult) -> None:
@@ -71,3 +91,34 @@ def test_run_tests_timeout_returns_failed_result(tmp_path: Path) -> None:
     assert result.success is False
     assert result.exit_code is None
     assert result.error is not None and "timed out" in result.error
+
+
+def test_docker_run_tests_uses_selected_container_python_and_prepared_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dependencies = make_docker_dependencies(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, "1 passed\n", "")
+
+    monkeypatch.setattr("graph_swarm.agent.tools.run_command.subprocess.run", fake_run)
+
+    result = run_tests(dependencies, timeout_seconds=30)
+
+    command = cast(list[str], captured["command"])
+    image_index = command.index("prepared:image")
+    assert command[0] == "docker.exe"
+    assert command[image_index + 1 :] == ["/usr/bin/python3.10", "-m", "pytest"]
+    assert command[image_index + 1] != "docker.exe"
+    assert command[command.index("--network") + 1] == "none"
+    assert command[command.index("--env") + 1] == (
+        "PYTHONPATH=/workspace/src:/workspace"
+    )
+    assert result.success is True
+    assert result.exit_code == 0
+    assert result.output == "1 passed\n"
+    assert dependencies.events[0].result == result

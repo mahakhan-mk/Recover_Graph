@@ -1,0 +1,239 @@
+{
+  "artifact_paths": {
+    "b0_artifact": "C:\\Users\\Lenovo\\Documents\\my project\\graph_swarm\\research\\evidence\\results\\GS-E003\\B0\\GS-T007\\GS-E003-B0-GS-T007-35f52168e7394ef0b54bcac9fe719688\\artifact.json",
+    "b0_raw_evidence": "C:\\Users\\Lenovo\\Documents\\my project\\graph_swarm\\research\\evidence\\results\\GS-E003\\B0\\GS-T007\\GS-E003-B0-GS-T007-35f52168e7394ef0b54bcac9fe719688\\raw_evidence.json",
+    "o1_artifact": "C:\\Users\\Lenovo\\Documents\\my project\\graph_swarm\\research\\evidence\\results\\GS-E003\\O1\\GS-T007\\GS-E003-O1-GS-T007-ab2cd27ebaed49a997c316c37b228985\\artifact.json",
+    "o1_raw_evidence": "C:\\Users\\Lenovo\\Documents\\my project\\graph_swarm\\research\\evidence\\results\\GS-E003\\O1\\GS-T007\\GS-E003-O1-GS-T007-ab2cd27ebaed49a997c316c37b228985\\raw_evidence.json"
+  },
+  "b0_objective_result": false,
+  "b0_oracle_advice_count": 0,
+  "b0_retries": 0,
+  "b0_run_id": "GS-E003-B0-GS-T007-35f52168e7394ef0b54bcac9fe719688",
+  "b0_runs": 1,
+  "b0_tool_calls": 20,
+  "budget_exhausted": {
+    "b0": true,
+    "o1": true
+  },
+  "container_python": "/opt/miniconda3/bin/python",
+  "effective_model": "runtime-selected-from-OPENROUTER_MODEL",
+  "environment": {
+    "container_python": "/opt/miniconda3/bin/python",
+    "environment_fingerprint": "49435e4f1ceac046",
+    "prepared_image": "graph-swarm/sprint3b-gs-t007:49435e4f1ceac046",
+    "runtime_smoke_artifact": {
+      "b0_launched": false,
+      "environment_fingerprint": "49435e4f1ceac046",
+      "o1_launched": false,
+      "path": "C:\\Users\\Lenovo\\Documents\\my project\\graph_swarm\\research\\evidence\\results\\GS-E003\\sprint3b\\runtime-smoke-20260915T073928Z-9e9048ec80dc4abebb74246218ac27fa.json",
+      "provider_calls": 0,
+      "status": "AGENT_RUNTIME_SMOKE_READY",
+      "task_id": "GS-T007"
+    },
+    "runtime_type": "docker"
+  },
+  "environment_fingerprint": "49435e4f1ceac046",
+  "error_classification": {
+    "B0": {
+      "classification": "bounded_termination",
+      "message": "The next tool call(s) would exceed the tool_calls_limit of 20 (tool_calls=21). Consider raising the limit, or see the docs on usage limits for budget-aware patterns: https://ai.pydantic.dev/agent/#usage-limits",
+      "timeout_layer": null,
+      "timeout_seconds": null,
+      "type": "UsageLimitExceeded"
+    },
+    "O1": {
+      "classification": "bounded_termination",
+      "message": "The next tool call(s) would exceed the tool_calls_limit of 20 (tool_calls=21). Consider raising the limit, or see the docs on usage limits for budget-aware patterns: https://ai.pydantic.dev/agent/#usage-limits",
+      "timeout_layer": null,
+      "timeout_seconds": null,
+      "type": "UsageLimitExceeded"
+    }
+  },
+  "failures": [],
+  "frozen_recovery_pattern": "When a required value or state is undefined or missing, inspect its dataflow for a removed initialization or assignment and restore the required assignment before first use.",
+  "gate_b1_evaluated": false,
+  "latency_ms": {
+    "b0": 112567.847,
+    "o1": 113694.354
+  },
+  "model": "runtime-selected-from-OPENROUTER_MODEL",
+  "model_settings": {
+    "temperature": 0
+  },
+  "not_gate_b1": true,
+  "o1_behavior_change_evidence": [],
+  "o1_behavior_changed": false,
+  "o1_intervention_timing": {
+    "boundary": "task_start",
+    "delivery": "pre_first_model_request"
+  },
+  "o1_objective_result": false,
+  "o1_oracle_advice_count": 1,
+  "o1_oracle_intervention": {
+    "applicability": {
+      "compatible_markers": {},
+      "compatible_versions": {},
+      "matched_fields": [
+        "frozen_transfer_mapping"
+      ],
+      "repository": "swesmith/pallets__jinja.ada0a9a6",
+      "runtime": "python"
+    },
+    "failed_operation": "task_start",
+    "failed_tool": "task_start",
+    "kind": "historical_recovery_found",
+    "matched_failure_episode_id": "oracle-failure-GS-T007",
+    "matched_resolution_id": "oracle-resolution-GS-T007",
+    "provenance": {
+      "environment_id": "GS-E003-O1-GS-T007-ab2cd27ebaed49a997c316c37b228985-environment",
+      "failed_action_id": "71eef9c4-6502-496a-bed2-ff4b8619e392",
+      "failure_episode_id": "oracle-failure-GS-T007",
+      "outcome_ids": [],
+      "resolution_id": "oracle-resolution-GS-T007"
+    },
+    "recovery_evidence": {
+      "failed_observations": 0,
+      "outcomes": [],
+      "successful_observations": 1
+    },
+    "recovery_summary": "When a required value or state is undefined or missing, inspect its dataflow for a removed initialization or assignment and restore the required assignment before first use.",
+    "resolution_status": "observed_successful"
+  },
+  "o1_oracle_review_id": "GS-R014",
+  "o1_retries": 0,
+  "o1_run_id": "GS-E003-O1-GS-T007-ab2cd27ebaed49a997c316c37b228985",
+  "o1_runs": 1,
+  "o1_tool_calls": 20,
+  "objective": {
+    "b0": false,
+    "by_condition": {
+      "B0": {
+        "duration_seconds": 4.355191,
+        "return_code": 1,
+        "status": "test_failure"
+      },
+      "O1": {
+        "duration_seconds": 3.620401,
+        "return_code": 1,
+        "status": "test_failure"
+      }
+    },
+    "o1": false
+  },
+  "oracle_advice_count": {
+    "b0": 0,
+    "o1": 1
+  },
+  "prepared_image": "graph-swarm/sprint3b-gs-t007:49435e4f1ceac046",
+  "prompt_config_identity": {
+    "config_path": "C:\\Users\\Lenovo\\Documents\\my project\\graph_swarm\\configs\\experiments\\rollout_3a_pilot.yaml",
+    "config_version": "v1",
+    "limits": {
+      "max_actions": 20,
+      "max_requests": 24,
+      "timeout_seconds": 300.0
+    },
+    "model_config_path": "configs/models/openrouter.yaml",
+    "prompt_version": "v1"
+  },
+  "provider": "openrouter",
+  "provider_pacing_wait_seconds": {
+    "B0": 48.17221609991975,
+    "O1": 51.70460159960203
+  },
+  "provider_request_pacing": {
+    "max_nominal_requests_per_minute": 12.0,
+    "min_interval_seconds": 5.0
+  },
+  "provider_request_pacing_by_condition": {
+    "B0": {
+      "max_nominal_requests_per_minute": 12.0,
+      "min_interval_seconds": 5.0
+    },
+    "O1": {
+      "max_nominal_requests_per_minute": 12.0,
+      "min_interval_seconds": 5.0
+    }
+  },
+  "provider_usage": {
+    "b0": {
+      "input_tokens": null,
+      "output_tokens": null
+    },
+    "o1": {
+      "input_tokens": null,
+      "output_tokens": null
+    }
+  },
+  "retries": {
+    "b0": 0,
+    "o1": 0
+  },
+  "runtime_contract": {
+    "network": "none",
+    "objective_evaluator": "FrozenSWEsmithObjective",
+    "persistent_memory": "disabled",
+    "pythonpath": "/workspace/src:/workspace",
+    "runtime_type": "docker",
+    "workdir": "/workspace"
+  },
+  "smoke_task": {
+    "family_id": "GS-F002",
+    "id": "GS-T007",
+    "occurrence_index": 2,
+    "rationale": "GS-T007 is the fixed Sprint 3C-B runtime-smoke task and its frozen GS-R014 mapping is validated, transferable, and has a non-empty recovery pattern.",
+    "repository": "swesmith/pallets__jinja.ada0a9a6",
+    "review_id": "GS-R014",
+    "selection": "fixed frozen transfer task; never selected by model outcome"
+  },
+  "smoke_task_id": "GS-T007",
+  "smoke_type": "development_provider_smoke",
+  "status": "PROVIDER_B0_O1_SMOKE_COMPLETE",
+  "t_runs": 0,
+  "temperature": 0,
+  "termination": {
+    "b0": {
+      "budget": "tool_calls",
+      "configured_limit": 20,
+      "type": "budget_exhausted"
+    },
+    "o1": {
+      "budget": "tool_calls",
+      "configured_limit": 20,
+      "type": "budget_exhausted"
+    }
+  },
+  "timeout_contract": {
+    "agent_wall_clock_seconds": 300.0,
+    "experiment_timeout_seconds": 300.0,
+    "model_request_timeout_seconds": 300.0,
+    "tool_timeout_seconds": {
+      "run_command": 30.0,
+      "run_tests": 120.0
+    }
+  },
+  "timeout_contract_by_condition": {
+    "B0": {
+      "agent_wall_clock_seconds": 300.0,
+      "experiment_timeout_seconds": 300.0,
+      "model_request_timeout_seconds": 300.0,
+      "tool_timeout_seconds": {
+        "run_command": 30.0,
+        "run_tests": 120.0
+      }
+    },
+    "O1": {
+      "agent_wall_clock_seconds": 300.0,
+      "experiment_timeout_seconds": 300.0,
+      "model_request_timeout_seconds": 300.0,
+      "tool_timeout_seconds": {
+        "run_command": 30.0,
+        "run_tests": 120.0
+      }
+    }
+  },
+  "tool_call_counts": {
+    "b0": 20,
+    "o1": 20
+  }
+}
