@@ -44,7 +44,7 @@ def make_settings(*, api_key: str | None = "test-key") -> Settings:
         neo4j_username="neo4j",
         neo4j_password="password",
         neo4j_database="neo4j",
-        groq_api_key=api_key,
+        openrouter_api_key=api_key,
     )
 
 

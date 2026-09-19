@@ -1,11 +1,18 @@
 import shutil
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
+from pydantic_ai import AgentRunResult
+from pydantic_ai.models.test import TestModel
+
+from graph_swarm.agent.coding_agent import create_coding_agent, run_coding_agent
 from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.agent.tools.read_file import read_file
 from graph_swarm.agent.tools.run_tests import run_tests
 from graph_swarm.agent.tools.write_file import write_file
 from graph_swarm.domain.events import AgentEvent
+from graph_swarm.settings import Settings
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[2]
@@ -14,6 +21,62 @@ FIXTURE_PATH = (
     / "repositories"
     / "rollout1_agent_smoke"
 )
+
+
+class WriteFileBoundaryModel(TestModel):
+    """Deterministic model that supplies concrete arguments to the real wrapper."""
+
+    def gen_tool_args(self, tool_def: object) -> object:
+        if getattr(tool_def, "name", None) == "write_file":
+            return {"path": "recovered.py", "content": "value = 1\n"}
+        return super().gen_tool_args(tool_def)  # type: ignore[arg-type]
+
+
+def make_offline_settings() -> Settings:
+    settings_factory = cast(Callable[..., Settings], Settings)
+    return settings_factory(
+        _env_file=None,
+        neo4j_uri="neo4j+s://example.databases.neo4j.io",
+        neo4j_username="example-user",
+        neo4j_password="example-password",
+        neo4j_database="example-db",
+        agent_request_limit=3,
+        agent_command_timeout_seconds=5,
+        agent_tests_timeout_seconds=5,
+    )
+
+
+def test_actual_coding_agent_wrapper_hands_off_exact_planned_action(
+    tmp_path: Path,
+) -> None:
+    dependencies = AgentDependencies(tmp_path, "run-wrapper", "task-wrapper")
+    agent = create_coding_agent(
+        make_offline_settings(),
+        model=WriteFileBoundaryModel(
+            call_tools=["write_file"],
+            custom_output_text="complete",
+        ),
+    )
+
+    result: AgentRunResult[str] = run_coding_agent(
+        agent,
+        make_offline_settings(),
+        dependencies,
+        "Write the recovery file.",
+    )
+
+    assert result.output == "complete"
+    assert len(dependencies.events) == 1
+    event = dependencies.events[0]
+    action = dependencies.planned_action_for(event.action_id)
+    assert action is not None
+    assert action.id == event.action_id == event.result.action_id
+    assert action.operation == "write_file"
+    assert action.arguments == {"path": "recovered.py", "content": "value = 1\n"}
+    assert action.run_id == event.run_id == dependencies.run_id
+    assert action.task_id == event.task_id == dependencies.task_id
+    assert action.planned_at <= event.occurred_at
+    assert (tmp_path / "recovered.py").read_text(encoding="utf-8") == "value = 1\n"
 
 
 def test_controlled_tools_repair_local_fixture_and_record_event_stream(

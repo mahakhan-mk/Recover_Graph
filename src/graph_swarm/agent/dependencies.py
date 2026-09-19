@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Literal
 
+from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.behavior import BehaviorChangeEvidence
 from graph_swarm.domain.events import AdviceEvent, AgentEvent
 
@@ -58,6 +59,9 @@ class AgentDependencies:
     run_id: str
     task_id: str
     events: list[AgentEvent] = field(default_factory=lambda: list[AgentEvent]())
+    planned_actions: dict[str, PlannedAction] = field(
+        default_factory=lambda: dict[str, PlannedAction]()
+    )
     task: Task | None = None
     environment: EnvironmentContext | None = None
     advisory_service: AdvisoryService | None = None
@@ -85,6 +89,26 @@ class AgentDependencies:
             raise ValueError("task_id must be non-empty")
         if self.task is not None and self.task.id != self.task_id:
             raise ValueError("task.id must match task_id")
+
+    def record_planned_action(self, action: PlannedAction) -> None:
+        """Retain the exact action created immediately before tool execution.
+
+        Planned actions are scoped to this dependency instance, which in turn
+        represents one task/run. Re-recording the same action is idempotent;
+        attempting to reuse its ID for different action content is rejected.
+        """
+        if action.run_id != self.run_id:
+            raise ValueError("planned action run_id must match dependencies.run_id")
+        if action.task_id != self.task_id:
+            raise ValueError("planned action task_id must match dependencies.task_id")
+        existing = self.planned_actions.get(action.id)
+        if existing is not None and existing != action:
+            raise ValueError(f"planned action id already has different content: {action.id}")
+        self.planned_actions[action.id] = action
+
+    def planned_action_for(self, action_id: str) -> PlannedAction | None:
+        """Return the trusted runtime action for one completed action ID."""
+        return self.planned_actions.get(action_id)
 
     def has_advised_action(self, action_key: str) -> bool:
         return action_key in self._advised_action_keys

@@ -9,6 +9,7 @@ from graph_swarm.agent.dependencies import (
     WorkspacePathError,
 )
 from graph_swarm.domain.action import ActionResult
+from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.events import AgentEvent, AgentEventType
 
 
@@ -52,6 +53,51 @@ def test_event_collection_starts_empty_and_stores_canonical_event(tmp_path: Path
 
     assert dependencies.events == [event]
     assert type(dependencies.events[0]) is AgentEvent
+
+
+def test_planned_action_store_is_task_run_scoped_and_keeps_original_action(
+    tmp_path: Path,
+) -> None:
+    dependencies = AgentDependencies(tmp_path, "run-001", "task-001")
+    action = PlannedAction(
+        id="action-001",
+        run_id="run-001",
+        task_id="task-001",
+        tool="write_file",
+        operation="write_file",
+        arguments={"path": "answer.py", "content": "value = 1"},
+        planned_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    dependencies.record_planned_action(action)
+    dependencies.record_planned_action(action)
+
+    assert dependencies.planned_actions == {action.id: action}
+    assert dependencies.planned_action_for(action.id) is action
+    assert AgentDependencies(tmp_path, "run-002", "task-001").planned_actions == {}
+
+
+def test_planned_action_store_rejects_identity_and_conflicting_duplicate(
+    tmp_path: Path,
+) -> None:
+    dependencies = AgentDependencies(tmp_path, "run-001", "task-001")
+    action = PlannedAction(
+        id="action-001",
+        run_id="run-001",
+        task_id="task-001",
+        tool="write_file",
+        operation="write_file",
+        arguments={"path": "answer.py", "content": "value = 1"},
+        planned_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    with pytest.raises(ValueError, match="run_id"):
+        dependencies.record_planned_action(action.model_copy(update={"run_id": "run-002"}))
+    dependencies.record_planned_action(action)
+    with pytest.raises(ValueError, match="different content"):
+        dependencies.record_planned_action(
+            action.model_copy(update={"arguments": {"path": "other.py", "content": "x"}})
+        )
 
 
 def test_valid_nested_workspace_path_resolves(tmp_path: Path) -> None:

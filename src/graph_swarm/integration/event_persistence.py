@@ -219,16 +219,26 @@ def _index_planned_actions(
 ) -> dict[str, PlannedAction]:
     if planned_actions is None:
         return {}
-    values = (
-        planned_actions.values()
-        if isinstance(planned_actions, Mapping)
-        else planned_actions
-    )
     indexed: dict[str, PlannedAction] = {}
-    for action in values:
+    if isinstance(planned_actions, Mapping):
+        values = planned_actions.items()
+    else:
+        values = ((None, action) for action in planned_actions)
+    for supplied_id, action in values:
         normalized_action = normalize_planned_action(action)
-        if normalized_action.id in indexed:
-            raise ValueError(f"duplicate planned action id: {normalized_action.id}")
+        if supplied_id is not None and supplied_id != normalized_action.id:
+            raise ValueError(
+                "planned action mapping key must match PlannedAction.id: "
+                f"{supplied_id!r} != {normalized_action.id!r}"
+            )
+        existing = indexed.get(normalized_action.id)
+        if existing is not None:
+            if existing != normalized_action:
+                raise ValueError(
+                    "duplicate planned action id has different content: "
+                    f"{normalized_action.id}"
+                )
+            continue
         indexed[normalized_action.id] = normalized_action
     return indexed
 

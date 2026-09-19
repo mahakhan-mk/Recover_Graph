@@ -923,7 +923,9 @@ class ExperimentRunner:
         if dependencies.events:
             event = dependencies.events[-1]
             executed_action = event.result
-            planned_action = _planned_action(event)
+            planned_action = dependencies.planned_action_for(event.action_id)
+            if planned_action is None:
+                planned_action = _planned_action(event)
             latency_ms = max(0.0, (executed_action.completed_at - started).total_seconds() * 1000)
         else:
             now = datetime.now(UTC)
