@@ -115,15 +115,63 @@ def test_gs_e002_graph_backed_advisory_path(
     ]
 
     try:
-        first_result = run_tests(acquisition_dependencies, timeout_seconds=30)
-        read_result = read_file(acquisition_dependencies, "calculator.py")
+        first_action = PlannedAction(
+            id=f"{prefix}-ACQUISITION-ACTION-TEST-BEFORE",
+            run_id=acquisition_run.id,
+            task_id=acquisition_task.id,
+            tool="run_tests",
+            operation="run_tests",
+            planned_at=datetime.now(UTC),
+        )
+        first_result = run_tests(
+            acquisition_dependencies,
+            timeout_seconds=30,
+            action_id=first_action.id,
+        )
+        read_action = PlannedAction(
+            id=f"{prefix}-ACQUISITION-ACTION-READ",
+            run_id=acquisition_run.id,
+            task_id=acquisition_task.id,
+            tool="read_file",
+            operation="read_file",
+            arguments={"path": "calculator.py"},
+            planned_at=datetime.now(UTC),
+        )
+        read_result = read_file(
+            acquisition_dependencies,
+            "calculator.py",
+            action_id=read_action.id,
+        )
         assert read_result.output is not None
+        corrected_source = read_result.output.replace("return a - b", "return a + b")
+        write_action = PlannedAction(
+            id=f"{prefix}-ACQUISITION-ACTION-WRITE",
+            run_id=acquisition_run.id,
+            task_id=acquisition_task.id,
+            tool="write_file",
+            operation="write_file",
+            arguments={"path": "calculator.py", "content": corrected_source},
+            planned_at=datetime.now(UTC),
+        )
         write_result = write_file(
             acquisition_dependencies,
             "calculator.py",
-            read_result.output.replace("return a - b", "return a + b"),
+            corrected_source,
+            action_id=write_action.id,
         )
-        final_result = run_tests(acquisition_dependencies, timeout_seconds=30)
+        final_action = PlannedAction(
+            id=f"{prefix}-ACQUISITION-ACTION-TEST-AFTER",
+            run_id=acquisition_run.id,
+            task_id=acquisition_task.id,
+            tool="run_tests",
+            operation="run_tests",
+            planned_at=datetime.now(UTC),
+        )
+        final_result = run_tests(
+            acquisition_dependencies,
+            timeout_seconds=30,
+            action_id=final_action.id,
+        )
         assert first_result.success is False
         assert write_result.success is True
         assert final_result.success is True
@@ -137,6 +185,7 @@ def test_gs_e002_graph_backed_advisory_path(
             acquisition_task,
             acquisition_run,
             acquisition_environment,
+            planned_actions=(first_action, read_action, write_action, final_action),
         )
         assert acquisition_chain is not None
         failure, resolution, outcome = acquisition_chain

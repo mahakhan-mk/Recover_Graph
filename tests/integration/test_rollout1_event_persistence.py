@@ -15,6 +15,7 @@ from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.agent.tools.read_file import read_file
 from graph_swarm.agent.tools.run_tests import run_tests
 from graph_swarm.agent.tools.write_file import write_file
+from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
 from graph_swarm.domain.resolutions import ResolutionStatus
 from graph_swarm.domain.runs import Run
@@ -121,23 +122,70 @@ def test_event_stream_persists_execution_and_one_failure(
     reconnected_repository: Neo4jRepository | None = None
 
     try:
-        first_test_result = run_tests(dependencies, timeout_seconds=30)
+        first_action = PlannedAction(
+            id=f"{TASK_ID}-ACTION-TEST-BEFORE",
+            run_id=RUN_ID,
+            task_id=TASK_ID,
+            tool="run_tests",
+            operation="run_tests",
+            planned_at=datetime.now(UTC),
+        )
+        first_test_result = run_tests(
+            dependencies,
+            timeout_seconds=30,
+            action_id=first_action.id,
+        )
         assert first_test_result.success is False
         assert first_test_result.exit_code is not None
 
-        read_result = read_file(dependencies, "calculator.py")
+        read_action = PlannedAction(
+            id=f"{TASK_ID}-ACTION-READ",
+            run_id=RUN_ID,
+            task_id=TASK_ID,
+            tool="read_file",
+            operation="read_file",
+            arguments={"path": "calculator.py"},
+            planned_at=datetime.now(UTC),
+        )
+        read_result = read_file(
+            dependencies,
+            "calculator.py",
+            action_id=read_action.id,
+        )
         assert read_result.success is True
         assert read_result.output is not None
 
+        corrected_source = read_result.output.replace("return a - b", "return a + b")
+        write_action = PlannedAction(
+            id=f"{TASK_ID}-ACTION-WRITE",
+            run_id=RUN_ID,
+            task_id=TASK_ID,
+            tool="write_file",
+            operation="write_file",
+            arguments={"path": "calculator.py", "content": corrected_source},
+            planned_at=datetime.now(UTC),
+        )
         write_result = write_file(
             dependencies,
             "calculator.py",
-            read_result.output.replace("return a - b", "return a + b"),
+            corrected_source,
+            action_id=write_action.id,
         )
         assert write_result.success is True
-        assert write_result.output is not None
 
-        final_test_result = run_tests(dependencies, timeout_seconds=30)
+        final_action = PlannedAction(
+            id=f"{TASK_ID}-ACTION-TEST-AFTER",
+            run_id=RUN_ID,
+            task_id=TASK_ID,
+            tool="run_tests",
+            operation="run_tests",
+            planned_at=datetime.now(UTC),
+        )
+        final_test_result = run_tests(
+            dependencies,
+            timeout_seconds=30,
+            action_id=final_action.id,
+        )
         assert final_test_result.success is True
         assert final_test_result.exit_code == 0
         assert len(dependencies.events) == 4
@@ -149,6 +197,7 @@ def test_event_stream_persists_execution_and_one_failure(
             task,
             run,
             environment,
+            planned_actions=(first_action, read_action, write_action, final_action),
         )
         assert persisted_chain is not None
         failure, resolution, outcome = persisted_chain
@@ -161,6 +210,7 @@ def test_event_stream_persists_execution_and_one_failure(
             task,
             run,
             environment,
+            planned_actions=(first_action, read_action, write_action, final_action),
         )
         assert repeated_chain is not None
         assert repeated_chain[0].id == failure.id
@@ -284,8 +334,12 @@ def test_event_stream_persists_execution_and_one_failure(
         assert incident.resolutions[0].status is ResolutionStatus.OBSERVED_SUCCESSFUL
         assert incident.resolutions[0].successful_observations == 1
         assert dependencies.events[2].action_id in incident.resolutions[0].description
-        assert write_result.output in incident.resolutions[0].description
+        assert '"path":"calculator.py"' in incident.resolutions[0].description
+        assert '"content":' in incident.resolutions[0].description
         assert dependencies.events[3].action_id in incident.resolutions[0].description
+        assert len(incident.recovery_actions) == 1
+        assert incident.recovery_actions[0].planned_action.id == dependencies.events[2].action_id
+        assert incident.recovery_actions[0].planned_action.arguments == write_action.arguments
         assert len(incident.outcomes) == 1
         assert incident.outcomes[0].id == outcome.id
         assert incident.outcomes[0].action_id == dependencies.events[3].action_id

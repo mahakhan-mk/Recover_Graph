@@ -7,11 +7,16 @@ import pytest
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.events import AgentEvent
+from graph_swarm.domain.recovery_patterns import RecoveryPattern
 from graph_swarm.graph._validation import (
     validate_action_persistence,
     validate_relationship_ids,
 )
-from graph_swarm.graph.read_models import ActionLineageRecord, IncidentLineage
+from graph_swarm.graph.read_models import (
+    ActionLineageRecord,
+    IncidentLineage,
+    RecoveryEvidenceLineage,
+)
 from graph_swarm.graph.repository import OperationalMemoryRepository
 
 STARTED_AT = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
@@ -26,6 +31,7 @@ ENTITY_METHODS = (
     "save_failure",
     "save_resolution",
     "save_outcome",
+    "save_recovery_pattern",
 )
 RELATIONSHIP_METHODS = (
     "link_task_action",
@@ -35,11 +41,18 @@ RELATIONSHIP_METHODS = (
     "link_failure_environment",
     "link_failure_resolution",
     "link_resolution_outcome",
+    "link_resolution_observed_change",
 )
 
 
 def test_all_repository_methods_are_synchronous() -> None:
-    for method_name in (*ENTITY_METHODS, *RELATIONSHIP_METHODS, "get_incident_lineage"):
+    for method_name in (
+        *ENTITY_METHODS,
+        *RELATIONSHIP_METHODS,
+        "get_incident_lineage",
+        "get_recovery_evidence",
+        "get_recovery_pattern",
+    ):
         method = getattr(OperationalMemoryRepository, method_name)
         assert not inspect.iscoroutinefunction(method)
 
@@ -54,6 +67,7 @@ def test_entity_methods_return_none_and_use_typed_domain_models() -> None:
         "save_failure": ("failure", "FailureEpisode"),
         "save_resolution": ("resolution", "Resolution"),
         "save_outcome": ("outcome", "Outcome"),
+        "save_recovery_pattern": ("pattern", "RecoveryPattern"),
     }
 
     for method_name, (parameter_name, expected_type_name) in expected_types.items():
@@ -69,6 +83,10 @@ def test_save_action_uses_frozen_action_contracts() -> None:
     assert hints["result"] is ActionResult
     assert ActionResult.__module__ == "graph_swarm.domain.action"
     assert AgentEvent.__module__ == "graph_swarm.domain.events"
+    assert (
+        get_type_hints(OperationalMemoryRepository.save_recovery_pattern)["pattern"]
+        is RecoveryPattern
+    )
 
 
 def make_planned_action(action_id: str = "action-001") -> PlannedAction:
@@ -114,4 +132,8 @@ def test_incident_lineage_is_typed_not_a_dictionary() -> None:
     assert (
         get_type_hints(OperationalMemoryRepository.get_incident_lineage)["return"]
         is IncidentLineage
+    )
+    assert (
+        get_type_hints(OperationalMemoryRepository.get_recovery_evidence)["return"]
+        is RecoveryEvidenceLineage
     )

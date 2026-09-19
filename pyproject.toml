@@ -18,6 +18,7 @@ dependencies = [
   "pydantic-ai-harness==0.22.0",
   "pydantic-evals==2.31.1",
   "pydantic-settings>=2",
+  "sentence-transformers==5.7.0",
   "PyYAML>=6",
   "truststore>=0.10",
 ]

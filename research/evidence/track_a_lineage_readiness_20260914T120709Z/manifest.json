@@ -1,0 +1,28 @@
+{
+  "blocker": "BLOCKED_MISSING_TRUSTED_PLANNED_ACTION_PROVENANCE",
+  "branch": "research/recovery-memory-v2",
+  "complete_trusted_lineage_count": 0,
+  "failure_episode_count": 1,
+  "historical_artifact_reconstruction": {
+    "available_files": [
+      "research/evidence/gs_e002/README.md",
+      "research/evidence/gs_e002/manifest.json",
+      "research/evidence/gs_e002/model_pilot_gpt_oss_120b.json",
+      "research/evidence/gs_e002/model_pilot_llama_3_3_70b.json",
+      "research/evidence/gs_e002/real_experiment_20260831.jsonl"
+    ],
+    "inspected_artifact_roots": [
+      "research/evidence/gs_e002"
+    ],
+    "legitimate_reconstruction_found": false,
+    "reason": "Existing artifacts contain experiment summaries and event fragments, but no complete trusted typed failed/recovery PlannedAction lineage with the required graph identities and relationships."
+  },
+  "neo4j_observed_before_migration": {
+    "node_count": 10,
+    "relationship_count": 6
+  },
+  "readiness_conclusion": "BLOCKED_MISSING_TRUSTED_RECOVERY_LINEAGE",
+  "runtime_planned_action_handoff_blocker": true,
+  "starting_commit": "625b24e95221b82a57fcf6f43b47c48a62dc604b",
+  "utc": "2026-09-14T12:07:11.931458+00:00"
+}

@@ -1,0 +1,34 @@
+{
+  "excluded_from_model_input": [
+    "family_id",
+    "gold_patch",
+    "benchmark_recovery_annotation",
+    "future_task_metadata",
+    "existing_recovery_pattern_semantics",
+    "existing_recovery_pattern_embedding"
+  ],
+  "failure_ids": [],
+  "lineage_count": 0,
+  "model_input_fields": [
+    "failed_action_arguments",
+    "failed_action_operation",
+    "failed_action_tool",
+    "failure_signature",
+    "failure_symptom",
+    "failure_type",
+    "outcome",
+    "recovery_action_arguments",
+    "recovery_action_operation",
+    "recovery_action_tool",
+    "source_chronological_index",
+    "source_environment_id",
+    "source_failure_id",
+    "source_markers",
+    "source_outcome_id",
+    "source_resolution_id",
+    "source_runtime",
+    "source_task_id",
+    "source_task_problem_statement",
+    "source_versions"
+  ]
+}

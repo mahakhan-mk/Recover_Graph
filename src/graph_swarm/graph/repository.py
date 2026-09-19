@@ -7,11 +7,17 @@ from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
 from graph_swarm.domain.failures import FailureEpisode
 from graph_swarm.domain.outcomes import Outcome
+from graph_swarm.domain.recovery_patterns import RecoveryPattern
 from graph_swarm.domain.resolutions import Resolution
 from graph_swarm.domain.runs import Run
 from graph_swarm.domain.tasks import Task
 from graph_swarm.domain.tools import Tool
-from graph_swarm.graph.read_models import IncidentLineage
+from graph_swarm.graph.read_models import (
+    IncidentLineage,
+    RecoveryEvidenceLineage,
+    RecoveryPatternLineage,
+    RecoveryPatternVectorCandidate,
+)
 from graph_swarm.retrieval.candidates import HistoricalRecoveryCandidate
 
 
@@ -63,6 +69,34 @@ class OperationalMemoryRepository(Protocol):
         """Persist one Outcome by ``outcome.id`` idempotently."""
         ...
 
+    def save_recovery_pattern(self, pattern: RecoveryPattern) -> None:
+        """Persist one RecoveryPattern by ``pattern.id`` idempotently."""
+        ...
+
+    def update_recovery_pattern_embedding(
+        self,
+        pattern_id: str,
+        embedding: list[float],
+    ) -> None:
+        """Update only the native embedding of an existing pattern."""
+        ...
+
+    def ensure_recovery_pattern_vector_index(self) -> None:
+        """Create the RecoveryPattern native vector index idempotently."""
+        ...
+
+    def query_recovery_pattern_vectors(
+        self,
+        query_embedding: list[float],
+        limit: int,
+    ) -> tuple[RecoveryPatternVectorCandidate, ...]:
+        """Return raw nearest-neighbor results without eligibility filtering."""
+        ...
+
+    def count_recovery_pattern_vectors(self) -> int:
+        """Count currently embedded RecoveryPatterns for complete-pool retrieval."""
+        ...
+
     def link_task_action(self, task_id: str, action_id: str) -> None:
         """Create ``Task-HAS_ACTION->Action`` idempotently."""
         ...
@@ -91,8 +125,24 @@ class OperationalMemoryRepository(Protocol):
         """Create ``Resolution-VERIFIED_BY->Outcome`` idempotently."""
         ...
 
+    def link_resolution_observed_change(
+        self,
+        resolution_id: str,
+        action_id: str,
+    ) -> None:
+        """Create ``Resolution-OBSERVED_CHANGE->Action`` idempotently."""
+        ...
+
     def get_incident_lineage(self, failure_id: str) -> IncidentLineage:
         """Return the typed Rollout 1 lineage rooted at ``failure_id``."""
+        ...
+
+    def get_recovery_evidence(self, failure_id: str) -> RecoveryEvidenceLineage:
+        """Return pre-pattern historical recovery evidence rooted at a failure."""
+        ...
+
+    def get_recovery_pattern(self, pattern_id: str) -> RecoveryPatternLineage:
+        """Reconstruct one RecoveryPattern and its source evidence."""
         ...
 
     def find_historical_recovery_candidates(

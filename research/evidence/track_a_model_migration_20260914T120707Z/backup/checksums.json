@@ -1,0 +1,20 @@
+{
+  "files": {
+    "counts.json": "d0740d2429cc7b6ba306ebe1907e85a3c6f93720645177ba842ea8f939f46761",
+    "nodes.jsonl": "45c989a599ada363d80f7066f9cc6761510f770bffc3b3a8436ce2198a912a0c",
+    "relationships.jsonl": "e9857c5dd260fa43da746c53788be744dd0fbf427305d433a9efe0d31a98862e",
+    "schema.json": "a98117d2d26ac3ee4b6be0c121d4468ad769274ff7865d0a059e9bb865cfc98d"
+  },
+  "verification": {
+    "checksums_match": true,
+    "credentials_absent": true,
+    "embedded_recovery_pattern_count_matches": true,
+    "export_outside_temp": true,
+    "json_and_jsonl_parse": true,
+    "manifest_branch_and_sha_present": true,
+    "node_count_matches": true,
+    "records_not_truncated": true,
+    "recovery_pattern_count_matches": true,
+    "relationship_count_matches": true
+  }
+}

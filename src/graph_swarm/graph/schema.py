@@ -9,4 +9,5 @@ NODE_LABELS = {
     "Resolution",
     "Outcome",
     "Environment",
+    "RecoveryPattern",
 }

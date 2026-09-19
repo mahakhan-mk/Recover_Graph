@@ -50,3 +50,15 @@ def test_iter_migration_statements_ignores_empty_statements(tmp_path: Path) -> N
     assert list(iter_migration_statements(tmp_path)) == [
         "CREATE CONSTRAINT example IF NOT EXISTS FOR (n:Example) REQUIRE n.id IS UNIQUE"
     ]
+
+
+def test_recovery_pattern_vector_index_migration_is_native_and_idempotent() -> None:
+    migration = Path(
+        "migrations/neo4j/002_recovery_pattern_vector_index.cypher"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE VECTOR INDEX recovery_pattern_embedding_idx IF NOT EXISTS" in migration
+    assert "FOR (pattern:RecoveryPattern) ON (pattern.embedding)" in migration
+    assert "`vector.dimensions`: 384" in migration
+    assert "`vector.similarity_function`: 'cosine'" in migration
+    assert "embedding_json" not in migration
