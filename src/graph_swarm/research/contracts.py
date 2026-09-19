@@ -65,6 +65,8 @@ class ExperimentRunArtifact(BaseModel):
     """
 
     experiment_id: str
+    gate_id: str | None = None
+    execution_manifest_id: str | None = None
     condition: ExperimentCondition
     run_id: str
     task_id: str

@@ -31,3 +31,35 @@ Objective task success is not required, budget exhaustion alone does not fail
 the smoke, `gate_b1_evaluated` remains false, and no T execution is included.
 Previous provider-smoke runs are development evidence only; no Gate B1 result
 has been produced.
+
+## Sprint 3D-B1 Gate B1 freeze
+
+Gate B1 is the frozen chronological comparison of GS-T006 through GS-T015,
+with one B0 and one O1 execution per task (20 intended valid executions).
+Within every task pair, B0 is planned before O1; task ranges may be selected
+explicitly for batching, while the global task order remains chronological.
+The machine-readable protocol is in `configs/experiments/gate_b1.yaml`; the
+runtime freeze record is created before execution by the Sprint 3D-B1 harness.
+
+The OpenRouter/model, zero temperature, 20-action/24-request/3-tool-retry
+limits, 300-second agent and model-request timeouts, and five-second request
+start pacing (12 requests per minute nominal ceiling) are immutable. O1 gets
+exactly one validated Oracle intervention at `task_start`, before the first
+model request. B0 has zero advice. T is disabled and is not constructed or
+executed at this gate.
+
+Normal objective completion/failure and bounded action/request exhaustion are
+valid observations. Provider and infrastructure failures remain immutable
+invalid attempts, are excluded from experimental metrics, and may be replaced
+only by an explicit manual rerun linked to the invalid attempt. No provider
+retry, automatic rerun, or outcome-based task selection is allowed. Completed
+valid observations are never overwritten or silently duplicated.
+
+The offline analyzer consumes only the Gate B1 manifest/index and its
+immutable artifacts. It reports task rows, successes, recurrence counts where
+the frozen matcher is available, bounded terminations, tool/request/retry/
+token/latency/pacing evidence, Oracle coverage, trajectory evidence, and
+invalid-attempt counts. Missing usage is reported as null. Gate B1 is not
+evaluated until all ten valid pairs exist; once complete it is only marked
+ready for human review, with no undocumented PASS/FAIL threshold. Track B
+stops after Gate B1 and waits for Track A Gate A1.

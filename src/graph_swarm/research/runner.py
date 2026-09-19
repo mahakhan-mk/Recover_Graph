@@ -519,6 +519,9 @@ class ExperimentRunArtifactStore:
         )
         run_dir.mkdir(parents=True, exist_ok=True)
         evidence = {
+            "experiment_id": artifact.experiment_id,
+            "gate_id": artifact.gate_id,
+            "execution_manifest_id": artifact.execution_manifest_id,
             "run_id": artifact.run_id,
             "task_id": artifact.task_id,
             "error": None if error is None else type(error).__name__,
@@ -586,6 +589,7 @@ class ExperimentExecution:
     agent_result: AgentRunResult[str] | None
     error: Exception | None
     step_database_path: Path
+    actual_environment_fingerprint: str | None = None
 
 
 class ExperimentRunner:
@@ -608,6 +612,8 @@ class ExperimentRunner:
         condition: ExperimentCondition | None = None,
         artifact_store: ExperimentRunArtifactStore | None = None,
         request_pacing: ProviderRequestPacing | None = None,
+        gate_id: str | None = None,
+        execution_manifest_id: str | None = None,
     ) -> None:
         if not configuration.config.development or not configuration.config.pilot:
             raise ExperimentConfigurationError(
@@ -659,6 +665,8 @@ class ExperimentRunner:
             configuration.artifact_root_path
         )
         self.request_pacing = request_pacing or ProviderRequestPacing()
+        self.gate_id = gate_id
+        self.execution_manifest_id = execution_manifest_id
 
     def run_all(self, tasks: Sequence[Task] | None = None) -> list[ExperimentExecution]:
         """Run each selected task once, strictly in chronological order."""
@@ -954,6 +962,8 @@ class ExperimentRunner:
         failure_type = _failure_type(executed_action)
         return ExperimentRunArtifact(
             experiment_id=self.configuration.config.experiment_id,
+            gate_id=self.gate_id,
+            execution_manifest_id=self.execution_manifest_id,
             condition=condition,
             run_id=run_id,
             task_id=task.id,

@@ -49,7 +49,8 @@ class AgentConfigurationError(ValueError):
     """Raised when live coding-agent provider configuration is incomplete."""
 
 
-_CODING_AGENT_TOOL_RETRIES = 3
+CODING_AGENT_TOOL_RETRIES = 3
+_CODING_AGENT_TOOL_RETRIES = CODING_AGENT_TOOL_RETRIES
 MODEL_REQUEST_TIMEOUT_SECONDS = 300
 
 

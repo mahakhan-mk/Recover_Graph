@@ -1,0 +1,16 @@
+{
+  "gate": "B1",
+  "runtime": "prepared_swesmith_docker",
+  "tasks": {
+    "GS-T006": {"environment_fingerprint": "3e2642bfedd2e004", "validated": true},
+    "GS-T007": {"environment_fingerprint": "49435e4f1ceac046", "validated": true},
+    "GS-T008": {"environment_fingerprint": "41e9dd1b233b4a7f", "validated": true},
+    "GS-T009": {"environment_fingerprint": "a9d0659a39ef61e1", "validated": true},
+    "GS-T010": {"environment_fingerprint": "41e9dd1b233b4a7f", "validated": true},
+    "GS-T011": {"environment_fingerprint": "e4203aa3dc32008b", "validated": true},
+    "GS-T012": {"environment_fingerprint": "92359a53c96275ab", "validated": true},
+    "GS-T013": {"environment_fingerprint": "0c7e47949071530c", "validated": true},
+    "GS-T014": {"environment_fingerprint": "0a5c5af12c231c7e", "validated": true},
+    "GS-T015": {"environment_fingerprint": "92359a53c96275ab", "validated": true}
+  }
+}
