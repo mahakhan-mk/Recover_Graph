@@ -488,6 +488,9 @@ _PYTHON_CONSTRAINT_PATTERN = re.compile(
     r"(?:python_requires|requires-python)\s*\+?=\s*[\"'](?P<constraint>[^\"']+)[\"']",
     re.IGNORECASE,
 )
+_PIP_MANIFEST_DIRECTIVE = re.compile(
+    r"^\s*(?:-r|--requirement|-c|--constraint)\s+(?P<reference>\S+)(?:\s+#.*)?$"
+)
 
 
 def _combine_python_constraint_fragments(fragments: Sequence[str]) -> str:
@@ -654,11 +657,11 @@ def _dependency_install_plan(
                 continue
             deps = parser.get(section, "deps", fallback="")
             for line in deps.splitlines():
-                requirement_match = re.search(r"(?:-r|--requirement)\s+([^\s]+)", line.strip())
-                if requirement_match:
-                    requirement_file = (repository / requirement_match.group(1)).resolve()
-                    if requirement_file.is_file():
-                        requirement_files.add(requirement_file)
+                reference = _local_dependency_manifest_reference(line)
+                if reference is not None:
+                    requirement_files.add(
+                        _resolve_dependency_manifest(repository, tox_path, reference)
+                    )
                 match = re.search(r"\.\[([^\]]+)\]", line.strip())
                 if match:
                     extras.update(part.strip() for part in match.group(1).split(","))
@@ -675,6 +678,7 @@ def _dependency_install_plan(
                 key, value = (part.strip() for part in line.split("=", 1))
                 if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
                     environment[key] = value
+    requirement_files = _dependency_manifest_closure(repository, requirement_files)
     overlay_values = tuple(
         str(item).strip()
         for item in (overlays or {}).get(task_id, ())
@@ -686,6 +690,85 @@ def _dependency_install_plan(
         overlay_values,
         tuple(sorted(environment.items())),
     )
+
+
+def _local_dependency_manifest_reference(line: str) -> str | None:
+    """Return a local pip manifest reference, ignoring packages and URLs."""
+    match = _PIP_MANIFEST_DIRECTIVE.match(line)
+    if match is None:
+        return None
+    reference = match.group("reference")
+    if "://" in reference:
+        return None
+    return reference
+
+
+def _resolve_dependency_manifest(
+    repository: Path,
+    source_manifest: Path,
+    reference: str,
+) -> Path:
+    """Resolve one pip include and enforce the frozen repository boundary."""
+    repository_root = repository.resolve()
+    referenced = (source_manifest.parent / reference).resolve()
+    try:
+        referenced.relative_to(repository_root)
+    except ValueError as error:
+        raise BenchmarkPreflightError(
+            "dependency manifest reference escapes the frozen repository: "
+            f"source={source_manifest} referenced={reference} resolved={referenced}"
+        ) from error
+    if not referenced.is_file():
+        raise BenchmarkPreflightError(
+            "referenced dependency manifest is missing: "
+            f"source={source_manifest} referenced={reference} resolved={referenced}"
+        )
+    return referenced
+
+
+def _dependency_manifest_closure(
+    repository: Path,
+    seeds: set[Path],
+) -> set[Path]:
+    """Expand local -r/--requirement/-c/--constraint references recursively."""
+    repository = repository.resolve()
+    resolved_seeds: set[Path] = set()
+    for path in seeds:
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(repository)
+        except ValueError as error:
+            raise BenchmarkPreflightError(
+                "dependency manifest reference escapes the frozen repository: "
+                f"source={repository} referenced={path} resolved={resolved}"
+            ) from error
+        if not resolved.is_file():
+            raise BenchmarkPreflightError(
+                "referenced dependency manifest is missing: "
+                f"source={repository} referenced={relative} resolved={resolved}"
+            )
+        resolved_seeds.add(resolved)
+    visited: set[Path] = set()
+    pending = list(resolved_seeds)
+    while pending:
+        manifest = pending.pop()
+        if manifest in visited:
+            continue
+        visited.add(manifest)
+        try:
+            lines = manifest.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError) as error:
+            raise BenchmarkPreflightError(
+                f"could not read dependency manifest {manifest}: {error}"
+            ) from error
+        for line in lines:
+            reference = _local_dependency_manifest_reference(line)
+            if reference is None:
+                continue
+            nested = _resolve_dependency_manifest(repository, manifest, reference)
+            if nested not in visited:
+                pending.append(nested)
+    return visited
 
 
 def _dependency_fingerprint(
@@ -720,6 +803,7 @@ def _dependency_fingerprint(
         digest.update(policy_fingerprint_payload(benchmark_policy))
     if benchmark_manifest_path is not None:
         digest.update(benchmark_manifest_path.read_bytes())
+    selected_manifests = {path.resolve() for path in plan.requirement_files}
     for path in sorted(
         path
         for path in repository.rglob("*")
@@ -728,6 +812,7 @@ def _dependency_fingerprint(
         and (
             path.name.startswith("requirements")
             and path.suffix == ".txt"
+            or path.resolve() in selected_manifests
             or path.name in {"pyproject.toml", "setup.py", "setup.cfg", "Pipfile", "tox.ini"}
         )
     ):
@@ -2127,6 +2212,5 @@ def _write_exclusive(path: Path, content: Any) -> None:
         handle.write(serialized)
         if not serialized.endswith("\n"):
             handle.write("\n")
-
 
 

@@ -258,6 +258,142 @@ def test_dependency_plan_reads_nested_requirements_and_tox_extras(tmp_path: Path
     assert plan.environment == (("TOX_RED", "1"),)
 
 
+def test_dependency_plan_recursively_closes_requirement_and_constraint_manifests(
+    tmp_path: Path,
+) -> None:
+    requirements = tmp_path / "requirements"
+    nested = requirements / "nested"
+    nested.mkdir(parents=True)
+    root = requirements / "requirements-tests.txt"
+    first = requirements / "requirements.txt"
+    second = nested / "second.txt"
+    root.write_text(
+        "--requirement requirements.txt\n-c nested/constraints-one.txt\n",
+        encoding="utf-8",
+    )
+    first.write_text(
+        "pytest\n--requirement nested/second.txt\n--constraint nested/constraints-two.txt\n",
+        encoding="utf-8",
+    )
+    second.write_text("trio\n", encoding="utf-8")
+    (nested / "constraints-one.txt").write_text(
+        "--constraint constraints-two.txt\n", encoding="utf-8"
+    )
+    (nested / "constraints-two.txt").write_text("urllib3<3\n", encoding="utf-8")
+    (tmp_path / "tox.ini").write_text(
+        "[testenv]\ndeps = -r requirements/requirements-tests.txt\n",
+        encoding="utf-8",
+    )
+
+    plan = sprint3._dependency_install_plan(tmp_path, task_id="GS-T001")  # pyright: ignore[reportPrivateUsage]
+
+    assert plan.requirement_files == (
+        nested / "constraints-one.txt",
+        nested / "constraints-two.txt",
+        second,
+        root,
+        first,
+    )
+
+
+def test_dependency_manifest_closure_deduplicates_and_terminates_cycles(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "requirements.txt"
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    root.write_text("-r first.txt\n-r first.txt\n", encoding="utf-8")
+    first.write_text("-r second.txt\n", encoding="utf-8")
+    second.write_text("-r first.txt\n", encoding="utf-8")
+
+    plan = sprint3._dependency_install_plan(tmp_path)  # pyright: ignore[reportPrivateUsage]
+
+    assert plan.requirement_files == (first, root, second)
+
+
+@pytest.mark.parametrize("directive", ("-r", "--requirement", "-c", "--constraint"))
+def test_dependency_manifest_missing_reference_fails_before_docker(
+    tmp_path: Path,
+    directive: str,
+) -> None:
+    source = tmp_path / "requirements.txt"
+    source.write_text(f"{directive} missing.txt\n", encoding="utf-8")
+
+    with pytest.raises(BenchmarkPreflightError, match="source=.*requirements.txt.*missing.txt"):
+        sprint3._dependency_install_plan(tmp_path)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_dependency_manifest_reference_cannot_escape_repository(tmp_path: Path) -> None:
+    source = tmp_path / "requirements.txt"
+    source.write_text("-r ../outside.txt\n", encoding="utf-8")
+
+    with pytest.raises(BenchmarkPreflightError, match="escapes the frozen repository"):
+        sprint3._dependency_install_plan(tmp_path)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_prepared_dockerfile_copies_recursive_manifests_before_pip_install(
+    tmp_path: Path,
+) -> None:
+    requirements = tmp_path / "requirements"
+    requirements.mkdir()
+    tests_file = requirements / "requirements-tests.txt"
+    base_file = requirements / "requirements.txt"
+    tests_file.write_text("-r requirements.txt\n", encoding="utf-8")
+    base_file.write_text("pytest\n", encoding="utf-8")
+    (tmp_path / "tox.ini").write_text(
+        "[testenv]\ndeps = -r requirements/requirements-tests.txt\n",
+        encoding="utf-8",
+    )
+    plan = sprint3._dependency_install_plan(tmp_path)  # pyright: ignore[reportPrivateUsage]
+
+    dockerfile = sprint3._prepared_dockerfile(  # pyright: ignore[reportPrivateUsage]
+        base_image_digest="frozen:image@sha256:base",
+        python_executable="/usr/bin/python3.12",
+        repository=tmp_path,
+        plan=plan,
+    )
+
+    tests_copy = (
+        "COPY requirements/requirements-tests.txt /workspace/requirements/requirements-tests.txt"
+    )
+    base_copy = "COPY requirements/requirements.txt /workspace/requirements/requirements.txt"
+    pip_install = "--requirement /workspace/requirements/requirements-tests.txt"
+    assert tests_copy in dockerfile
+    assert base_copy in dockerfile
+    assert dockerfile.index(tests_copy) < dockerfile.index(pip_install)
+    assert dockerfile.index(base_copy) < dockerfile.index(pip_install)
+
+
+def test_nested_dependency_manifest_changes_fingerprint(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True)
+    nested = tmp_path / "requirements" / "requirements.txt"
+    nested.parent.mkdir()
+    root = tmp_path / "requirements" / "requirements-tests.txt"
+    root.write_text("-r requirements.txt\n", encoding="utf-8")
+    nested.write_text("pytest==8.0.0\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "commit", "-m", "baseline"],
+        check=True,
+        capture_output=True,
+    )
+    plan = sprint3._dependency_install_plan(tmp_path)  # pyright: ignore[reportPrivateUsage]
+    interpreter = sprint3.PythonInterpreter(Path("python312"), "3.12.8")
+    first = sprint3._dependency_fingerprint(  # pyright: ignore[reportPrivateUsage]
+        tmp_path, interpreter, plan
+    )
+    nested.write_text("pytest==8.1.0\n", encoding="utf-8")
+    second = sprint3._dependency_fingerprint(  # pyright: ignore[reportPrivateUsage]
+        tmp_path, interpreter, plan
+    )
+    assert first != second
+
+
 def test_dependency_overlay_is_task_scoped(tmp_path: Path) -> None:
     overlays = {"GS-T007": ("trio",)}
 
