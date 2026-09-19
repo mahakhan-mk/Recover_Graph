@@ -22,7 +22,7 @@ From a clean clone, create the root development environment and configure only
 your own credentials:
 
 ```powershell
-py -3.12 -m venv .venv
+py -3.13 -m venv .venv
 .\\.venv\\Scripts\\python.exe -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```

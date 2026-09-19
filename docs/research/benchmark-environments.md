@@ -15,7 +15,7 @@ development-only virtual environment:
 ```powershell
 git clone <GRAPH_SWARM_REPOSITORY_URL> graph_swarm
 Set-Location graph_swarm
-py -3.12 -m venv .venv
+py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
