@@ -1,34 +1,29 @@
 {
   "schema_version": 1,
-  "scope": "resource_bounded_development_gate_a1",
+  "scope": "full_five_family_gate_a1_development_pilot",
+  "selection_revision": 2,
+  "supersedes": "resource_bounded_four_family_subset",
+  "scope_revision_rationale": "The previous resource-bounded four-family selection was superseded before acquisition execution because no acquisition tasks had executed and no Gate A1 retrieval results existed; the scope expanded solely because the workstation resource decision changed.",
+  "acquisition_executed_before_revision": false,
+  "retrieval_results_existed_before_revision": false,
   "included_acquisition_tasks": [
     "GS-T001",
     "GS-T002",
     "GS-T003",
+    "GS-T004",
     "GS-T005"
   ],
   "included_transfer_tasks": [
     "GS-T006",
     "GS-T007",
     "GS-T008",
+    "GS-T009",
     "GS-T010",
     "GS-T011",
     "GS-T012",
     "GS-T013",
+    "GS-T014",
     "GS-T015"
   ],
-  "excluded_tasks": [
-    {
-      "task_id": "GS-T004",
-      "reason": "local_resource_constraint_monai_image_size"
-    },
-    {
-      "task_id": "GS-T009",
-      "reason": "source_family_excluded_from_local_development_acquisition"
-    },
-    {
-      "task_id": "GS-T014",
-      "reason": "source_family_excluded_from_local_development_acquisition"
-    }
-  ]
+  "excluded_tasks": []
 }

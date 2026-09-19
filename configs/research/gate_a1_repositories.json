@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scope": "resource_bounded_gate_a1_development_acquisition_baselines",
+  "scope": "full_five_family_gate_a1_development_acquisition_baselines",
   "repositories": [
     {
       "task_id": "GS-T001",
@@ -16,6 +16,11 @@
       "task_id": "GS-T003",
       "repository": "swesmith/sunpy__sunpy.f8edfd5c",
       "commit": "0cd78e256ccd5c37ae18b900d628b137eb447a71"
+    },
+    {
+      "task_id": "GS-T004",
+      "repository": "swesmith/Project-MONAI__MONAI.a09c1f08",
+      "commit": "acfea3e9e300e7b1b709345ed04d2f6f0baaede0"
     },
     {
       "task_id": "GS-T005",

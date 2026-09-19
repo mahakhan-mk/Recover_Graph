@@ -57,6 +57,12 @@ class DevelopmentSubsetExclusion:
 @dataclass(frozen=True)
 class DevelopmentSubset:
     schema_version: int
+    selection_revision: int
+    scope: str
+    supersedes: str
+    scope_revision_rationale: str
+    acquisition_executed_before_revision: bool
+    retrieval_results_existed_before_revision: bool
     included_acquisition_tasks: tuple[str, ...]
     included_transfer_tasks: tuple[str, ...]
     excluded_tasks: tuple[DevelopmentSubsetExclusion, ...]
@@ -192,13 +198,33 @@ BaselineChecker = Callable[[str, str], tuple[str, ...]]
 
 
 def load_development_subset(project_root: Path) -> DevelopmentSubset:
-    """Load the frozen resource-bounded subset and validate it against pilot.jsonl."""
+    """Load the revised full Gate A1 development pilot and validate pilot.jsonl."""
     raw = _load_json(project_root / DEVELOPMENT_SUBSET_PATH)
-    if raw.get("scope") != "resource_bounded_development_gate_a1":
-        raise GateA1ConfigurationError("development subset scope is not resource-bounded Gate A1")
+    scope = raw.get("scope")
+    if scope != "full_five_family_gate_a1_development_pilot":
+        raise GateA1ConfigurationError("development subset scope is not the full Gate A1 pilot")
     schema_version = raw.get("schema_version")
     if schema_version != 1:
         raise GateA1ConfigurationError("Gate A1 development subset schema_version must be 1")
+    selection_revision = raw.get("selection_revision")
+    if selection_revision != 2:
+        raise GateA1ConfigurationError("Gate A1 development subset selection_revision must be 2")
+    supersedes = raw.get("supersedes")
+    if supersedes != "resource_bounded_four_family_subset":
+        raise GateA1ConfigurationError(
+            "Gate A1 development subset must supersede the four-family selection"
+        )
+    rationale = raw.get("scope_revision_rationale")
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise GateA1ConfigurationError("scope_revision_rationale must be a non-empty string")
+    if raw.get("acquisition_executed_before_revision") is not False:
+        raise GateA1ConfigurationError(
+            "acquisition_executed_before_revision must be false"
+        )
+    if raw.get("retrieval_results_existed_before_revision") is not False:
+        raise GateA1ConfigurationError(
+            "retrieval_results_existed_before_revision must be false"
+        )
     included_acquisition = _string_tuple(
         raw.get("included_acquisition_tasks"), "included_acquisition_tasks"
     )
@@ -242,9 +268,9 @@ def load_development_subset(project_root: Path) -> DevelopmentSubset:
     acquisition_records = [by_task[task_id] for task_id in included_acquisition]
     if any(record.occurrence_index != 1 for record in acquisition_records):
         raise GateA1ConfigurationError("included acquisition tasks must be occurrence-1 tasks")
-    if tuple(record.chronological_index for record in acquisition_records) != (1, 2, 3, 5):
+    if tuple(record.chronological_index for record in acquisition_records) != (1, 2, 3, 4, 5):
         raise GateA1ConfigurationError(
-            "included acquisition chronology must remain canonical 1,2,3,5"
+            "included acquisition chronology must remain canonical 1,2,3,4,5"
         )
     acquisition_families = {record.family_id for record in acquisition_records}
     for task_id in included_transfer:
@@ -266,28 +292,20 @@ def load_development_subset(project_root: Path) -> DevelopmentSubset:
     for task_id in CANONICAL_ACQUISITION_TASK_IDS + CANONICAL_TRANSFER_TASK_IDS:
         if task_id not in by_task:
             raise GateA1ConfigurationError(f"canonical pilot task is missing: {task_id}")
-    expected_exclusions = {
-        "GS-T004": "local_resource_constraint_monai_image_size",
-        "GS-T009": "source_family_excluded_from_local_development_acquisition",
-        "GS-T014": "source_family_excluded_from_local_development_acquisition",
-    }
-    if {item.task_id: item.reason for item in exclusions} != expected_exclusions:
-        raise GateA1ConfigurationError("development subset exclusions are not frozen as specified")
-    if included_acquisition != ("GS-T001", "GS-T002", "GS-T003", "GS-T005"):
-        raise GateA1ConfigurationError("resource-bounded acquisition sequence is not frozen")
-    if included_transfer != (
-        "GS-T006",
-        "GS-T007",
-        "GS-T008",
-        "GS-T010",
-        "GS-T011",
-        "GS-T012",
-        "GS-T013",
-        "GS-T015",
-    ):
-        raise GateA1ConfigurationError("resource-bounded transfer sequence is not frozen")
+    if exclusions:
+        raise GateA1ConfigurationError("full Gate A1 development pilot cannot exclude tasks")
+    if included_acquisition != CANONICAL_ACQUISITION_TASK_IDS:
+        raise GateA1ConfigurationError("full Gate A1 acquisition sequence is not canonical")
+    if included_transfer != CANONICAL_TRANSFER_TASK_IDS:
+        raise GateA1ConfigurationError("full Gate A1 transfer sequence is not canonical")
     return DevelopmentSubset(
         schema_version=1,
+        selection_revision=2,
+        scope=cast(str, scope),
+        supersedes=cast(str, supersedes),
+        scope_revision_rationale=rationale,
+        acquisition_executed_before_revision=False,
+        retrieval_results_existed_before_revision=False,
         included_acquisition_tasks=included_acquisition,
         included_transfer_tasks=included_transfer,
         excluded_tasks=tuple(exclusions),
@@ -295,7 +313,7 @@ def load_development_subset(project_root: Path) -> DevelopmentSubset:
 
 
 def load_frozen_baselines(project_root: Path) -> tuple[FrozenBaseline, ...]:
-    """Load the four clean local acquisition snapshots without mutating them."""
+    """Load the five clean local acquisition snapshots without mutating them."""
     raw = _load_json(project_root / BASELINE_MANIFEST_PATH)
     values = raw.get("repositories")
     if not isinstance(values, list):
@@ -614,7 +632,7 @@ def prepare_gate_a1_environments(
     execution_root: Path | None = None,
     artifact_root: Path | None = None,
 ) -> Path:
-    """Prepare only the frozen resource-bounded subset acquisition tasks."""
+    """Prepare only the frozen full five-family acquisition tasks."""
     subset = load_development_subset(project_root)
     identities = load_acquisition_identities(
         project_root, task_ids=subset.included_acquisition_tasks
@@ -728,8 +746,17 @@ def write_readiness_artifact(
         "embedding_dimension": RECOVERY_PATTERN_EMBEDDING_DIMENSION,
         "retrieval_query_version": RECOVERY_RETRIEVAL_QUERY_VERSION,
         "vector_index": VECTOR_INDEX,
-        "development_scope": "resource_bounded_four_family_subset",
-        "canonical_acquisition_candidate_count": 5,
+        "development_scope": subset.scope,
+        "selection_revision": subset.selection_revision,
+        "supersedes": subset.supersedes,
+        "scope_revision_rationale": subset.scope_revision_rationale,
+        "acquisition_executed_before_scope_revision": (
+            subset.acquisition_executed_before_revision
+        ),
+        "retrieval_results_existed_before_scope_revision": (
+            subset.retrieval_results_existed_before_revision
+        ),
+        "canonical_acquisition_candidate_count": len(CANONICAL_ACQUISITION_TASK_IDS),
         "selected_local_acquisition_count": len(subset.included_acquisition_tasks),
         "excluded_acquisition_count": len(subset.excluded_acquisition_tasks),
         "acquisition_task_ids": [status.task_id for status in statuses],
@@ -738,7 +765,7 @@ def write_readiness_artifact(
         "excluded_acquisition_tasks": [asdict(item) for item in subset.excluded_acquisition_tasks],
         "excluded_transfer_tasks": [asdict(item) for item in subset.excluded_transfer_tasks],
         "subset_frozen_before_acquisition_execution": True,
-        "preparation_referenced_excluded_monai_image": False,
+        "scope_frozen_before_acquisition_execution": True,
         "frozen_baseline_manifest": BASELINE_MANIFEST_PATH.as_posix(),
         "frozen_baselines": [asdict(item) for item in load_frozen_baselines(project_root)],
         "acquisition_environment_contract": ACQUISITION_CONTRACT.as_posix(),
@@ -777,6 +804,12 @@ def write_readiness_artifact(
         artifact_dir / "metrics.json",
         {
             "status": status_name,
+            "development_scope": subset.scope,
+            "selection_revision": subset.selection_revision,
+            "canonical_acquisition_candidate_count": len(CANONICAL_ACQUISITION_TASK_IDS),
+            "selected_local_acquisition_count": len(subset.included_acquisition_tasks),
+            "excluded_acquisition_count": len(subset.excluded_acquisition_tasks),
+            "scope_frozen_before_acquisition_execution": True,
             "acquisition_tasks_attempted": 0,
             "complete_trusted_recovery_lineages": 0,
             "patterns_generated": 0,
@@ -806,33 +839,43 @@ def write_readiness_artifact(
             "blockers": blockers,
         },
     )
-    (artifact_dir / "README.md").write_text(
-        "\n".join(
-            (
-                f"# {GATE_A1}",
-                "",
-                "Development-only readiness check. No acquisition, provider call, "
-                "advice delivery, or behavioral T execution was performed.",
-                "",
-                f"Status: {status_name}",
-                "",
-                "Development scope: resource_bounded_four_family_subset",
-                "Subset frozen before acquisition execution: true",
-                "",
-                "Pattern acquisition quality was not evaluated because the environment "
-                "preflight failed before execution.",
+    readme_lines = [
+        f"# {GATE_A1}",
+        "",
+        "Development-only readiness check. No acquisition, provider call, "
+        "advice delivery, or behavioral T execution was performed.",
+        "",
+        f"Status: {status_name}",
+        "",
+        f"Development scope: {subset.scope}",
+        f"Selection revision: {subset.selection_revision}",
+        f"Supersedes: {subset.supersedes}",
+        "Scope frozen before acquisition execution: true",
+        "",
+        "Pattern acquisition quality was not evaluated because the environment "
+        "preflight failed before execution.",
+    ]
+    if subset.excluded_tasks:
+        readme_lines.extend(
+            [
                 "",
                 "Excluded from this local development diagnostic:",
-                "- GS-T004: local_resource_constraint_monai_image_size",
-                "- GS-T009: source_family_excluded_from_local_development_acquisition",
-                "- GS-T014: source_family_excluded_from_local_development_acquisition",
-                "",
-                "## Blockers",
-                "",
-                *(f"- {item['task_id']}: {', '.join(item['reasons'])}" for item in blockers),
-            )
+                *[
+                    f"- {item.task_id}: {item.reason}"
+                    for item in subset.excluded_tasks
+                ],
+            ]
         )
-        + "\n",
+    readme_lines.extend(
+        [
+            "",
+            "## Blockers",
+            "",
+            *[f"- {item['task_id']}: {', '.join(item['reasons'])}" for item in blockers],
+        ]
+    )
+    (artifact_dir / "README.md").write_text(
+        "\n".join(readme_lines) + "\n",
         encoding="utf-8",
     )
     return artifact_dir
@@ -844,7 +887,7 @@ def main() -> int:
     parser.add_argument(
         "--prepare-environments",
         action="store_true",
-        help="prepare only T001-T005 and write the separate Gate A1 contract",
+        help="prepare only the frozen Gate A1 acquisition tasks and write the separate contract",
     )
     args = parser.parse_args()
     project_root = args.project_root.resolve()

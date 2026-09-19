@@ -190,35 +190,57 @@ def test_acquisition_identities_derive_from_pilot_in_occurrence_order(
         "GS-T001",
         "GS-T002",
         "GS-T003",
+        "GS-T004",
         "GS-T005",
     ]
     assert [identity.upstream_image for identity in identities] == [
         "swebench/swesmith.x86_64.arrow-py_1776_arrow.1d70d009",
         "swebench/swesmith.x86_64.pygments_1776_pygments.27649ebb",
         "swebench/swesmith.x86_64.sunpy_1776_sunpy.f8edfd5c",
+        "swebench/swesmith.x86_64.project-monai_1776_monai.a09c1f08",
         "swebench/swesmith.x86_64.cknd_1776_stackprinter.219fcc52",
     ]
     assert all(identity.occurrence_index == 1 for identity in identities)
-    assert [identity.chronological_index for identity in identities] == [1, 2, 3, 5]
+    assert [identity.chronological_index for identity in identities] == [1, 2, 3, 4, 5]
 
 
-def test_resource_bounded_subset_validates_canonical_transfer_families(
+def test_full_five_family_subset_validates_canonical_transfer_families(
     project_root: Path,
 ) -> None:
     subset = load_development_subset(project_root)
-    assert subset.included_acquisition_tasks == ("GS-T001", "GS-T002", "GS-T003", "GS-T005")
+    assert subset.scope == "full_five_family_gate_a1_development_pilot"
+    assert subset.selection_revision == 2
+    assert subset.supersedes == "resource_bounded_four_family_subset"
+    assert subset.acquisition_executed_before_revision is False
+    assert subset.retrieval_results_existed_before_revision is False
+    assert subset.included_acquisition_tasks == (
+        "GS-T001",
+        "GS-T002",
+        "GS-T003",
+        "GS-T004",
+        "GS-T005",
+    )
     assert subset.included_transfer_tasks == (
         "GS-T006",
         "GS-T007",
         "GS-T008",
+        "GS-T009",
         "GS-T010",
         "GS-T011",
         "GS-T012",
         "GS-T013",
+        "GS-T014",
         "GS-T015",
     )
-    assert [item.task_id for item in subset.excluded_acquisition_tasks] == ["GS-T004"]
-    assert [item.task_id for item in subset.excluded_transfer_tasks] == ["GS-T009", "GS-T014"]
+    assert subset.excluded_tasks == ()
+    assert not hasattr(subset, "family_id")
+
+
+def test_monai_baseline_sha_is_frozen_and_clean(project_root: Path) -> None:
+    baselines = {item.task_id: item for item in gate_a1.load_frozen_baselines(project_root)}
+    assert baselines["GS-T004"].repository == "swesmith/Project-MONAI__MONAI.a09c1f08"
+    assert baselines["GS-T004"].commit == "acfea3e9e300e7b1b709345ed04d2f6f0baaede0"
+    assert validate_frozen_baselines(project_root)["GS-T004"] == ()
 
 
 def test_readiness_uses_separate_contract_and_leaves_frozen_b1_manifest_unchanged(
@@ -237,7 +259,13 @@ def test_readiness_uses_separate_contract_and_leaves_frozen_b1_manifest_unchange
     after = {path: hashlib.sha256(path.read_bytes()).digest() for path in frozen_files}
     assert before == after
     assert all(status.ready for status in statuses)
-    assert [status.task_id for status in statuses] == ["GS-T001", "GS-T002", "GS-T003", "GS-T005"]
+    assert [status.task_id for status in statuses] == [
+        "GS-T001",
+        "GS-T002",
+        "GS-T003",
+        "GS-T004",
+        "GS-T005",
+    ]
 
 
 def test_mismatched_upstream_image_fails_readiness(project_root: Path, tmp_path: Path) -> None:
@@ -310,7 +338,7 @@ def test_dirty_acquisition_baseline_fails_closed(project_root: Path) -> None:
     assert blockers["GS-T005"] == ("baseline Git worktree is dirty",)
 
 
-def test_gate_a1_preparation_never_requests_excluded_monai_task(
+def test_gate_a1_preparation_requests_monai_exactly_once(
     project_root: Path, tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     project = _test_project(tmp_path, project_root)
@@ -366,7 +394,10 @@ def test_gate_a1_preparation_never_requests_excluded_monai_task(
         return None
 
     def validate_baselines(*_args: object, **_kwargs: object) -> dict[str, tuple[str, ...]]:
-        return {task_id: () for task_id in ("GS-T001", "GS-T002", "GS-T003", "GS-T005")}
+        return {
+            task_id: ()
+            for task_id in ("GS-T001", "GS-T002", "GS-T003", "GS-T004", "GS-T005")
+        }
 
     monkeypatch.setattr(gate_a1, "_docker_image_status", image_status)
     monkeypatch.setattr(gate_a1, "_validate_prepared_runtime", validate_runtime)
@@ -377,9 +408,15 @@ def test_gate_a1_preparation_never_requests_excluded_monai_task(
     )
     contract_path = prepare_gate_a1_environments(project)
     contract = json.loads(contract_path.read_text())
-    assert calls == [("GS-T001", "GS-T002", "GS-T003", "GS-T005")]
+    assert calls == [("GS-T001", "GS-T002", "GS-T003", "GS-T004", "GS-T005")]
     assert [entry["task_id"] for entry in contract["environments"]] == list(calls[0])
-    assert "project-monai" not in contract_path.read_text()
+    monai_entries = [
+        entry for entry in contract["environments"] if entry["task_id"] == "GS-T004"
+    ]
+    assert len(monai_entries) == 1
+    assert monai_entries[0]["upstream_image"] == (
+        "swebench/swesmith.x86_64.project-monai_1776_monai.a09c1f08"
+    )
 
 
 def test_zero_attempted_is_classified_as_environment_blocked(
@@ -391,23 +428,53 @@ def test_zero_attempted_is_classified_as_environment_blocked(
         docker_status_checker=lambda: (False, "Docker daemon is unavailable"),
         neo4j_status_checker=lambda: (False, "neo4j unavailable"),
     )
+    historical = project / "research/evidence/gs_e003_gate_a1_legacy/manifest.json"
+    historical.parent.mkdir(parents=True)
+    historical.write_text(
+        '{"development_scope":"resource_bounded_four_family_subset"}\n',
+        encoding="utf-8",
+    )
+    historical_before = historical.read_bytes()
 
     def fake_git(*_args: object) -> str:
         return "test"
 
     monkeypatch.setattr(gate_a1, "_git", fake_git)
     artifact = write_readiness_artifact(project, statuses)
+    assert historical.read_bytes() == historical_before
+    manifest = json.loads((artifact / "manifest.json").read_text())
+    assert manifest["development_scope"] == "full_five_family_gate_a1_development_pilot"
+    assert manifest["canonical_acquisition_candidate_count"] == 5
+    assert manifest["selected_local_acquisition_count"] == 5
+    assert manifest["excluded_acquisition_count"] == 0
+    assert manifest["included_transfer_task_ids"] == [
+        "GS-T006",
+        "GS-T007",
+        "GS-T008",
+        "GS-T009",
+        "GS-T010",
+        "GS-T011",
+        "GS-T012",
+        "GS-T013",
+        "GS-T014",
+        "GS-T015",
+    ]
+    readme = (artifact / "README.md").read_text().lower()
+    assert "local_resource_constraint_monai_image_size" not in readme
+    assert "excluded from this local development diagnostic" not in readme
     metrics = json.loads((artifact / "metrics.json").read_text())
     assert metrics["status"] == "BLOCKED_ACQUISITION_ENVIRONMENT"
     assert metrics["acquisition_tasks_attempted"] == 0
     assert metrics["complete_trusted_recovery_lineages"] == 0
     assert metrics["patterns_generated"] == 0
     assert metrics["patterns_embedded"] == 0
-    assert metrics["included_acquisition_tasks"] == 4
-    assert metrics["excluded_acquisition_tasks"] == 1
-    assert metrics["included_transfer_tasks"] == 8
-    assert metrics["excluded_transfer_tasks"] == 2
-    assert metrics["transfer_task_denominator"] == 8
+    assert metrics["development_scope"] == "full_five_family_gate_a1_development_pilot"
+    assert metrics["canonical_acquisition_candidate_count"] == 5
+    assert metrics["selected_local_acquisition_count"] == 5
+    assert metrics["excluded_acquisition_count"] == 0
+    assert metrics["included_transfer_tasks"] == 10
+    assert metrics["excluded_transfer_tasks"] == 0
+    assert metrics["transfer_task_denominator"] == 10
     assert (
         "Pattern acquisition quality was not evaluated because the environment "
         "preflight failed before execution." in (artifact / "README.md").read_text()
