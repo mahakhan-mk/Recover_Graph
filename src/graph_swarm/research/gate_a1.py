@@ -34,18 +34,59 @@ from graph_swarm.retrieval.service import (
 from graph_swarm.settings import get_settings
 
 GATE_A1 = "GS-E003 / Gate A1"
-ACQUISITION_TASK_IDS = tuple(f"GS-T{i:03d}" for i in range(1, 6))
-TRANSFER_TASK_IDS = tuple(f"GS-T{i:03d}" for i in range(6, 16))
+DEVELOPMENT_SUBSET_PATH = Path("configs/research/gate_a1_development_subset.json")
+BASELINE_MANIFEST_PATH = Path("configs/research/gate_a1_repositories.json")
+CANONICAL_ACQUISITION_TASK_IDS = tuple(f"GS-T{i:03d}" for i in range(1, 6))
+CANONICAL_TRANSFER_TASK_IDS = tuple(f"GS-T{i:03d}" for i in range(6, 16))
 VECTOR_INDEX = "recovery_pattern_embedding_idx"
 ACQUISITION_CONTRACT = Path("configs/research/gate_a1_docker_environments.json")
 ACQUISITION_POLICY = Path("configs/research/gate_a1_benchmark_environments.toml")
-ACQUISITION_ENVIRONMENT_ROOT = Path(
-    "research/evidence/workspaces/gate-a1-task-environments"
-)
+ACQUISITION_ENVIRONMENT_ROOT = Path("research/evidence/workspaces/gate-a1-task-environments")
 
 
 class GateA1ConfigurationError(ValueError):
     """Raised when the frozen pilot cannot define a deterministic acquisition set."""
+
+
+@dataclass(frozen=True)
+class DevelopmentSubsetExclusion:
+    task_id: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class DevelopmentSubset:
+    schema_version: int
+    included_acquisition_tasks: tuple[str, ...]
+    included_transfer_tasks: tuple[str, ...]
+    excluded_tasks: tuple[DevelopmentSubsetExclusion, ...]
+
+    @property
+    def excluded_acquisition_tasks(self) -> tuple[DevelopmentSubsetExclusion, ...]:
+        acquisition = set(CANONICAL_ACQUISITION_TASK_IDS)
+        return tuple(item for item in self.excluded_tasks if item.task_id in acquisition)
+
+    @property
+    def excluded_transfer_tasks(self) -> tuple[DevelopmentSubsetExclusion, ...]:
+        transfer = set(CANONICAL_TRANSFER_TASK_IDS)
+        return tuple(item for item in self.excluded_tasks if item.task_id in transfer)
+
+
+@dataclass(frozen=True)
+class FrozenBaseline:
+    task_id: str
+    repository: str
+    commit: str
+
+
+@dataclass(frozen=True)
+class PilotRecord:
+    task_id: str
+    repository: str
+    image_name: str
+    family_id: str
+    occurrence_index: int
+    chronological_index: int
 
 
 class GateA1RetrievalAudit(BaseModel):
@@ -95,9 +136,7 @@ class ComponentRetrievalEvaluator:
             retrieval_query_version=result.query_version,
             vector_candidate_count=len(result.candidates),
             selected_pattern_id=None if selected is None else selected.id,
-            selected_pattern_source_task_id=(
-                None if selected is None else selected.source_task_id
-            ),
+            selected_pattern_source_task_id=(None if selected is None else selected.source_task_id),
             selected_pattern_source_chronological_index=(
                 None if selected is None else selected.source_chronological_index
             ),
@@ -149,39 +188,301 @@ class AcquisitionEnvironmentStatus:
 
 StatusChecker = Callable[[], tuple[bool, str]]
 ImageChecker = Callable[[str], tuple[bool, str]]
+BaselineChecker = Callable[[str, str], tuple[str, ...]]
+
+
+def load_development_subset(project_root: Path) -> DevelopmentSubset:
+    """Load the frozen resource-bounded subset and validate it against pilot.jsonl."""
+    raw = _load_json(project_root / DEVELOPMENT_SUBSET_PATH)
+    if raw.get("scope") != "resource_bounded_development_gate_a1":
+        raise GateA1ConfigurationError("development subset scope is not resource-bounded Gate A1")
+    schema_version = raw.get("schema_version")
+    if schema_version != 1:
+        raise GateA1ConfigurationError("Gate A1 development subset schema_version must be 1")
+    included_acquisition = _string_tuple(
+        raw.get("included_acquisition_tasks"), "included_acquisition_tasks"
+    )
+    included_transfer = _string_tuple(raw.get("included_transfer_tasks"), "included_transfer_tasks")
+    raw_excluded = raw.get("excluded_tasks")
+    if not isinstance(raw_excluded, list):
+        raise GateA1ConfigurationError("excluded_tasks must be a list")
+    exclusions: list[DevelopmentSubsetExclusion] = []
+    for value in cast(list[Any], raw_excluded):
+        if not isinstance(value, dict):
+            raise GateA1ConfigurationError("each excluded task must be an object")
+        excluded = cast(dict[str, Any], value)
+        task_id = excluded.get("task_id")
+        reason = excluded.get("reason")
+        if not isinstance(task_id, str) or not isinstance(reason, str) or not reason.strip():
+            raise GateA1ConfigurationError(
+                "each excluded task requires task_id and a non-empty reason"
+            )
+        exclusions.append(DevelopmentSubsetExclusion(task_id, reason))
+    all_selected = (*included_acquisition, *included_transfer)
+    all_excluded = tuple(item.task_id for item in exclusions)
+    if len(set(all_selected)) != len(all_selected) or len(set(all_excluded)) != len(all_excluded):
+        raise GateA1ConfigurationError("development subset contains duplicate task IDs")
+    if set(all_selected) & set(all_excluded):
+        raise GateA1ConfigurationError("included and excluded subset task IDs overlap")
+
+    records = _pilot_records(project_root)
+    by_task = {record.task_id: record for record in records}
+    if len(by_task) != len(records):
+        raise GateA1ConfigurationError("pilot manifest contains duplicate task IDs")
+    _require_pilot_tasks(by_task, all_selected + all_excluded)
+    if (
+        tuple(
+            sorted(included_acquisition, key=lambda task_id: by_task[task_id].chronological_index)
+        )
+        != included_acquisition
+    ):
+        raise GateA1ConfigurationError(
+            "included acquisition tasks are not canonical chronological order"
+        )
+    acquisition_records = [by_task[task_id] for task_id in included_acquisition]
+    if any(record.occurrence_index != 1 for record in acquisition_records):
+        raise GateA1ConfigurationError("included acquisition tasks must be occurrence-1 tasks")
+    if tuple(record.chronological_index for record in acquisition_records) != (1, 2, 3, 5):
+        raise GateA1ConfigurationError(
+            "included acquisition chronology must remain canonical 1,2,3,5"
+        )
+    acquisition_families = {record.family_id for record in acquisition_records}
+    for task_id in included_transfer:
+        transfer = by_task[task_id]
+        source = next(
+            (
+                record
+                for record in records
+                if record.family_id == transfer.family_id and record.occurrence_index == 1
+            ),
+            None,
+        )
+        if source is None or source.task_id not in included_acquisition:
+            raise GateA1ConfigurationError(
+                f"included transfer {task_id} has no included occurrence-1 acquisition family"
+            )
+        if transfer.family_id not in acquisition_families:
+            raise GateA1ConfigurationError(f"included transfer family is not acquired: {task_id}")
+    for task_id in CANONICAL_ACQUISITION_TASK_IDS + CANONICAL_TRANSFER_TASK_IDS:
+        if task_id not in by_task:
+            raise GateA1ConfigurationError(f"canonical pilot task is missing: {task_id}")
+    expected_exclusions = {
+        "GS-T004": "local_resource_constraint_monai_image_size",
+        "GS-T009": "source_family_excluded_from_local_development_acquisition",
+        "GS-T014": "source_family_excluded_from_local_development_acquisition",
+    }
+    if {item.task_id: item.reason for item in exclusions} != expected_exclusions:
+        raise GateA1ConfigurationError("development subset exclusions are not frozen as specified")
+    if included_acquisition != ("GS-T001", "GS-T002", "GS-T003", "GS-T005"):
+        raise GateA1ConfigurationError("resource-bounded acquisition sequence is not frozen")
+    if included_transfer != (
+        "GS-T006",
+        "GS-T007",
+        "GS-T008",
+        "GS-T010",
+        "GS-T011",
+        "GS-T012",
+        "GS-T013",
+        "GS-T015",
+    ):
+        raise GateA1ConfigurationError("resource-bounded transfer sequence is not frozen")
+    return DevelopmentSubset(
+        schema_version=1,
+        included_acquisition_tasks=included_acquisition,
+        included_transfer_tasks=included_transfer,
+        excluded_tasks=tuple(exclusions),
+    )
+
+
+def load_frozen_baselines(project_root: Path) -> tuple[FrozenBaseline, ...]:
+    """Load the four clean local acquisition snapshots without mutating them."""
+    raw = _load_json(project_root / BASELINE_MANIFEST_PATH)
+    values = raw.get("repositories")
+    if not isinstance(values, list):
+        raise GateA1ConfigurationError("repositories must be a list")
+    baselines: list[FrozenBaseline] = []
+    for value in cast(list[Any], values):
+        if not isinstance(value, dict):
+            raise GateA1ConfigurationError("each baseline entry must be an object")
+        baseline = cast(dict[str, Any], value)
+        task_id = baseline.get("task_id")
+        repository = baseline.get("repository")
+        commit = baseline.get("commit")
+        if not all(
+            isinstance(item, str) and item.strip() for item in (task_id, repository, commit)
+        ):
+            raise GateA1ConfigurationError(
+                "baseline entries require task_id, repository, and commit"
+            )
+        baselines.append(
+            FrozenBaseline(cast(str, task_id), cast(str, repository), cast(str, commit))
+        )
+    return tuple(baselines)
+
+
+def validate_frozen_baselines(
+    project_root: Path,
+    *,
+    subset: DevelopmentSubset | None = None,
+    baseline_checker: BaselineChecker | None = None,
+) -> dict[str, tuple[str, ...]]:
+    """Validate required clean Git snapshots without changing repository state."""
+    selected = subset or load_development_subset(project_root)
+    baselines = load_frozen_baselines(project_root)
+    by_task = {baseline.task_id: baseline for baseline in baselines}
+    if len(baselines) != len(selected.included_acquisition_tasks) or set(by_task) != set(
+        selected.included_acquisition_tasks
+    ):
+        raise GateA1ConfigurationError(
+            "Gate A1 baseline manifest must contain exactly the included acquisition tasks"
+        )
+    pilot_by_task = {
+        identity.task_id: identity
+        for identity in load_acquisition_identities(
+            project_root, task_ids=selected.included_acquisition_tasks
+        )
+    }
+    repository_mismatches = [
+        task_id
+        for task_id, baseline in by_task.items()
+        if baseline.repository != pilot_by_task[task_id].repository
+    ]
+    if repository_mismatches:
+        raise GateA1ConfigurationError(
+            "baseline repository does not match pilot identity for: "
+            + ", ".join(sorted(repository_mismatches))
+        )
+
+    def default_checker(repository: str, commit: str) -> tuple[str, ...]:
+        return _check_baseline(project_root, repository, commit)
+
+    checker: BaselineChecker = baseline_checker or default_checker
+    return {
+        task_id: checker(by_task[task_id].repository, by_task[task_id].commit)
+        for task_id in selected.included_acquisition_tasks
+    }
+
+
+def _check_baseline(
+    project_root: Path,
+    repository: str,
+    expected_commit: str,
+) -> tuple[str, ...]:
+    path = project_root / "benchmark/workspaces" / repository
+    if not path.is_dir():
+        return (f"baseline repository directory is missing: {path.as_posix()}",)
+    blockers: list[str] = []
+    inside = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True,
+        check=False,
+        text=True,
+        encoding="utf-8",
+    )
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return (f"baseline is not a Git repository: {path.as_posix()}",)
+    head = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        capture_output=True,
+        check=False,
+        text=True,
+        encoding="utf-8",
+    )
+    if head.returncode != 0 or head.stdout.strip() != expected_commit:
+        blockers.append(
+            f"baseline HEAD mismatch: {head.stdout.strip() or '<unavailable>'} != {expected_commit}"
+        )
+    status = subprocess.run(
+        ["git", "-C", str(path), "status", "--short"],
+        capture_output=True,
+        check=False,
+        text=True,
+        encoding="utf-8",
+    )
+    if status.returncode != 0:
+        blockers.append("baseline Git status could not be read")
+    elif status.stdout.strip():
+        blockers.append("baseline Git worktree is dirty")
+    return tuple(blockers)
+
+
+def _pilot_records(project_root: Path) -> tuple[PilotRecord, ...]:
+    records: list[PilotRecord] = []
+    for record in _load_jsonl(project_root / "benchmark/manifests/pilot.jsonl"):
+        values = (
+            record.get("task_id"),
+            record.get("repository"),
+            record.get("image_name"),
+            record.get("family_id"),
+            record.get("occurrence_index"),
+            record.get("chronological_index"),
+        )
+        if (
+            not isinstance(values[0], str)
+            or not isinstance(values[1], str)
+            or not isinstance(values[2], str)
+            or not isinstance(values[3], str)
+            or not isinstance(values[4], int)
+            or not isinstance(values[5], int)
+        ):
+            raise GateA1ConfigurationError("pilot record has invalid identity metadata")
+        records.append(PilotRecord(*cast(tuple[Any, ...], values)))
+    return tuple(records)
+
+
+def _require_pilot_tasks(by_task: dict[str, PilotRecord], task_ids: tuple[str, ...]) -> None:
+    missing = [task_id for task_id in task_ids if task_id not in by_task]
+    if missing:
+        raise GateA1ConfigurationError(f"subset task IDs missing from pilot manifest: {missing}")
+
+
+def _string_tuple(value: object, field: str) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise GateA1ConfigurationError(f"{field} must be a list of non-empty strings")
+    items = cast(list[Any], value)
+    if not all(isinstance(item, str) and item.strip() for item in items):
+        raise GateA1ConfigurationError(f"{field} must be a list of non-empty strings")
+    return tuple(cast(str, item) for item in items)
 
 
 def load_acquisition_identities(
     project_root: Path,
     *,
-    task_ids: tuple[str, ...] = ACQUISITION_TASK_IDS,
+    task_ids: tuple[str, ...] | None = None,
 ) -> tuple[AcquisitionIdentity, ...]:
     """Load and validate occurrence-1 acquisition identities from the pilot only."""
+    subset = load_development_subset(project_root)
+    selected_task_ids = task_ids or subset.included_acquisition_tasks
+    if set(selected_task_ids) != set(subset.included_acquisition_tasks):
+        raise GateA1ConfigurationError(
+            "Gate A1 acquisition identities must match the frozen development subset"
+        )
     records = _load_jsonl(project_root / "benchmark/manifests/pilot.jsonl")
-    wanted = set(task_ids)
+    wanted = set(selected_task_ids)
     selected = [record for record in records if record.get("task_id") in wanted]
     if {record.get("task_id") for record in selected} != wanted:
         raise GateA1ConfigurationError(
             "pilot manifest is missing one or more Gate A1 acquisition task identities"
         )
     ordered = sorted(selected, key=lambda record: int(record.get("chronological_index", -1)))
-    if tuple(str(record.get("task_id")) for record in ordered) != task_ids:
+    if tuple(str(record.get("task_id")) for record in ordered) != selected_task_ids:
         raise GateA1ConfigurationError(
             "Gate A1 acquisition task IDs must be in pilot chronological order"
         )
     identities: list[AcquisitionIdentity] = []
-    for expected_index, record in enumerate(ordered, start=1):
+    expected_chronology = tuple(int(record["chronological_index"]) for record in ordered)
+    for record in ordered:
         occurrence = record.get("occurrence_index")
         chronological = record.get("chronological_index")
         if (
             not isinstance(occurrence, int)
             or not isinstance(chronological, int)
             or occurrence != 1
-            or chronological != expected_index
+            or chronological not in expected_chronology
         ):
             raise GateA1ConfigurationError(
                 "Gate A1 acquisition identities must be occurrence-1 tasks with "
-                "chronological indexes 1 through 5"
+                "chronological indexes must remain canonical"
             )
         repository = record.get("repository")
         upstream_image = record.get("image_name")
@@ -204,13 +505,27 @@ def load_acquisition_identities(
 def assess_acquisition_environments(
     project_root: Path,
     *,
-    task_ids: tuple[str, ...] = ACQUISITION_TASK_IDS,
+    task_ids: tuple[str, ...] | None = None,
     docker_status_checker: StatusChecker | None = None,
     docker_image_checker: ImageChecker | None = None,
     neo4j_status_checker: StatusChecker | None = None,
+    baseline_checker: BaselineChecker | None = None,
 ) -> tuple[AcquisitionEnvironmentStatus, ...]:
     """Check the separate Gate A1 contract before any acquisition/provider call."""
-    identities = load_acquisition_identities(project_root, task_ids=task_ids)
+    subset = load_development_subset(project_root)
+    selected_task_ids = task_ids or subset.included_acquisition_tasks
+    identities = load_acquisition_identities(project_root, task_ids=selected_task_ids)
+    try:
+        baseline_blockers = validate_frozen_baselines(
+            project_root,
+            subset=subset,
+            baseline_checker=baseline_checker,
+        )
+    except GateA1ConfigurationError as error:
+        baseline_blockers = {
+            task_id: (f"baseline configuration is invalid: {error}",)
+            for task_id in selected_task_ids
+        }
     contract_path = project_root / ACQUISITION_CONTRACT
     contract = _load_json(contract_path) if contract_path.is_file() else {}
     contract_records = contract.get("environments", [])
@@ -228,6 +543,7 @@ def assess_acquisition_environments(
     for identity in identities:
         entry = by_task.get(identity.task_id, {})
         blockers: list[str] = []
+        blockers.extend(baseline_blockers.get(identity.task_id, ()))
         if not entry:
             blockers.append("task has no separate Gate A1 prepared environment entry")
         upstream_image = str(entry.get("upstream_image", ""))
@@ -298,12 +614,16 @@ def prepare_gate_a1_environments(
     execution_root: Path | None = None,
     artifact_root: Path | None = None,
 ) -> Path:
-    """Prepare only T001-T005 and write the isolated Gate A1 contract."""
-    identities = load_acquisition_identities(project_root)
+    """Prepare only the frozen resource-bounded subset acquisition tasks."""
+    subset = load_development_subset(project_root)
+    identities = load_acquisition_identities(
+        project_root, task_ids=subset.included_acquisition_tasks
+    )
+    baseline_blockers = validate_frozen_baselines(project_root, subset=subset)
+    if any(baseline_blockers.values()):
+        raise RuntimeError(f"Gate A1 baselines are not reproducible: {baseline_blockers}")
     baseline = (baseline_root or (project_root / "benchmark/workspaces")).resolve()
-    execution = (
-        execution_root or (project_root / ACQUISITION_ENVIRONMENT_ROOT)
-    ).resolve()
+    execution = (execution_root or (project_root / ACQUISITION_ENVIRONMENT_ROOT)).resolve()
     artifacts = (artifact_root or (project_root / "research/evidence/results")).resolve()
     from experiments.sprint3 import run_prepare
 
@@ -312,15 +632,14 @@ def prepare_gate_a1_environments(
         baseline_root=baseline,
         execution_root=execution.parent,
         artifact_root=artifacts,
-        task_ids=ACQUISITION_TASK_IDS,
+        task_ids=subset.included_acquisition_tasks,
         policy_path=project_root / ACQUISITION_POLICY,
         environment_subdirectory=execution.name,
         result_subdirectory="gate_a1",
     )
     result = _load_json(preparation_result)
     task_results = {
-        str(task["task_id"]): task
-        for task in cast(list[dict[str, Any]], result.get("tasks", []))
+        str(task["task_id"]): task for task in cast(list[dict[str, Any]], result.get("tasks", []))
     }
     entries: list[dict[str, Any]] = []
     for identity in identities:
@@ -384,6 +703,7 @@ def write_readiness_artifact(
     statuses: tuple[AcquisitionEnvironmentStatus, ...],
 ) -> Path:
     """Write a non-destructive, timestamped Gate A1 readiness artifact."""
+    subset = load_development_subset(project_root)
     now = datetime.now(UTC)
     stamp = now.strftime("%Y%m%dT%H%M%SZ")
     artifact_dir = project_root / "research" / "evidence" / f"gs_e003_gate_a1_{stamp}"
@@ -408,8 +728,19 @@ def write_readiness_artifact(
         "embedding_dimension": RECOVERY_PATTERN_EMBEDDING_DIMENSION,
         "retrieval_query_version": RECOVERY_RETRIEVAL_QUERY_VERSION,
         "vector_index": VECTOR_INDEX,
+        "development_scope": "resource_bounded_four_family_subset",
+        "canonical_acquisition_candidate_count": 5,
+        "selected_local_acquisition_count": len(subset.included_acquisition_tasks),
+        "excluded_acquisition_count": len(subset.excluded_acquisition_tasks),
         "acquisition_task_ids": [status.task_id for status in statuses],
-        "transfer_task_ids": list(TRANSFER_TASK_IDS),
+        "included_acquisition_task_ids": list(subset.included_acquisition_tasks),
+        "included_transfer_task_ids": list(subset.included_transfer_tasks),
+        "excluded_acquisition_tasks": [asdict(item) for item in subset.excluded_acquisition_tasks],
+        "excluded_transfer_tasks": [asdict(item) for item in subset.excluded_transfer_tasks],
+        "subset_frozen_before_acquisition_execution": True,
+        "preparation_referenced_excluded_monai_image": False,
+        "frozen_baseline_manifest": BASELINE_MANIFEST_PATH.as_posix(),
+        "frozen_baselines": [asdict(item) for item in load_frozen_baselines(project_root)],
         "acquisition_environment_contract": ACQUISITION_CONTRACT.as_posix(),
         "environment_statuses": [asdict(status) for status in statuses],
         "infrastructure_preflight": {
@@ -450,7 +781,12 @@ def write_readiness_artifact(
             "complete_trusted_recovery_lineages": 0,
             "patterns_generated": 0,
             "patterns_embedded": 0,
+            "included_acquisition_tasks": len(subset.included_acquisition_tasks),
+            "excluded_acquisition_tasks": len(subset.excluded_acquisition_tasks),
+            "included_transfer_tasks": len(subset.included_transfer_tasks),
+            "excluded_transfer_tasks": len(subset.excluded_transfer_tasks),
             "transfer_tasks_evaluated": 0,
+            "transfer_task_denominator": len(subset.included_transfer_tasks),
             "actions_evaluated": 0,
             "selections": 0,
             "no_selection_cases": 0,
@@ -480,8 +816,16 @@ def write_readiness_artifact(
                 "",
                 f"Status: {status_name}",
                 "",
+                "Development scope: resource_bounded_four_family_subset",
+                "Subset frozen before acquisition execution: true",
+                "",
                 "Pattern acquisition quality was not evaluated because the environment "
                 "preflight failed before execution.",
+                "",
+                "Excluded from this local development diagnostic:",
+                "- GS-T004: local_resource_constraint_monai_image_size",
+                "- GS-T009: source_family_excluded_from_local_development_acquisition",
+                "- GS-T014: source_family_excluded_from_local_development_acquisition",
                 "",
                 "## Blockers",
                 "",
@@ -663,22 +1007,25 @@ def _validate_prepared_runtime(image: str, workspace: Path, python_executable: s
     )
     if completed.returncode != 0:
         raise RuntimeError(
-            f"prepared runtime validation failed for {image}: "
-            f"{completed.stderr[-2000:]}"
+            f"prepared runtime validation failed for {image}: {completed.stderr[-2000:]}"
         )
 
 
 __all__ = [
-    "ACQUISITION_TASK_IDS",
     "AcquisitionEnvironmentStatus",
     "AcquisitionIdentity",
     "ComponentRetrievalEvaluator",
+    "DevelopmentSubset",
+    "DevelopmentSubsetExclusion",
+    "FrozenBaseline",
     "GateA1ConfigurationError",
     "GateA1RetrievalAudit",
-    "TRANSFER_TASK_IDS",
     "assess_acquisition_environments",
     "load_acquisition_identities",
+    "load_development_subset",
+    "load_frozen_baselines",
     "prepare_gate_a1_environments",
+    "validate_frozen_baselines",
     "write_readiness_artifact",
 ]
 

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "scope": "resource_bounded_gate_a1_development_acquisition_baselines",
+  "repositories": [
+    {
+      "task_id": "GS-T001",
+      "repository": "swesmith/arrow-py__arrow.1d70d009",
+      "commit": "e2ffa95da9e1b81ea793a8cd910bbf25593b1971"
+    },
+    {
+      "task_id": "GS-T002",
+      "repository": "swesmith/pygments__pygments.27649ebb",
+      "commit": "d53d06ab2c467be43d32f68881422698ee33adf6"
+    },
+    {
+      "task_id": "GS-T003",
+      "repository": "swesmith/sunpy__sunpy.f8edfd5c",
+      "commit": "0cd78e256ccd5c37ae18b900d628b137eb447a71"
+    },
+    {
+      "task_id": "GS-T005",
+      "repository": "swesmith/cknd__stackprinter.219fcc52",
+      "commit": "60ab1766145487cbfb0d7c2fab2f5f1045c8de5b"
+    }
+  ]
+}

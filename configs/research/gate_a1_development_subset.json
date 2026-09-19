@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "scope": "resource_bounded_development_gate_a1",
+  "included_acquisition_tasks": [
+    "GS-T001",
+    "GS-T002",
+    "GS-T003",
+    "GS-T005"
+  ],
+  "included_transfer_tasks": [
+    "GS-T006",
+    "GS-T007",
+    "GS-T008",
+    "GS-T010",
+    "GS-T011",
+    "GS-T012",
+    "GS-T013",
+    "GS-T015"
+  ],
+  "excluded_tasks": [
+    {
+      "task_id": "GS-T004",
+      "reason": "local_resource_constraint_monai_image_size"
+    },
+    {
+      "task_id": "GS-T009",
+      "reason": "source_family_excluded_from_local_development_acquisition"
+    },
+    {
+      "task_id": "GS-T014",
+      "reason": "source_family_excluded_from_local_development_acquisition"
+    }
+  ]
+}

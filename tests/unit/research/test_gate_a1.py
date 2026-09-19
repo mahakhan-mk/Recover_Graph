@@ -16,6 +16,9 @@ from graph_swarm.research.gate_a1 import (
     ComponentRetrievalEvaluator,
     assess_acquisition_environments,
     load_acquisition_identities,
+    load_development_subset,
+    prepare_gate_a1_environments,
+    validate_frozen_baselines,
     write_readiness_artifact,
 )
 from graph_swarm.retrieval.service import (
@@ -88,9 +91,9 @@ def test_component_evaluator_is_shadow_only_and_never_injects_advice() -> None:
     )
     retrieval = FakeRetrieval()
 
-    audit = ComponentRetrievalEvaluator(
-        cast(RecoveryPatternRetrievalService, retrieval)
-    ).evaluate(task, action, environment)
+    audit = ComponentRetrievalEvaluator(cast(RecoveryPatternRetrievalService, retrieval)).evaluate(
+        task, action, environment
+    )
 
     assert retrieval.calls == 1
     assert audit.current_task_id == task.id
@@ -105,6 +108,7 @@ class ReadinessChecks(TypedDict):
     docker_status_checker: gate_a1.StatusChecker
     docker_image_checker: gate_a1.ImageChecker
     neo4j_status_checker: gate_a1.StatusChecker
+    baseline_checker: gate_a1.BaselineChecker
 
 
 def _test_project(tmp_path: Path, source_root: Path, *, complete: bool = True) -> Path:
@@ -114,6 +118,14 @@ def _test_project(tmp_path: Path, source_root: Path, *, complete: bool = True) -
         tmp_path / "benchmark/manifests/pilot.jsonl",
     )
     (tmp_path / "configs" / "research").mkdir(parents=True)
+    shutil.copy(
+        source_root / gate_a1.DEVELOPMENT_SUBSET_PATH,
+        tmp_path / gate_a1.DEVELOPMENT_SUBSET_PATH,
+    )
+    shutil.copy(
+        source_root / gate_a1.BASELINE_MANIFEST_PATH,
+        tmp_path / gate_a1.BASELINE_MANIFEST_PATH,
+    )
     identities = load_acquisition_identities(source_root)
     environments: list[dict[str, str]] = []
     for identity in identities:
@@ -159,10 +171,14 @@ def _ready_checks() -> ReadinessChecks:
     def neo4j_status() -> tuple[bool, str]:
         return True, ""
 
+    def baseline_status(_repository: str, _commit: str) -> tuple[str, ...]:
+        return ()
+
     return {
         "docker_status_checker": docker_status,
         "docker_image_checker": image_status,
         "neo4j_status_checker": neo4j_status,
+        "baseline_checker": baseline_status,
     }
 
 
@@ -174,35 +190,57 @@ def test_acquisition_identities_derive_from_pilot_in_occurrence_order(
         "GS-T001",
         "GS-T002",
         "GS-T003",
-        "GS-T004",
         "GS-T005",
     ]
     assert [identity.upstream_image for identity in identities] == [
         "swebench/swesmith.x86_64.arrow-py_1776_arrow.1d70d009",
         "swebench/swesmith.x86_64.pygments_1776_pygments.27649ebb",
         "swebench/swesmith.x86_64.sunpy_1776_sunpy.f8edfd5c",
-        "swebench/swesmith.x86_64.project-monai_1776_monai.a09c1f08",
         "swebench/swesmith.x86_64.cknd_1776_stackprinter.219fcc52",
     ]
     assert all(identity.occurrence_index == 1 for identity in identities)
+    assert [identity.chronological_index for identity in identities] == [1, 2, 3, 5]
+
+
+def test_resource_bounded_subset_validates_canonical_transfer_families(
+    project_root: Path,
+) -> None:
+    subset = load_development_subset(project_root)
+    assert subset.included_acquisition_tasks == ("GS-T001", "GS-T002", "GS-T003", "GS-T005")
+    assert subset.included_transfer_tasks == (
+        "GS-T006",
+        "GS-T007",
+        "GS-T008",
+        "GS-T010",
+        "GS-T011",
+        "GS-T012",
+        "GS-T013",
+        "GS-T015",
+    )
+    assert [item.task_id for item in subset.excluded_acquisition_tasks] == ["GS-T004"]
+    assert [item.task_id for item in subset.excluded_transfer_tasks] == ["GS-T009", "GS-T014"]
 
 
 def test_readiness_uses_separate_contract_and_leaves_frozen_b1_manifest_unchanged(
     project_root: Path, tmp_path: Path
 ) -> None:
-    b1_manifest = project_root / "configs/research/docker_environments.json"
-    before = hashlib.sha256(b1_manifest.read_bytes()).digest()
+    frozen_files = (
+        project_root / "benchmark/manifests/pilot.jsonl",
+        project_root / "configs/research/docker_environments.json",
+        project_root / "configs/research/benchmark_environments.toml",
+        project_root / "configs/experiments/gate_b1.yaml",
+    )
+    before = {path: hashlib.sha256(path.read_bytes()).digest() for path in frozen_files}
     statuses = assess_acquisition_environments(
         _test_project(tmp_path, project_root), **_ready_checks()
     )
-    after = hashlib.sha256(b1_manifest.read_bytes()).digest()
+    after = {path: hashlib.sha256(path.read_bytes()).digest() for path in frozen_files}
     assert before == after
     assert all(status.ready for status in statuses)
+    assert [status.task_id for status in statuses] == ["GS-T001", "GS-T002", "GS-T003", "GS-T005"]
 
 
-def test_mismatched_upstream_image_fails_readiness(
-    project_root: Path, tmp_path: Path
-) -> None:
+def test_mismatched_upstream_image_fails_readiness(project_root: Path, tmp_path: Path) -> None:
     project = _test_project(tmp_path, project_root)
     contract = json.loads((project / gate_a1.ACQUISITION_CONTRACT).read_text())
     contract["environments"][0]["upstream_image"] = "wrong/image"
@@ -249,6 +287,101 @@ def test_neo4j_unreachable_fails_without_database_writes(
     assert any("neo4j_unreachable" in reason for reason in statuses[0].blockers)
 
 
+def test_frozen_baseline_sha_mismatch_fails_closed(project_root: Path) -> None:
+    blockers = validate_frozen_baselines(
+        project_root,
+        baseline_checker=lambda repository, commit: (
+            ("baseline HEAD mismatch",) if repository.endswith("arrow.1d70d009") else ()
+        ),
+    )
+    assert blockers["GS-T001"] == ("baseline HEAD mismatch",)
+    assert blockers["GS-T002"] == ()
+
+
+def test_dirty_acquisition_baseline_fails_closed(project_root: Path) -> None:
+    blockers = validate_frozen_baselines(
+        project_root,
+        baseline_checker=lambda repository, commit: (
+            ("baseline Git worktree is dirty",)
+            if repository.endswith("stackprinter.219fcc52")
+            else ()
+        ),
+    )
+    assert blockers["GS-T005"] == ("baseline Git worktree is dirty",)
+
+
+def test_gate_a1_preparation_never_requests_excluded_monai_task(
+    project_root: Path, tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    project = _test_project(tmp_path, project_root)
+    identities = load_acquisition_identities(project)
+    for identity in identities:
+        (project / "benchmark" / "workspaces" / identity.repository).mkdir(
+            parents=True, exist_ok=True
+        )
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run_prepare(**kwargs: object) -> Path:
+        task_ids = tuple(cast(tuple[str, ...], kwargs["task_ids"]))
+        calls.append(task_ids)
+        execution_root = cast(Path, kwargs["execution_root"])
+        subdirectory = cast(str, kwargs["environment_subdirectory"])
+        environment_root = execution_root / subdirectory
+        result_root = cast(Path, kwargs["artifact_root"]) / "GS-E003" / "gate_a1"
+        result_root.mkdir(parents=True, exist_ok=True)
+        tasks: list[dict[str, str]] = []
+        for task_id in task_ids:
+            marker = environment_root / task_id / "fingerprint" / "environment.json"
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(
+                json.dumps(
+                    {
+                        "validated": False,
+                        "environment_fingerprint": "fingerprint",
+                        "base_image_digest": "sha256:base",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            tasks.append(
+                {
+                    "task_id": task_id,
+                    "container_image": f"prepared/{task_id.lower()}:image",
+                    "environment_fingerprint": "fingerprint",
+                    "validation_marker": str(marker),
+                    "base_image_digest": "sha256:base",
+                    "container_python_executable": "python",
+                }
+            )
+        result = result_root / "preparation-test.json"
+        result.write_text(json.dumps({"tasks": tasks}), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr("experiments.sprint3.run_prepare", fake_run_prepare)
+
+    def image_status(_image: str) -> tuple[bool, str]:
+        return True, ""
+
+    def validate_runtime(*_args: object) -> None:
+        return None
+
+    def validate_baselines(*_args: object, **_kwargs: object) -> dict[str, tuple[str, ...]]:
+        return {task_id: () for task_id in ("GS-T001", "GS-T002", "GS-T003", "GS-T005")}
+
+    monkeypatch.setattr(gate_a1, "_docker_image_status", image_status)
+    monkeypatch.setattr(gate_a1, "_validate_prepared_runtime", validate_runtime)
+    monkeypatch.setattr(
+        gate_a1,
+        "validate_frozen_baselines",
+        validate_baselines,
+    )
+    contract_path = prepare_gate_a1_environments(project)
+    contract = json.loads(contract_path.read_text())
+    assert calls == [("GS-T001", "GS-T002", "GS-T003", "GS-T005")]
+    assert [entry["task_id"] for entry in contract["environments"]] == list(calls[0])
+    assert "project-monai" not in contract_path.read_text()
+
+
 def test_zero_attempted_is_classified_as_environment_blocked(
     project_root: Path, tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -258,6 +391,7 @@ def test_zero_attempted_is_classified_as_environment_blocked(
         docker_status_checker=lambda: (False, "Docker daemon is unavailable"),
         neo4j_status_checker=lambda: (False, "neo4j unavailable"),
     )
+
     def fake_git(*_args: object) -> str:
         return "test"
 
@@ -269,8 +403,12 @@ def test_zero_attempted_is_classified_as_environment_blocked(
     assert metrics["complete_trusted_recovery_lineages"] == 0
     assert metrics["patterns_generated"] == 0
     assert metrics["patterns_embedded"] == 0
+    assert metrics["included_acquisition_tasks"] == 4
+    assert metrics["excluded_acquisition_tasks"] == 1
+    assert metrics["included_transfer_tasks"] == 8
+    assert metrics["excluded_transfer_tasks"] == 2
+    assert metrics["transfer_task_denominator"] == 8
     assert (
         "Pattern acquisition quality was not evaluated because the environment "
-        "preflight failed before execution."
-        in (artifact / "README.md").read_text()
+        "preflight failed before execution." in (artifact / "README.md").read_text()
     )
