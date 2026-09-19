@@ -1661,8 +1661,18 @@ def run_prepare(
     baseline_root: Path,
     execution_root: Path,
     artifact_root: Path,
+    task_ids: Sequence[str] = TRANSFER_TASKS,
+    policy_path: Path | None = None,
+    environment_subdirectory: str = "sprint3-task-environments",
+    result_subdirectory: str = "sprint3b",
 ) -> Path:
-    """Build or reuse prepared T006-T015 environments without objective work."""
+    """Build or reuse prepared environments without objective work.
+
+    The defaults preserve the frozen Track B preparation contract. Narrow
+    development gates may provide their own task order, policy, and isolated
+    environment directory while reusing the same SWE-smith machinery.
+    """
+    requested_task_ids = tuple(task_ids)
     b0_config = _configured_runtime(
         load_experiment_configuration(
             project_root / "configs/experiments/rollout_3a_pilot.yaml",
@@ -1672,18 +1682,27 @@ def run_prepare(
         execution_root,
     )
     try:
-        benchmark_policy = load_benchmark_environment_policy(
+        selected_policy_path = policy_path or (
             project_root / "configs/research/benchmark_environments.toml"
         )
+        if requested_task_ids == TRANSFER_TASKS:
+            benchmark_policy = load_benchmark_environment_policy(selected_policy_path)
+        else:
+            benchmark_policy = load_benchmark_environment_policy(
+                selected_policy_path,
+                expected_task_order=requested_task_ids,
+            )
     except BenchmarkEnvironmentConfigurationError as error:
         raise BenchmarkPreflightError(str(error)) from error
     all_cases = load_task_cases(
         b0_config.task_manifest_path,
         problem_statements_path=b0_config.task_problems_path,
     )
-    cases = [case for case in all_cases if case.task.id in TRANSFER_TASKS]
-    if tuple(case.task.id for case in cases) != TRANSFER_TASKS:
-        raise BenchmarkPreflightError("frozen T006-T015 cases are incomplete or out of order")
+    cases = [case for case in all_cases if case.task.id in requested_task_ids]
+    if tuple(case.task.id for case in cases) != requested_task_ids:
+        raise BenchmarkPreflightError(
+            f"requested benchmark cases are incomplete or out of order: {requested_task_ids!r}"
+        )
     _verify_baselines(cases, baseline_root)
     instance_ids = _manifest_instance_ids(
         b0_config.task_manifest_path,
@@ -1699,7 +1718,7 @@ def run_prepare(
     load_frozen_swesmith_cases(tuple(instance_ids.values()))
     environments = _prepare_task_environments(
         cases,
-        environment_root=execution_root / "sprint3-task-environments",
+        environment_root=execution_root / environment_subdirectory,
         source_root=baseline_root,
         dependency_overlays=TASK_DEPENDENCY_OVERLAYS,
         container_images=container_images,
@@ -1729,10 +1748,18 @@ def run_prepare(
                 "container_image": environment.container_image,
                 "base_container_image": environment.base_container_image,
                 "environment_fingerprint": environment.environment_fingerprint,
+                "validation_marker": (
+                    str(environment.validation_marker)
+                    if environment.validation_marker is not None
+                    else None
+                ),
+                "base_image_digest": _marker_value(
+                    environment.validation_marker, "base_image_digest"
+                ),
                 "validated": validated,
             }
         )
-    result_root = artifact_root / "GS-E003" / "sprint3b"
+    result_root = artifact_root / "GS-E003" / result_subdirectory
     result_root.mkdir(parents=True, exist_ok=True)
     result_path = result_root / (
         "preparation-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + ".json"
@@ -2060,6 +2087,17 @@ def _manifest_image_names(manifest_path: Path, task_ids: Sequence[str]) -> dict[
             "frozen manifest container image names are incomplete for T006-T015"
         )
     return found
+
+
+def _marker_value(marker: Path | None, key: str) -> Any:
+    """Read one optional preparation value without changing marker semantics."""
+    if marker is None or not marker.is_file():
+        return None
+    try:
+        raw: Any = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    return raw.get(key) if isinstance(raw, dict) else None
 
 
 def _test_ids(value: Any) -> tuple[str, ...]:

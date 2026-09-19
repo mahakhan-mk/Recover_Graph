@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "gate": "GS-E003 / Gate A1 development acquisition",
+  "contract_type": "development_only_acquisition",
+  "source_manifest": "benchmark/manifests/pilot.jsonl",
+  "environment_root": "research/evidence/workspaces/gate-a1-task-environments",
+  "environments": []
+}

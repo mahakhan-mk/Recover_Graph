@@ -1,0 +1,62 @@
+{
+  "acquisition_tasks_attempted": 0,
+  "actions_evaluated": 0,
+  "blockers": [
+    {
+      "reasons": [
+        "task has no frozen prepared environment in configs/research/docker_environments.json",
+        "Docker daemon is unavailable: Command '['docker', 'info', '--format', '{{.ServerVersion}}']' returned non-zero exit status 1.",
+        "workspace is missing: C:/Users/Lenovo/Documents/graph_swarm/benchmark/workspaces/missing/GS-T001"
+      ],
+      "task_id": "GS-T001"
+    },
+    {
+      "reasons": [
+        "task has no frozen prepared environment in configs/research/docker_environments.json",
+        "Docker daemon is unavailable: Command '['docker', 'info', '--format', '{{.ServerVersion}}']' returned non-zero exit status 1.",
+        "workspace is missing: C:/Users/Lenovo/Documents/graph_swarm/benchmark/workspaces/missing/GS-T002"
+      ],
+      "task_id": "GS-T002"
+    },
+    {
+      "reasons": [
+        "task has no frozen prepared environment in configs/research/docker_environments.json",
+        "Docker daemon is unavailable: Command '['docker', 'info', '--format', '{{.ServerVersion}}']' returned non-zero exit status 1.",
+        "workspace is missing: C:/Users/Lenovo/Documents/graph_swarm/benchmark/workspaces/missing/GS-T003"
+      ],
+      "task_id": "GS-T003"
+    },
+    {
+      "reasons": [
+        "task has no frozen prepared environment in configs/research/docker_environments.json",
+        "Docker daemon is unavailable: Command '['docker', 'info', '--format', '{{.ServerVersion}}']' returned non-zero exit status 1.",
+        "workspace is missing: C:/Users/Lenovo/Documents/graph_swarm/benchmark/workspaces/missing/GS-T004"
+      ],
+      "task_id": "GS-T004"
+    },
+    {
+      "reasons": [
+        "task has no frozen prepared environment in configs/research/docker_environments.json",
+        "Docker daemon is unavailable: Command '['docker', 'info', '--format', '{{.ServerVersion}}']' returned non-zero exit status 1.",
+        "workspace is missing: C:/Users/Lenovo/Documents/graph_swarm/benchmark/workspaces/missing/GS-T005"
+      ],
+      "task_id": "GS-T005"
+    }
+  ],
+  "candidate_recall_at_k": null,
+  "complete_trusted_recovery_lineages": 0,
+  "correct_top1": 0,
+  "incorrect_top1": 0,
+  "median_retrieval_latency_ms": null,
+  "no_selection_cases": 0,
+  "p95_retrieval_latency_ms": null,
+  "patterns_embedded": 0,
+  "patterns_generated": 0,
+  "precision_at_1": null,
+  "rejection_counts": {},
+  "selection_coverage": null,
+  "selections": 0,
+  "status": "BLOCKED_ACQUISITION_ENVIRONMENT",
+  "strict_correct_top1_all_labelled_opportunities": null,
+  "transfer_tasks_evaluated": 0
+}

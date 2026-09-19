@@ -1,4 +1,9 @@
-"""Deterministic, independently testable pre-execution advisory service."""
+"""Deterministic pre-execution advisory service.
+
+The production treatment path uses Recovery Memory V2. The legacy candidate
+adapter remains only for older test/reporting doubles that do not implement the
+V2 repository surface; it is never selected for a real V2-capable repository.
+"""
 
 from datetime import datetime
 
@@ -12,10 +17,15 @@ from graph_swarm.domain.advice import (
 from graph_swarm.domain.environment import EnvironmentContext
 from graph_swarm.domain.resolutions import ResolutionStatus
 from graph_swarm.domain.tasks import Task
+from graph_swarm.graph.read_models import RecoveryPatternLineage
 from graph_swarm.graph.repository import OperationalMemoryRepository
 from graph_swarm.retrieval.applicability import ApplicabilityService
 from graph_swarm.retrieval.candidates import HistoricalRecoveryCandidate
 from graph_swarm.retrieval.scorer import select_best_candidate
+from graph_swarm.retrieval.service import (
+    RecoveryPatternRetrievalService,
+    RecoveryRetrievalResult,
+)
 
 
 class AdvisoryService:
@@ -25,9 +35,15 @@ class AdvisoryService:
         self,
         repository: OperationalMemoryRepository,
         applicability: ApplicabilityService | None = None,
+        retrieval_service: RecoveryPatternRetrievalService | None = None,
     ) -> None:
         self._repository = repository
         self._applicability = applicability or ApplicabilityService()
+        self._retrieval_service = retrieval_service
+        self._v2_repository = (
+            repository if _supports_v2(repository) else None
+        )
+        self.last_retrieval_result: RecoveryRetrievalResult | None = None
 
     def evaluate_action(
         self,
@@ -42,10 +58,11 @@ class AdvisoryService:
         outcome count, descending failure timestamp, and finally ascending
         resolution/failure IDs as stable tie breakers.
         """
-        if task.repository != environment.repository:
-            return AdviceResult.no_advice(
-                "task and current environment repositories do not match"
-            )
+        if self._retrieval_service is not None or self._v2_repository is not None:
+            return self._evaluate_v2(task, planned_action, environment)
+
+        # Compatibility path for legacy reporting/test doubles only. A real
+        # Neo4jRepository implements the V2 vector and lineage methods above.
 
         candidates = self._repository.find_historical_recovery_candidates(
             planned_action,
@@ -89,6 +106,59 @@ class AdvisoryService:
             decision.compatible_markers,
         )
 
+    def _evaluate_v2(
+        self,
+        task: Task,
+        planned_action: PlannedAction,
+        environment: EnvironmentContext,
+    ) -> AdviceResult:
+        retrieval = self._retrieval_service
+        if retrieval is None:
+            if self._v2_repository is None:
+                return AdviceResult.no_advice("V2 retrieval repository is unavailable")
+            retrieval = RecoveryPatternRetrievalService(self._v2_repository)
+            self._retrieval_service = retrieval
+
+        result = retrieval.retrieve(task, planned_action, environment)
+        self.last_retrieval_result = result
+        if result.selected_pattern is None:
+            return AdviceResult.no_advice(
+                result.no_selection_reason or "no applicable RecoveryPattern",
+                considered_candidates=len(result.candidates),
+            )
+
+        selected_evaluation = next(
+            (
+                candidate
+                for candidate in result.eligible_candidates
+                if candidate.pattern_id == result.selected_pattern.id
+            ),
+            None,
+        )
+        if selected_evaluation is None:
+            return AdviceResult.no_advice(
+                "selected RecoveryPattern has no eligible audit record",
+                considered_candidates=len(result.candidates),
+            )
+
+        try:
+            lineage = self._repository.get_recovery_pattern(result.selected_pattern.id)
+            _validate_pattern_lineage(result.selected_pattern.id, lineage)
+        except Exception:  # noqa: BLE001 - missing provenance fails closed
+            return AdviceResult.no_advice(
+                "selected RecoveryPattern source lineage is unavailable",
+                considered_candidates=len(result.candidates),
+            )
+
+        return _v2_advice_result(
+            result.selected_pattern.guidance,
+            lineage,
+            selected_evaluation.matched_fields,
+            selected_evaluation.compatible_versions,
+            selected_evaluation.compatible_markers,
+            environment,
+        )
+
 
 def _advice_result(
     candidate: HistoricalRecoveryCandidate,
@@ -123,6 +193,70 @@ def _advice_result(
             outcome_ids=tuple(outcome.id for outcome in candidate.outcomes),
         ),
     )
+
+
+def _v2_advice_result(
+    guidance: str,
+    lineage: RecoveryPatternLineage,
+    matched_fields: tuple[str, ...],
+    compatible_versions: dict[str, str],
+    compatible_markers: dict[str, str],
+    environment: EnvironmentContext,
+) -> AdviceResult:
+    """Map trusted pattern source lineage into the frozen AdviceResult shape."""
+    failed_action = lineage.failed_action.planned_action
+    return AdviceResult.historical_recovery(
+        matched_failure_episode_id=lineage.failure.id,
+        matched_resolution_id=lineage.resolution.id,
+        failed_tool=failed_action.tool,
+        failed_operation=failed_action.operation,
+        recovery_summary=guidance,
+        resolution_status=lineage.resolution.status,
+        recovery_evidence=RecoveryEvidence(
+            successful_observations=lineage.resolution.successful_observations,
+            failed_observations=lineage.resolution.failed_observations,
+            outcomes=(lineage.outcome,),
+        ),
+        applicability=ApplicabilityAssessment(
+            matched_fields=matched_fields,
+            repository=environment.repository,
+            runtime=environment.runtime,
+            compatible_versions=compatible_versions,
+            compatible_markers=compatible_markers,
+        ),
+        provenance=RecoveryProvenance(
+            failure_episode_id=lineage.failure.id,
+            resolution_id=lineage.resolution.id,
+            failed_action_id=failed_action.id,
+            environment_id=lineage.environment.id,
+            outcome_ids=(lineage.outcome.id,),
+        ),
+    )
+
+
+def _validate_pattern_lineage(pattern_id: str, lineage: RecoveryPatternLineage) -> None:
+    """Reject a repository response whose source IDs do not match the pattern."""
+    pattern = lineage.pattern
+    if pattern.id != pattern_id:
+        raise ValueError("reconstructed pattern ID does not match the selected pattern")
+    if (
+        pattern.source_failure_id != lineage.failure.id
+        or pattern.source_resolution_id != lineage.resolution.id
+        or pattern.source_outcome_id != lineage.outcome.id
+        or pattern.source_task_id != lineage.task.id
+        or pattern.source_chronological_index != lineage.task.chronological_index
+    ):
+        raise ValueError("selected RecoveryPattern provenance does not match source lineage")
+
+
+def _supports_v2(repository: OperationalMemoryRepository) -> bool:
+    """Detect the concrete V2 repository surface without invoking it."""
+    required = (
+        "count_recovery_pattern_vectors",
+        "query_recovery_pattern_vectors",
+        "get_recovery_pattern",
+    )
+    return all(callable(getattr(type(repository), name, None)) for name in required)
 
 
 def _chronologically_available(

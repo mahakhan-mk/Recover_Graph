@@ -172,6 +172,7 @@ def test_retrieval_builds_query_embeds_and_requests_complete_pool() -> None:
     assert repository.query_calls[0][0] == [0.5] * 384
     assert result.query_version == "v1"
     assert result.selected_pattern is not None
+    assert "must-not-be-read" not in result.query_text
 
 
 @pytest.mark.parametrize("future_index", (5, 6))

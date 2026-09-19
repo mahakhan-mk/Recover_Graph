@@ -68,7 +68,11 @@ def _as_mapping(value: Any) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def load_benchmark_environment_policy(path: Path) -> BenchmarkEnvironmentPolicy:
+def load_benchmark_environment_policy(
+    path: Path,
+    *,
+    expected_task_order: tuple[str, ...] = FROZEN_TASK_ORDER,
+) -> BenchmarkEnvironmentPolicy:
     """Load and validate policy without duplicating manifest image names."""
     try:
         raw: Any = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -92,9 +96,9 @@ def load_benchmark_environment_policy(path: Path) -> BenchmarkEnvironmentPolicy:
     benchmark = _as_mapping(benchmark)
     tasks = _as_mapping(tasks)
     task_order = tuple(benchmark.get("task_order", ()))
-    if task_order != FROZEN_TASK_ORDER:
+    if task_order != expected_task_order:
         raise BenchmarkEnvironmentConfigurationError(
-            f"benchmark environment task order must be {FROZEN_TASK_ORDER!r}"
+            f"benchmark environment task order must be {expected_task_order!r}"
         )
     allowed_benchmark_fields = {
         "name",
@@ -138,7 +142,7 @@ def load_benchmark_environment_policy(path: Path) -> BenchmarkEnvironmentPolicy:
         )
 
     validated: dict[str, TaskEnvironmentPolicy] = {}
-    for task_id in FROZEN_TASK_ORDER:
+    for task_id in expected_task_order:
         raw_task = tasks.get(task_id)
         if not isinstance(raw_task, dict):
             raise BenchmarkEnvironmentConfigurationError(
@@ -227,7 +231,7 @@ def load_benchmark_environment_policy(path: Path) -> BenchmarkEnvironmentPolicy:
             required_extras=required_extras,
         )
 
-    unknown_tasks = set(tasks) - set(FROZEN_TASK_ORDER)
+    unknown_tasks = set(tasks) - set(expected_task_order)
     if unknown_tasks:
         raise BenchmarkEnvironmentConfigurationError(
             f"benchmark environment policy contains unknown tasks: {sorted(unknown_tasks)}"

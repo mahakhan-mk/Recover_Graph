@@ -25,6 +25,19 @@ from graph_swarm.memory.recovery_evidence import (
 PlannedActionContext = Mapping[str, PlannedAction] | Sequence[PlannedAction]
 
 
+class MissingTrustedPlannedActionError(ValueError):
+    """Raised when a T memory path has an event without runtime provenance."""
+
+    code = "BLOCKED_MISSING_TRUSTED_PLANNED_ACTION_PROVENANCE"
+
+    def __init__(self, action_ids: Sequence[str]) -> None:
+        self.action_ids = tuple(action_ids)
+        super().__init__(
+            f"{self.code}: missing runtime PlannedAction for action IDs "
+            f"{', '.join(self.action_ids)}"
+        )
+
+
 def persist_agent_event(
     repository: OperationalMemoryRepository,
     event: AgentEvent,
@@ -66,6 +79,7 @@ def persist_agent_event_stream(
     environment: EnvironmentContext,
     *,
     planned_actions: PlannedActionContext | None = None,
+    require_trusted_planned_actions: bool = False,
 ) -> tuple[FailureEpisode, Resolution, Outcome] | None:
     """Persist GS-E001 recovery evidence from one ordered event stream.
 
@@ -75,6 +89,12 @@ def persist_agent_event_stream(
     """
     event_list = list(events)
     action_context = _index_planned_actions(planned_actions)
+    if require_trusted_planned_actions:
+        missing_action_ids = tuple(
+            event.action_id for event in event_list if event.action_id not in action_context
+        )
+        if missing_action_ids:
+            raise MissingTrustedPlannedActionError(missing_action_ids)
     detected_failure: FailureEpisode | None = None
     failure_index: int | None = None
     for index, event in enumerate(event_list):

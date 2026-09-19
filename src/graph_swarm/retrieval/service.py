@@ -5,7 +5,7 @@ from __future__ import annotations
 from math import isfinite
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
@@ -43,6 +43,9 @@ class RecoveryCandidateEvaluation(BaseModel):
     vector_score: float
     eligible: bool
     rejection_reasons: tuple[str, ...] = ()
+    matched_fields: tuple[str, ...] = ()
+    compatible_versions: dict[str, str] = Field(default_factory=dict)
+    compatible_markers: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("vector_score", mode="before")
     @classmethod
@@ -168,6 +171,9 @@ class RecoveryPatternRetrievalService:
             vector_score=candidate.vector_score,
             eligible=not rejection_reasons,
             rejection_reasons=tuple(rejection_reasons),
+            matched_fields=applicability.matched_fields,
+            compatible_versions=applicability.compatible_versions,
+            compatible_markers=applicability.compatible_markers,
         )
 
 

@@ -1,0 +1,46 @@
+[benchmark]
+name = "gate-a1-development-acquisition"
+task_order = ["GS-T001", "GS-T002", "GS-T003", "GS-T004", "GS-T005"]
+network_during_execution = false
+container_image_source = "frozen_task_manifest"
+docker_build_timeout_seconds = 7200
+
+[tasks."GS-T001"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Development-only Gate A1 preparation uses the exact frozen pilot SWE-smith image."
+
+[tasks."GS-T002"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Development-only Gate A1 preparation uses the exact frozen pilot SWE-smith image."
+
+[tasks."GS-T003"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Development-only Gate A1 preparation uses the exact frozen pilot SWE-smith image."
+
+[tasks."GS-T004"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Development-only Gate A1 preparation uses the exact frozen pilot SWE-smith image."
+
+[tasks."GS-T005"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+rationale = "Development-only Gate A1 preparation uses the exact frozen pilot SWE-smith image."
