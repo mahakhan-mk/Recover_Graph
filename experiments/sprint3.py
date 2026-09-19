@@ -86,7 +86,12 @@ class BenchmarkPreflightError(RuntimeError):
     """Raised before model execution when the isolated benchmark is unusable."""
 
 
-TASK_DEPENDENCY_OVERLAYS: Mapping[str, Sequence[str]] = {}
+# SunPy's frozen image omits its repository-declared build/runtime
+# ``setuptools_scm`` dependency, which prevents pytest collection.  Keep the
+# repair task-scoped so the other frozen environments remain unchanged.
+TASK_DEPENDENCY_OVERLAYS: Mapping[str, Sequence[str]] = {
+    "GS-T003": ("setuptools_scm[toml]>=8.0.1",),
+}
 
 
 @dataclass(frozen=True)
@@ -2212,5 +2217,4 @@ def _write_exclusive(path: Path, content: Any) -> None:
         handle.write(serialized)
         if not serialized.endswith("\n"):
             handle.write("\n")
-
 

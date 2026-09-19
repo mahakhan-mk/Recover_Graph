@@ -25,14 +25,14 @@
       "workspace": "research/evidence/workspaces/gate-a1-task-environments/GS-T002/workspace"
     },
     {
-      "environment_fingerprint": "1459499a6c71c40b",
-      "prepared_image": "graph-swarm/sprint3b-gs-t003:1459499a6c71c40b",
+      "environment_fingerprint": "5de87654e89917a4",
+      "prepared_image": "graph-swarm/sprint3b-gs-t003:5de87654e89917a4",
       "repository": "swesmith/sunpy__sunpy.f8edfd5c",
       "runtime_type": "docker",
       "task_id": "GS-T003",
       "upstream_digest": "swebench/swesmith.x86_64.sunpy_1776_sunpy.f8edfd5c@sha256:a656ae5ccc1c0e4381205ea689453e6a360816e20523ddbf54d59a84e1ae95f2",
       "upstream_image": "swebench/swesmith.x86_64.sunpy_1776_sunpy.f8edfd5c",
-      "validation_marker": "research/evidence/workspaces/gate-a1-task-environments/GS-T003/1459499a6c71c40b/environment.json",
+      "validation_marker": "research/evidence/workspaces/gate-a1-task-environments/GS-T003/5de87654e89917a4/environment.json",
       "workspace": "research/evidence/workspaces/gate-a1-task-environments/GS-T003/workspace"
     },
     {
