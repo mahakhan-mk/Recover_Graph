@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "gate": "B1",
+  "runtime": "prepared_swesmith_docker",
+  "environment_root": "research/evidence/workspaces/sprint3-task-environments",
+  "environments": [
+    {
+      "task_id": "GS-T006",
+      "repository": "tornadoweb__tornado.d5ac65c1",
+      "workspace": "benchmark/workspaces/swesmith/tornadoweb__tornado.d5ac65c1",
+      "upstream_image": "swebench/swesmith.x86_64.tornadoweb_1776_tornado.d5ac65c1",
+      "upstream_digest": "sha256:6c145000a2bf5a7c946e66706dcf744ce99acc33c411f1e29ab0c01f11feb82f",
+      "prepared_image": "graph-swarm/sprint3b-gs-t006:3e2642bfedd2e004",
+      "environment_fingerprint": "3e2642bfedd2e004",
+      "marker": "research/evidence/workspaces/sprint3-task-environments/GS-T006/3e2642bfedd2e004/environment.json"
+    },
+    {
+      "task_id": "GS-T007",
+      "repository": "pallets__jinja.ada0a9a6",
+      "workspace": "benchmark/workspaces/swesmith/pallets__jinja.ada0a9a6",
+      "upstream_image": "swebench/swesmith.x86_64.pallets_1776_jinja.ada0a9a6",
+      "upstream_digest": "sha256:0416d3b73c08f501f96a47c769ab7bddb0f96f0cb4cc04efcc142577b4a59685",
+      "prepared_image": "graph-swarm/sprint3b-gs-t007:49435e4f1ceac046",
+      "environment_fingerprint": "49435e4f1ceac046",
+      "marker": "research/evidence/workspaces/sprint3-task-environments/GS-T007/49435e4f1ceac046/environment.json"
+    },
+    {
+      "task_id": "GS-T008",
+      "repository": "tobymao__sqlglot.036601ba",
+      "workspace": "benchmark/workspaces/swesmith/tobymao__sqlglot.036601ba",
+      "upstream_image": "swebench/swesmith.x86_64.tobymao_1776_sqlglot.036601ba",
+      "upstream_digest": "sha256:08bbf9a13106425b251b10cb7b77fe469c228d59d665a53086aab545b76c8b1f",
+      "prepared_image": "graph-swarm/sprint3b-gs-t008:41e9dd1b233b4a7f",
+      "environment_fingerprint": "41e9dd1b233b4a7f",
+      "marker": "research/evidence/workspaces/sprint3-task-environments/GS-T008/41e9dd1b233b4a7f/environment.json"
+    },
+    {
+      "task_id": "GS-T009",
+      "repository": "pydata__patsy.a5d16484",
+      "workspace": "benchmark/workspaces/swesmith/pydata__patsy.a5d16484",
+      "upstream_image": "swebench/swesmith.x86_64.pydata_1776_patsy.a5d16484",
+      "upstream_digest": "sha256:60bbd514959a26d2782fb7ae92a7c5067c903282c13882cb0e5ec755ab382fbe",
+      "prepared_image": "graph-swarm/sprint3b-gs-t009:a9d0659a39ef61e1",
+      "environment_fingerprint": "a9d0659a39ef61e1",
+      "marker": "research/evidence/workspaces/sprint3-task-environments/GS-T009/a9d0659a39ef61e1/environment.json"
+    },
+    {
+      "task_id": "GS-T010",
+      "repository": "tobymao__sqlglot.036601ba",
+      "workspace": "benchmark/workspaces/swesmith/tobymao__sqlglot.036601ba",
+      "upstream_image": "swebench/swesmith.x86_64.tobymao_1776_sqlglot.036601ba",
+      "upstream_digest": "sha256:08bbf9a13106425b251b10cb7b77fe469c228d59d665a53086aab545b76c8b1f",
+      "prepared_image": "graph-swarm/sprint3b-gs-t010:41e9dd1b233b4a7f",
+      "environment_fingerprint": "41e9dd1b233b4a7f",
+      "marker": "research/evidence/workspaces/sprint3-task-environments/GS-T010/41e9dd1b233b4a7f/environment.json"
+    },
+    {
+      "task_id": "GS-T011",
+      "repository": "tox-dev__pipdeptree.c31b6418",
+      "workspace": "benchmark/workspaces/swesmith/tox-dev__pipdeptree.c31b6418",
+      "upstream_image": "swebench/swesmith.x86_64.tox-dev_1776_pipdeptree.c31b6418",
+      "upstream_digest": "sha256:80e25256f4e78a72fd7bbf859f4d61ba2bba462bce2d0cd9c0e5469127b08282",
+      "prepared_image": "graph-swarm/sprint3b-gs-t011:e4203aa3dc32008b",
+      "environment_fingerprint": "e4203aa3dc32008b",
+      "marker": "research/evidence/workspaces/sprint3-task-environments/GS-T011/e4203aa3dc32008b/environment.json"
+    },
+    {
+      "task_id": "GS-T012",
+      "repository": "stanfordnlp__dspy.651a4c71",
+      "workspace": "benchmark/workspaces/swesmith/stanfordnlp__dspy.651a4c71",
+      "upstream_image": "swebench/swesmith.x86_64.stanfordnlp_1776_dspy.651a4c71",
+      "upstream_digest": "sha256:d5f83b4fd3e4403f022f069c80f0229f8da42dba522626af7a04a14165262f6c",
+      "prepared_image": "graph-swarm/sprint3b-gs-t012:92359a53c96275ab",
+      "environment_fingerprint": "92359a53c96275ab",
+      "marker": "research/evidence/workspaces/sprint3-task-environments/GS-T012/92359a53c96275ab/environment.json"
+    },
+    {
+      "task_id": "GS-T013",
+      "repository": "Cog-Creators__Red-DiscordBot.33e0eac7",
+      "workspace": "benchmark/workspaces/swesmith/Cog-Creators__Red-DiscordBot.33e0eac7",
+      "upstream_image": "swebench/swesmith.x86_64.cog-creators_1776_red-discordbot.33e0eac7",
+      "upstream_digest": "sha256:efe749af7b4d7d94b9be35e44db302b1f28f6ba0d476e15efed5e75c1eed7304",
+      "prepared_image": "graph-swarm/sprint3b-gs-t013:0c7e47949071530c",
+      "environment_fingerprint": "0c7e47949071530c",
+      "marker": "research/evidence/workspaces/sprint3-task-environments/GS-T013/0c7e47949071530c/environment.json"
+    },
+    {
+      "task_id": "GS-T014",
+      "repository": "stanfordnlp__string2string.c4a72f59",
+      "workspace": "benchmark/workspaces/swesmith/stanfordnlp__string2string.c4a72f59",
+      "upstream_image": "swebench/swesmith.x86_64.stanfordnlp_1776_string2string.c4a72f59",
+      "upstream_digest": "sha256:ec6d68c454594197f2a500b774e0b7e03e337eaa16df372b5f4102319b291f13",
+      "prepared_image": "graph-swarm/sprint3b-gs-t014:0a5c5af12c231c7e",
+      "environment_fingerprint": "0a5c5af12c231c7e",
+      "marker": "research/evidence/workspaces/sprint3-task-environments/GS-T014/0a5c5af12c231c7e/environment.json"
+    },
+    {
+      "task_id": "GS-T015",
+      "repository": "stanfordnlp__dspy.651a4c71",
+      "workspace": "benchmark/workspaces/swesmith/stanfordnlp__dspy.651a4c71",
+      "upstream_image": "swebench/swesmith.x86_64.stanfordnlp_1776_dspy.651a4c71",
+      "upstream_digest": "sha256:d5f83b4fd3e4403f022f069c80f0229f8da42dba522626af7a04a14165262f6c",
+      "prepared_image": "graph-swarm/sprint3b-gs-t015:92359a53c96275ab",
+      "environment_fingerprint": "92359a53c96275ab",
+      "marker": "research/evidence/workspaces/sprint3-task-environments/GS-T015/92359a53c96275ab/environment.json"
+    }
+  ]
+}

@@ -14,7 +14,7 @@ dependencies = [
   "datasets>=4.0",
   "neo4j>=6.2",
   "pydantic>=2",
-  "pydantic-ai-slim[groq,openai]==2.31.1",
+  "pydantic-ai-slim[openai]==2.31.1",
   "pydantic-ai-harness==0.22.0",
   "pydantic-evals==2.31.1",
   "pydantic-settings>=2",

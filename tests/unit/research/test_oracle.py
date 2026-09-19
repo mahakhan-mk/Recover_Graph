@@ -32,7 +32,7 @@ from graph_swarm.research.runner import (
 from graph_swarm.settings import Settings
 
 ROOT = Path(__file__).resolve().parents[3]
-O1_CONFIG = ROOT / "configs" / "experiments" / "rollout_3_o1.yaml"
+O1_CONFIG = ROOT / "configs" / "experiments" / "rollout_3a_o1.yaml"
 PILOT_MANIFEST = ROOT / "benchmark" / "manifests" / "pilot.jsonl"
 PILOT_ANNOTATIONS = ROOT / "benchmark" / "annotations" / "recurrence_validation.csv"
 PATTERN = "Inspect the failing behavior and restore the validated recovery ordering."
@@ -44,7 +44,6 @@ def make_settings() -> Settings:
         neo4j_username="example-user",
         neo4j_password="example-password",
         neo4j_database="example-db",
-        groq_api_key="offline-key",
         agent_request_limit=3,
     )
 

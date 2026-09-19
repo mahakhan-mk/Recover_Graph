@@ -556,11 +556,12 @@ def _runtime_text(value: object) -> str | None:
 
 
 def _effective_model(configuration: LoadedExperimentConfiguration) -> str:
-    if configuration.model.provider == "openrouter":
-        return os.environ.get("OPENROUTER_MODEL") or configuration.model.model
-    if configuration.model.provider == "groq":
-        return os.environ.get("GROQ_MODEL") or configuration.model.model
-    return configuration.model.model
+    if configuration.model.provider != "openrouter":
+        raise ProviderSmokeError(
+            "unsupported provider in provider smoke configuration: "
+            f"{configuration.model.provider}; the supported provider is openrouter"
+        )
+    return os.environ.get("OPENROUTER_MODEL") or configuration.model.model
 
 
 def _runtime_artifact_reference(runtime_artifact: RuntimeSmokeArtifact) -> dict[str, object]:

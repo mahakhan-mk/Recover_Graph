@@ -26,7 +26,6 @@ def make_settings() -> Settings:
         neo4j_username="example-user",
         neo4j_password="example-password",
         neo4j_database="example-db",
-        groq_api_key="offline-key",
         agent_request_limit=24,
         agent_command_timeout_seconds=5,
         agent_tests_timeout_seconds=5,

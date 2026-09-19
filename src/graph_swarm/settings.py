@@ -21,11 +21,9 @@ class Settings(BaseSettings):
     neo4j_username: str
     neo4j_password: str
     neo4j_database: str
-    groq_api_key: str | None = None
-    groq_model: str | None = None
     openrouter_api_key: str | None = None
     openrouter_model: str | None = None
-    model_provider: str | None = None
+    model_provider: str = "openrouter"
     agent_request_limit: int = Field(default=10, gt=0)
     agent_command_timeout_seconds: float = Field(default=30.0, gt=0)
     agent_tests_timeout_seconds: float = Field(default=120.0, gt=0)

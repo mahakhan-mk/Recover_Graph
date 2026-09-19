@@ -15,7 +15,7 @@ development-only virtual environment:
 ```powershell
 git clone <GRAPH_SWARM_REPOSITORY_URL> graph_swarm
 Set-Location graph_swarm
-py -3.13 -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
@@ -23,6 +23,38 @@ py -3.13 -m venv .venv
 The root project requires `>=3.12,<3.14`: Python 3.12 through 3.13 are
 supported, with Python 3.13 recommended for development. Benchmark packages
 must not be installed into this root virtual environment.
+
+## Read-only setup verification and repository bootstrap
+
+The tracked repository manifest at `benchmark/manifests/repositories.json`
+records each SWE-smith clone URL, exact commit, local path, and task IDs. The
+tracked Docker manifest at `configs/research/docker_environments.json` records
+the ten task identities, immutable base-image digests, prepared image tags, and
+expected environment fingerprints. These small manifests are the canonical
+handoff metadata; the workspaces and images remain local or separately
+transferred assets.
+
+Run the safe setup audit from the project root:
+
+```powershell
+.\.venv\Scripts\python.exe -m graph_swarm.research.verify_setup
+```
+
+It checks Python, import availability, secret presence without printing
+values, repository commits and dirtiness, marker metadata, Neo4j configuration,
+and the frozen Gate B1 controls. It never installs, clones, invokes Docker,
+calls OpenRouter, modifies Neo4j/Git state, or runs research.
+
+If a clean clone is missing benchmark repositories, acquisition is a separate,
+explicit operation:
+
+```powershell
+.\.venv\Scripts\python.exe -m graph_swarm.research.bootstrap_setup --clone
+```
+
+Existing repositories are never overwritten. Dirty or mismatched repositories
+are refused for manual review. This command was not run while preparing this
+handoff.
 
 ## Authoritative runtime
 
@@ -220,6 +252,29 @@ development evidence only, not a Gate B1 result; every summary keeps
 `provider-smoke-*.json` documents under
 `research/evidence/results/GS-E003/sprint3b/`; every summary explicitly keeps
 `gate_b1_evaluated` false.
+
+## Prepared image handoff
+
+Path A is the canonical reproducible route: acquire the exact SWE-smith base
+image named in the Docker manifest, verify its immutable digest, obtain the
+pinned repository commit, run the existing `benchmark_prepare` tooling, and
+verify the resulting marker fingerprint with `verify_setup` and
+`benchmark_preflight`.
+
+Path B is a convenience transport for an already-working prepared image set.
+The sender may export the required tags and the receiver may load the archive:
+
+```powershell
+# Sender, outside Graph Swarm Git history
+docker save -o graph-swarm-prepared-images.tar <required-image-tags>
+
+# Receiver
+docker load -i graph-swarm-prepared-images.tar
+```
+
+Run verification after loading. The archive is not canonical experiment
+metadata, must not be committed, and is not created by the repository setup
+commands.
 
 ## Troubleshooting
 

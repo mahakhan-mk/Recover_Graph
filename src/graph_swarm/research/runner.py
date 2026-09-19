@@ -619,9 +619,10 @@ class ExperimentRunner:
             raise ExperimentConfigurationError(
                 "GS-E003 must be explicitly marked development/pilot"
             )
-        if configuration.model.provider not in {"groq", "openrouter"}:
+        if configuration.model.provider != "openrouter":
             raise ExperimentConfigurationError(
-                f"unsupported Track B model provider: {configuration.model.provider}"
+                "unsupported Track B model provider: "
+                f"{configuration.model.provider}; the supported provider is openrouter"
             )
         selected_condition = condition or _configured_condition(configuration)
         if selected_condition not in configuration.config.conditions:
@@ -843,22 +844,20 @@ class ExperimentRunner:
 
     def _settings_for_model(self) -> Settings:
         base = self.settings or get_settings()
-        if self.configuration.model.provider == "openrouter":
-            import os
-
-            return base.model_copy(
-                update={
-                    "model_provider": "openrouter",
-                    "openrouter_api_key": os.environ.get("OPENROUTER_API_KEY")
-                    or base.openrouter_api_key,
-                    "openrouter_model": os.environ.get("OPENROUTER_MODEL")
-                    or base.openrouter_model,
-                }
+        if self.configuration.model.provider != "openrouter":
+            raise ExperimentConfigurationError(
+                "unsupported Track B model provider: "
+                f"{self.configuration.model.provider}; the supported provider is openrouter"
             )
+        import os
+
         return base.model_copy(
             update={
-                "model_provider": "groq",
-                "groq_model": self.configuration.model.model,
+                "model_provider": "openrouter",
+                "openrouter_api_key": os.environ.get("OPENROUTER_API_KEY")
+                or base.openrouter_api_key,
+                "openrouter_model": os.environ.get("OPENROUTER_MODEL")
+                or base.openrouter_model,
             }
         )
 
@@ -1010,14 +1009,17 @@ class ExperimentRunner:
         )
 
     def _artifact_model_name(self) -> str:
-        if self.configuration.model.provider == "openrouter":
-            base = self.settings or get_settings()
-            return (
-                os.environ.get("OPENROUTER_MODEL")
-                or base.openrouter_model
-                or self.configuration.model.model
+        if self.configuration.model.provider != "openrouter":
+            raise ExperimentConfigurationError(
+                "unsupported Track B model provider: "
+                f"{self.configuration.model.provider}; the supported provider is openrouter"
             )
-        return self.configuration.model.model
+        base = self.settings or get_settings()
+        return (
+            os.environ.get("OPENROUTER_MODEL")
+            or base.openrouter_model
+            or self.configuration.model.model
+        )
 
     def _advice_review_id(
         self,

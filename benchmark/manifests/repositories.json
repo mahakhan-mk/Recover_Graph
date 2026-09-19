@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "workspace_root": "benchmark/workspaces/swesmith",
+  "repositories": [
+    {
+      "logical_name": "Cog-Creators__Red-DiscordBot.33e0eac7",
+      "directory": "Cog-Creators__Red-DiscordBot.33e0eac7",
+      "path": "benchmark/workspaces/swesmith/Cog-Creators__Red-DiscordBot.33e0eac7",
+      "clone_url": "https://github.com/swesmith/Cog-Creators__Red-DiscordBot.33e0eac7.git",
+      "commit": "bc9ec7631756184f7405c0e1c443c8c57eb269d2",
+      "task_ids": ["GS-T013"]
+    },
+    {
+      "logical_name": "pallets__jinja.ada0a9a6",
+      "directory": "pallets__jinja.ada0a9a6",
+      "path": "benchmark/workspaces/swesmith/pallets__jinja.ada0a9a6",
+      "clone_url": "https://github.com/swesmith/pallets__jinja.ada0a9a6.git",
+      "commit": "83b73140ca308ee1c65870c78d11ebdff5a13d68",
+      "task_ids": ["GS-T007"]
+    },
+    {
+      "logical_name": "pydata__patsy.a5d16484",
+      "directory": "pydata__patsy.a5d16484",
+      "path": "benchmark/workspaces/swesmith/pydata__patsy.a5d16484",
+      "clone_url": "https://github.com/swesmith/pydata__patsy.a5d16484.git",
+      "commit": "aac7539dbb86b0cc177a8c74e9a7a28bda354cda",
+      "task_ids": ["GS-T009"]
+    },
+    {
+      "logical_name": "stanfordnlp__dspy.651a4c71",
+      "directory": "stanfordnlp__dspy.651a4c71",
+      "path": "benchmark/workspaces/swesmith/stanfordnlp__dspy.651a4c71",
+      "clone_url": "https://github.com/swesmith/stanfordnlp__dspy.651a4c71.git",
+      "commit": "57c387e36f136a5a8c9284f9a57bdfb8d096a83e",
+      "task_ids": ["GS-T012", "GS-T015"]
+    },
+    {
+      "logical_name": "stanfordnlp__string2string.c4a72f59",
+      "directory": "stanfordnlp__string2string.c4a72f59",
+      "path": "benchmark/workspaces/swesmith/stanfordnlp__string2string.c4a72f59",
+      "clone_url": "https://github.com/swesmith/stanfordnlp__string2string.c4a72f59.git",
+      "commit": "99542a900f8fb483578767e50c11498f2ec11ee9",
+      "task_ids": ["GS-T014"]
+    },
+    {
+      "logical_name": "tobymao__sqlglot.036601ba",
+      "directory": "tobymao__sqlglot.036601ba",
+      "path": "benchmark/workspaces/swesmith/tobymao__sqlglot.036601ba",
+      "clone_url": "https://github.com/swesmith/tobymao__sqlglot.036601ba.git",
+      "commit": "11710cc8e44a685969087a8b1f24a5a06fde0161",
+      "task_ids": ["GS-T008", "GS-T010"]
+    },
+    {
+      "logical_name": "tornadoweb__tornado.d5ac65c1",
+      "directory": "tornadoweb__tornado.d5ac65c1",
+      "path": "benchmark/workspaces/swesmith/tornadoweb__tornado.d5ac65c1",
+      "clone_url": "https://github.com/swesmith/tornadoweb__tornado.d5ac65c1.git",
+      "commit": "3a49fcc4520192175e1549dad76a8cf827630582",
+      "task_ids": ["GS-T006"]
+    },
+    {
+      "logical_name": "tox-dev__pipdeptree.c31b6418",
+      "directory": "tox-dev__pipdeptree.c31b6418",
+      "path": "benchmark/workspaces/swesmith/tox-dev__pipdeptree.c31b6418",
+      "clone_url": "https://github.com/swesmith/tox-dev__pipdeptree.c31b6418.git",
+      "commit": "95f5eaf97bdebead3ef4a31179816402e870c160",
+      "task_ids": ["GS-T011"]
+    }
+  ]
+}

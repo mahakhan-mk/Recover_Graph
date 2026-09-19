@@ -41,8 +41,8 @@ from graph_swarm.research.runner import (
 from graph_swarm.settings import Settings
 
 ROOT = Path(__file__).resolve().parents[3]
-PILOT_CONFIG = ROOT / "configs" / "experiments" / "rollout_3_pilot.yaml"
-O1_CONFIG = ROOT / "configs" / "experiments" / "rollout_3_o1.yaml"
+PILOT_CONFIG = ROOT / "configs" / "experiments" / "rollout_3a_pilot.yaml"
+O1_CONFIG = ROOT / "configs" / "experiments" / "rollout_3a_o1.yaml"
 ACTIVE_B0_CONFIG = ROOT / "configs" / "experiments" / "rollout_3a_pilot.yaml"
 ACTIVE_O1_CONFIG = ROOT / "configs" / "experiments" / "rollout_3a_o1.yaml"
 
@@ -53,7 +53,6 @@ def make_settings() -> Settings:
         neo4j_username="example-user",
         neo4j_password="example-password",
         neo4j_database="example-db",
-        groq_api_key="offline-key",
         agent_request_limit=3,
     )
 
@@ -78,8 +77,8 @@ def test_gs_e003_pilot_configuration_is_b0_only() -> None:
     assert configuration.config.limits.max_actions == 20
     assert configuration.config.limits.max_requests == 24
     assert configuration.config.limits.timeout_seconds == 300
-    assert configuration.config.model_config_path == "configs/models/groq.yaml"
-    assert configuration.model.model == "openai/gpt-oss-120b"
+    assert configuration.config.model_config_path == "configs/models/openrouter.yaml"
+    assert configuration.model.provider == "openrouter"
     assert configuration.model.prompt_version == "v1"
 
 
@@ -100,7 +99,7 @@ def test_existing_experiment_configuration_without_request_budget_remains_valid(
         {
             "experiment_id": "legacy",
             "rollout": "legacy_rollout",
-            "model_config": "configs/models/groq.yaml",
+            "model_config": "configs/models/openrouter.yaml",
             "conditions": ["B0"],
             "limits": {"max_actions": 20, "timeout_seconds": 300},
         }

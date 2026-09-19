@@ -32,5 +32,17 @@ artifacts/reports/*
 
 # Neo4j local data
 .neo4j/
+
+# Benchmark and research runtime state
+benchmark/workspaces/
+research/evidence/workspaces/
+research/evidence/results/runs/
+research/evidence/results/attempts.jsonl
+
+# Temporary inspection output and Docker image archives
+*.log
+*.tar
+*.tar.gz
+b0-steps-inspection.txt
 diff.txt
 difff.txt

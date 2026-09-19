@@ -5,11 +5,9 @@ from typing import cast
 import pytest
 from pydantic_ai import AgentRunResult, FunctionToolset, UsageLimits
 from pydantic_ai.messages import ToolReturnPart
-from pydantic_ai.models.groq import GroqModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.models.test import TestModel
-from pydantic_ai.providers.groq import GroqProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from graph_swarm.agent.coding_agent import (
@@ -126,28 +124,17 @@ async def test_run_coding_agent_async_falls_back_to_settings_request_limit(
     assert usage_limits.tool_calls_limit == 7
 
 
-def test_live_factory_requires_explicit_groq_configuration() -> None:
-    with pytest.raises(AgentConfigurationError, match="groq_model"):
+def test_live_factory_requires_explicit_openrouter_configuration() -> None:
+    with pytest.raises(AgentConfigurationError, match="OPENROUTER_MODEL"):
         create_coding_agent(make_settings(load_env_file=False))
 
 
-def test_groq_factory_preserves_groq_model_and_provider() -> None:
+def test_live_factory_rejects_unsupported_provider() -> None:
     settings = make_settings(load_env_file=False).model_copy(
-        update={
-            "model_provider": "groq",
-            "groq_model": "llama-3.3-70b-versatile",
-            "groq_api_key": "offline-key",
-        }
+        update={"model_provider": "unsupported"}
     )
-
-    agent = create_coding_agent(settings)
-
-    model = cast(GroqModel, agent.model)
-    assert type(model) is GroqModel
-    assert isinstance(model, GroqModel)
-    assert model.model_name == "llama-3.3-70b-versatile"
-    assert model.system == "groq"
-    assert isinstance(model._provider, GroqProvider)  # pyright: ignore[reportPrivateUsage]
+    with pytest.raises(AgentConfigurationError, match="supported live provider is openrouter"):
+        create_coding_agent(settings)
 
 
 def test_openrouter_factory_requires_key_only_when_selected() -> None:

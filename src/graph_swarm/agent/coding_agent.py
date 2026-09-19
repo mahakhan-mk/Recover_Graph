@@ -18,9 +18,7 @@ from pydantic_ai import (
     UsageLimits,
 )
 from pydantic_ai.models import Model
-from pydantic_ai.models.groq import GroqModel
 from pydantic_ai.models.openrouter import OpenRouterModel
-from pydantic_ai.providers.groq import GroqProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from graph_swarm.agent.advisory import (
@@ -74,18 +72,6 @@ class ModelRequestTimeoutError(TimeoutError):
         super().__init__(f"model request timeout expired after {timeout_seconds} seconds")
 
 
-def _build_groq_model(settings: Settings) -> GroqModel:
-    if not settings.groq_model or not settings.groq_model.strip():
-        raise AgentConfigurationError("groq_model must be supplied through Settings or GROQ_MODEL")
-    if not settings.groq_api_key or not settings.groq_api_key.strip():
-        raise AgentConfigurationError(
-            "groq_api_key must be supplied through Settings or GROQ_API_KEY"
-        )
-
-    provider = GroqProvider(api_key=settings.groq_api_key)
-    return GroqModel(settings.groq_model, provider=provider)
-
-
 def _build_openrouter_model(settings: Settings) -> OpenRouterModel:
     if not settings.openrouter_model or not settings.openrouter_model.strip():
         raise AgentConfigurationError(
@@ -114,10 +100,12 @@ def create_coding_agent(
     """
     if model is not None:
         selected_model = model
-    elif settings.model_provider == "openrouter":
-        selected_model = _build_openrouter_model(settings)
     else:
-        selected_model = _build_groq_model(settings)
+        if settings.model_provider != "openrouter":
+            raise AgentConfigurationError(
+                "unsupported model_provider; the supported live provider is openrouter"
+            )
+        selected_model = _build_openrouter_model(settings)
     agent: Agent[AgentDependencies, str] = Agent(
         selected_model,
         deps_type=AgentDependencies,
