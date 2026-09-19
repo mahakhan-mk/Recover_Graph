@@ -1,8 +1,64 @@
 {
-  "schema_version": 1,
-  "gate": "GS-E003 / Gate A1 development acquisition",
   "contract_type": "development_only_acquisition",
-  "source_manifest": "benchmark/manifests/pilot.jsonl",
   "environment_root": "research/evidence/workspaces/gate-a1-task-environments",
-  "environments": []
+  "environments": [
+    {
+      "environment_fingerprint": "d5fbd497d6ce8c24",
+      "prepared_image": "graph-swarm/sprint3b-gs-t001:d5fbd497d6ce8c24",
+      "repository": "swesmith/arrow-py__arrow.1d70d009",
+      "runtime_type": "docker",
+      "task_id": "GS-T001",
+      "upstream_digest": "swebench/swesmith.x86_64.arrow-py_1776_arrow.1d70d009@sha256:b6ee7b19255d3810e7eeff59a954b27002dde4d7991ca7f9555c0a5b99993f17",
+      "upstream_image": "swebench/swesmith.x86_64.arrow-py_1776_arrow.1d70d009",
+      "validation_marker": "research/evidence/workspaces/gate-a1-task-environments/GS-T001/d5fbd497d6ce8c24/environment.json",
+      "workspace": "research/evidence/workspaces/gate-a1-task-environments/GS-T001/workspace"
+    },
+    {
+      "environment_fingerprint": "171efbc7f6b60980",
+      "prepared_image": "graph-swarm/sprint3b-gs-t002:171efbc7f6b60980",
+      "repository": "swesmith/pygments__pygments.27649ebb",
+      "runtime_type": "docker",
+      "task_id": "GS-T002",
+      "upstream_digest": "swebench/swesmith.x86_64.pygments_1776_pygments.27649ebb@sha256:ba403c3f4f52fb6ed76c0809b541f2a78ff7147a978a665c962ae11313002dd9",
+      "upstream_image": "swebench/swesmith.x86_64.pygments_1776_pygments.27649ebb",
+      "validation_marker": "research/evidence/workspaces/gate-a1-task-environments/GS-T002/171efbc7f6b60980/environment.json",
+      "workspace": "research/evidence/workspaces/gate-a1-task-environments/GS-T002/workspace"
+    },
+    {
+      "environment_fingerprint": "1459499a6c71c40b",
+      "prepared_image": "graph-swarm/sprint3b-gs-t003:1459499a6c71c40b",
+      "repository": "swesmith/sunpy__sunpy.f8edfd5c",
+      "runtime_type": "docker",
+      "task_id": "GS-T003",
+      "upstream_digest": "swebench/swesmith.x86_64.sunpy_1776_sunpy.f8edfd5c@sha256:a656ae5ccc1c0e4381205ea689453e6a360816e20523ddbf54d59a84e1ae95f2",
+      "upstream_image": "swebench/swesmith.x86_64.sunpy_1776_sunpy.f8edfd5c",
+      "validation_marker": "research/evidence/workspaces/gate-a1-task-environments/GS-T003/1459499a6c71c40b/environment.json",
+      "workspace": "research/evidence/workspaces/gate-a1-task-environments/GS-T003/workspace"
+    },
+    {
+      "environment_fingerprint": "5cd13b6be2ebe6cd",
+      "prepared_image": "graph-swarm/sprint3b-gs-t004:5cd13b6be2ebe6cd",
+      "repository": "swesmith/Project-MONAI__MONAI.a09c1f08",
+      "runtime_type": "docker",
+      "task_id": "GS-T004",
+      "upstream_digest": "swebench/swesmith.x86_64.project-monai_1776_monai.a09c1f08@sha256:ada19e0d27dadb991c5b6112e00f116b26359067d5298650eb2eeff7d8385af2",
+      "upstream_image": "swebench/swesmith.x86_64.project-monai_1776_monai.a09c1f08",
+      "validation_marker": "research/evidence/workspaces/gate-a1-task-environments/GS-T004/5cd13b6be2ebe6cd/environment.json",
+      "workspace": "research/evidence/workspaces/gate-a1-task-environments/GS-T004/workspace"
+    },
+    {
+      "environment_fingerprint": "08c9dcaa8831807e",
+      "prepared_image": "graph-swarm/sprint3b-gs-t005:08c9dcaa8831807e",
+      "repository": "swesmith/cknd__stackprinter.219fcc52",
+      "runtime_type": "docker",
+      "task_id": "GS-T005",
+      "upstream_digest": "swebench/swesmith.x86_64.cknd_1776_stackprinter.219fcc52@sha256:d9e850c047b2555c62b1105db939c00d298f90985a1516dd75839fc7d7247de8",
+      "upstream_image": "swebench/swesmith.x86_64.cknd_1776_stackprinter.219fcc52",
+      "validation_marker": "research/evidence/workspaces/gate-a1-task-environments/GS-T005/08c9dcaa8831807e/environment.json",
+      "workspace": "research/evidence/workspaces/gate-a1-task-environments/GS-T005/workspace"
+    }
+  ],
+  "gate": "GS-E003 / Gate A1",
+  "schema_version": 1,
+  "source_manifest": "benchmark/manifests/pilot.jsonl"
 }
