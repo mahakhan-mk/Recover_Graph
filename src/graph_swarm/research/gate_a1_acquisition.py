@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import os
 import time
@@ -66,7 +67,15 @@ from graph_swarm.settings import get_settings
 
 ACQUISITION_TASK_IDS = tuple(f"GS-T{i:03d}" for i in range(1, 6))
 ACQUISITION_NAMESPACE = "GS-E003/Gate-A1/acquisition"
+ACQUISITION_R2_NAMESPACE = "GS-E003/Gate-A1/acquisition-r2"
 ACQUISITION_CONDITION = "gate_a1_acquisition"
+ACQUISITION_R2_CONDITION = "gate_a1_acquisition_r2"
+ACQUISITION_R2_CONFIG = "configs/experiments/gate_a1_acquisition_r2.yaml"
+ACQUISITION_R3_NAMESPACE = "GS-E003/Gate-A1/acquisition-r3"
+ACQUISITION_R3_CONDITION = "gate_a1_acquisition_r3"
+ACQUISITION_R3_CONFIG = "configs/experiments/gate_a1_acquisition_r3.yaml"
+FROZEN_CODING_MODEL = "qwen/qwen3-coder:free"
+FROZEN_R3_CODING_MODEL = "qwen/qwen3-coder"
 
 
 class GateA1AcquisitionPreflightError(RuntimeError):
@@ -90,15 +99,21 @@ def _write_json(path: Path, value: object) -> None:
     )
 
 
-def _settings_for_agent() -> Any:
+def _settings_for_agent(*, coding_model: str | None = None) -> Any:
     base = get_settings()
+    selected_coding_model = (
+        coding_model
+        or os.environ.get("OPENROUTER_CODING_MODEL")
+        or base.openrouter_coding_model
+        or FROZEN_CODING_MODEL
+    )
     return base.model_copy(
         update={
             "model_provider": "openrouter",
             "openrouter_api_key": os.environ.get("OPENROUTER_API_KEY")
             or base.openrouter_api_key,
-            "openrouter_model": os.environ.get("OPENROUTER_MODEL")
-            or base.openrouter_model,
+            "openrouter_model": selected_coding_model,
+            "openrouter_coding_model": selected_coding_model,
         }
     )
 
@@ -306,13 +321,24 @@ def resolve_gate_a1_environments(
     return environments
 
 
-def _validate_preflight_configuration(configuration: Any, settings: Any) -> None:
+def _validate_preflight_configuration(
+    configuration: Any,
+    settings: Any,
+    *,
+    expected_coding_model: str = FROZEN_CODING_MODEL,
+) -> None:
     if configuration.model.provider != "openrouter" or settings.model_provider != "openrouter":
         raise GateA1AcquisitionPreflightError("Gate A1 coding provider must be OpenRouter")
     if not settings.openrouter_api_key or not settings.openrouter_api_key.strip():
         raise GateA1AcquisitionPreflightError("OPENROUTER_API_KEY is missing")
     if not settings.openrouter_model or not settings.openrouter_model.strip():
         raise GateA1AcquisitionPreflightError("OPENROUTER_MODEL is missing")
+    if settings.openrouter_model != expected_coding_model:
+        raise GateA1AcquisitionPreflightError(
+            "Gate A1 coding model must be "
+            f"{expected_coding_model!r}; recovery abstraction remains "
+            f"{FROZEN_RECOVERY_MODEL!r}"
+        )
 
 
 def run_gate_a1_acquisition_preflight(project_root: Path) -> tuple[str, Path]:
@@ -409,10 +435,11 @@ def _base_task_artifact(
     model_settings: Mapping[str, object],
     prompt_version: str,
     workspace: Path,
+    namespace: str = ACQUISITION_NAMESPACE,
 ) -> dict[str, object]:
     runtime = environment.agent_execution_runtime()
     return {
-        "namespace": ACQUISITION_NAMESPACE,
+        "namespace": namespace,
         "gate": "GS-E003 / Gate A1",
         "phase": "acquisition",
         "task_id": task.id,
@@ -494,18 +521,22 @@ def _run_task(
     settings: Any,
     pacing: ProviderRequestPacing,
     embedder: RecoveryPatternEmbedder | None,
+    run_id: str | None = None,
+    namespace: str = ACQUISITION_NAMESPACE,
+    condition: str = ACQUISITION_CONDITION,
+    artifact_subdirectory: str = "acquisition",
 ) -> tuple[dict[str, object], RecoveryPatternEmbedder | None, bool]:
     task = case.task
-    run_id = f"GS-E003-A1-{task.id}-{uuid.uuid4().hex}"
+    run_id = run_id or f"GS-E003-A1-{task.id}-{uuid.uuid4().hex}"
     run = Run(id=run_id, task_id=task.id, started_at=datetime.now(UTC))
     workspace = _materialize_workspace(
         source_root=baseline_root,
         execution_root=execution_root,
         frozen_cases=objective.cases,
-        condition=ACQUISITION_CONDITION,
+        condition=condition,
         task=task,
     )
-    run_dir = artifact_root / "GS-E003" / "gate_a1" / "acquisition" / task.id / run_id
+    run_dir = artifact_root / "GS-E003" / "gate_a1" / artifact_subdirectory / task.id / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     step_database = run_dir / "steps.sqlite"
     artifact = _base_task_artifact(
@@ -516,6 +547,7 @@ def _run_task(
         model_settings=configuration.model.settings,
         prompt_version=configuration.model.prompt_version,
         workspace=workspace,
+        namespace=namespace,
     )
     environment_context = EnvironmentContext(
         id=f"{run_id}-environment",
@@ -689,6 +721,393 @@ def _run_task(
     return artifact, embedder, status.startswith("acquired")
 
 
+def _r2_configuration_hash(
+    configuration: Any,
+    settings: Any,
+    environments: Mapping[str, IsolatedTaskEnvironment],
+    *,
+    max_new_tasks: int | None = None,
+) -> str:
+    """Hash the immutable R2 model, prompt, budget, and runtime boundary.
+
+    ``max_new_tasks`` is deliberately an orchestration control, not part of
+    the task-level configuration identity.
+    """
+    del max_new_tasks
+    payload = {
+        "task_ids": list(ACQUISITION_TASK_IDS),
+        "coding_model": settings.openrouter_model,
+        "abstraction_model": FROZEN_RECOVERY_MODEL,
+        "prompt_version": configuration.model.prompt_version,
+        "model_settings": dict(configuration.model.settings),
+        "limits": {
+            "max_actions": configuration.config.limits.max_actions,
+            "max_requests": configuration.config.limits.max_requests,
+            "timeout_seconds": configuration.config.limits.timeout_seconds,
+        },
+        "environments": [
+            {
+                "task_id": task_id,
+                "environment_fingerprint": environments[task_id].environment_fingerprint,
+                "container_image": environments[task_id].container_image,
+            }
+            for task_id in ACQUISITION_TASK_IDS
+        ],
+    }
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _r2_task_marker(
+    artifact_root: Path,
+    task_id: str,
+    marker_name: str,
+) -> Path:
+    return artifact_root / "tasks" / task_id / marker_name
+
+
+def _r2_resume_action(artifact_root: Path, task_id: str) -> str | None:
+    """Return the durable resume decision for one task, if it already exists."""
+    if _r2_task_marker(artifact_root, task_id, "completed.json").is_file():
+        return "skipped_completed"
+    if _r2_task_marker(artifact_root, task_id, "started.json").is_file():
+        return "skipped_started_no_rerun"
+    return None
+
+
+def _r2_task_plan(
+    artifact_root: Path,
+    *,
+    max_new_tasks: int | None,
+) -> tuple[tuple[str, str], ...]:
+    """Plan canonical R2 task handling without starting any provider call."""
+    if max_new_tasks is not None and max_new_tasks <= 0:
+        raise GateA1AcquisitionPreflightError("max_new_tasks must be positive")
+
+    started_count = 0
+    plan: list[tuple[str, str]] = []
+    for task_id in ACQUISITION_TASK_IDS:
+        resume_action = _r2_resume_action(artifact_root, task_id)
+        if resume_action is not None:
+            plan.append((task_id, resume_action))
+            continue
+        if max_new_tasks is not None and started_count >= max_new_tasks:
+            break
+        plan.append((task_id, "start"))
+        started_count += 1
+    return tuple(plan)
+
+
+def _validate_revision_manifest(
+    manifest: Mapping[str, object],
+    *,
+    configuration_hash: str,
+    revision: str,
+    namespace: str,
+) -> None:
+    if manifest.get("run_revision") != revision:
+        raise GateA1AcquisitionPreflightError(
+            f"resume requires a Gate A1 Acquisition {revision} manifest"
+        )
+    if manifest.get("namespace") != namespace:
+        raise GateA1AcquisitionPreflightError(
+            f"resume requires the fresh Gate A1 Acquisition {revision} namespace"
+        )
+    if manifest.get("configuration_hash") != configuration_hash:
+        raise GateA1AcquisitionPreflightError(
+            f"{revision} resume configuration hash differs from the frozen initial attempt"
+        )
+    task_ids = manifest.get("task_ids")
+    task_id_values = cast(list[object], task_ids) if isinstance(task_ids, list) else None
+    if task_id_values is None or not all(isinstance(item, str) for item in task_id_values):
+        raise GateA1AcquisitionPreflightError(
+            f"{revision} resume task chronology must remain T001 through T005"
+        )
+    if tuple(cast(list[str], task_id_values)) != ACQUISITION_TASK_IDS:
+        raise GateA1AcquisitionPreflightError(
+            f"{revision} resume task chronology must remain T001 through T005"
+        )
+
+
+def _validate_r2_manifest(
+    manifest: Mapping[str, object],
+    *,
+    configuration_hash: str,
+) -> None:
+    _validate_revision_manifest(
+        manifest,
+        configuration_hash=configuration_hash,
+        revision="R2",
+        namespace=ACQUISITION_R2_NAMESPACE,
+    )
+
+
+def _validate_r3_manifest(
+    manifest: Mapping[str, object],
+    *,
+    configuration_hash: str,
+) -> None:
+    _validate_revision_manifest(
+        manifest,
+        configuration_hash=configuration_hash,
+        revision="R3",
+        namespace=ACQUISITION_R3_NAMESPACE,
+    )
+
+
+def run_gate_a1_acquisition_r2(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+    _revision: str = "R2",
+) -> tuple[str, Path]:
+    """Run or explicitly resume a uniform, immutable Gate A1 revision.
+
+    A durable started marker is written before each real agent call.  A task
+    with either a started or completed marker is never automatically rerun.
+    The revision namespace and configuration hash prevent importing A1 state or
+    resuming with a different model, prompt, budget, or environment.
+    """
+    if _revision not in {"R2", "R3"}:
+        raise ValueError(f"unsupported Gate A1 acquisition revision: {_revision}")
+    if max_new_tasks is not None and max_new_tasks <= 0:
+        raise GateA1AcquisitionPreflightError("max_new_tasks must be positive")
+    is_r2 = _revision == "R2"
+    namespace = ACQUISITION_R2_NAMESPACE if is_r2 else ACQUISITION_R3_NAMESPACE
+    condition = ACQUISITION_R2_CONDITION if is_r2 else ACQUISITION_R3_CONDITION
+    configuration_path = ACQUISITION_R2_CONFIG if is_r2 else ACQUISITION_R3_CONFIG
+    expected_coding_model = FROZEN_CODING_MODEL if is_r2 else FROZEN_R3_CODING_MODEL
+    run_prefix = "acquisition-r2" if is_r2 else "acquisition-r3"
+    task_artifact_subdirectory = run_prefix
+    ready_to_resume_status = f"READY_TO_RESUME_GATE_A1_ACQUISITION_{_revision}"
+    blocked_status = f"BLOCKED_GATE_A1_ACQUISITION_{_revision}"
+    project_root = project_root.expanduser().resolve()
+    if resume_root is None:
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        artifact_root = (
+            project_root
+            / "research/evidence/results/GS-E003/gate_a1"
+            / f"{run_prefix}-{stamp}"
+        )
+        artifact_root.mkdir(parents=True, exist_ok=False)
+    else:
+        artifact_root = resume_root.expanduser().resolve()
+        if not artifact_root.name.startswith(f"{run_prefix}-"):
+            raise GateA1AcquisitionPreflightError(
+                f"{_revision} resume path must use an {run_prefix}-* namespace"
+            )
+
+    manifest: dict[str, object] = {
+        "gate": "GS-E003 / Gate A1",
+        "phase": "acquisition",
+        "run_revision": _revision,
+        "namespace": namespace,
+        "task_ids": list(ACQUISITION_TASK_IDS),
+        "transfer_tasks_executed": [],
+        "retrieval_executed": False,
+        "behavioral_evaluation_executed": False,
+        "status": blocked_status,
+        "max_new_tasks": max_new_tasks,
+        "new_tasks_started": 0,
+        "tasks": [],
+        "errors": [],
+    }
+    repository: Neo4jRepository | None = None
+    previous_api_key = os.environ.get("OPENROUTER_API_KEY")
+    previous_model = os.environ.get("OPENROUTER_MODEL")
+    try:
+        baseline_root = project_root / "benchmark/workspaces"
+        execution_root = project_root / "research/evidence/workspaces"
+        configuration = _configured_runtime(
+            load_experiment_configuration(
+                project_root / configuration_path,
+                project_root=project_root,
+            ),
+            baseline_root,
+            execution_root,
+        )
+        cases = _task_cases(configuration, ACQUISITION_TASK_IDS)
+        environments, frozen_cases = _preflight(
+            project_root=project_root,
+            baseline_root=baseline_root,
+            execution_root=execution_root,
+            configuration=configuration,
+            cases=cases,
+        )
+        settings = _settings_for_agent(coding_model=configuration.model.model)
+        _validate_preflight_configuration(
+            configuration,
+            settings,
+            expected_coding_model=expected_coding_model,
+        )
+        configuration_hash = _r2_configuration_hash(configuration, settings, environments)
+        manifest["configuration_hash"] = configuration_hash
+        manifest["coding_model"] = settings.openrouter_model
+        manifest["abstraction_model"] = FROZEN_RECOVERY_MODEL
+        manifest["prompt_version"] = configuration.model.prompt_version
+        manifest["limits"] = configuration.config.limits.model_dump(mode="json")
+        if resume_root is not None:
+            existing_raw: object = json.loads(
+                (artifact_root / "manifest.json").read_text(encoding="utf-8")
+            )
+            if not isinstance(existing_raw, dict):
+                raise GateA1AcquisitionPreflightError(
+                    f"{_revision} resume manifest is not an object"
+                )
+            existing = cast(dict[str, object], existing_raw)
+            validator = _validate_r2_manifest if is_r2 else _validate_r3_manifest
+            validator(existing, configuration_hash=configuration_hash)
+            manifest = existing
+        else:
+            _write_json(artifact_root / "manifest.json", manifest)
+
+        repository = Neo4jRepository(
+            uri=settings.neo4j_uri,
+            username=settings.neo4j_username,
+            password=settings.neo4j_password,
+            database=settings.neo4j_database,
+        )
+        if settings.openrouter_api_key:
+            os.environ["OPENROUTER_API_KEY"] = settings.openrouter_api_key
+        os.environ["OPENROUTER_MODEL"] = FROZEN_RECOVERY_MODEL
+        repository.verify_connectivity()
+        repository.ensure_recovery_pattern_vector_index()
+        objective = FrozenSWEsmithObjective(frozen_cases, environments)
+        pacing = ProviderRequestPacing()
+        embedder: RecoveryPatternEmbedder | None = None
+        task_records: list[dict[str, object]] = []
+        task_plan = dict(
+            _r2_task_plan(artifact_root, max_new_tasks=max_new_tasks)
+        )
+        new_tasks_started = 0
+        boundary_hit = False
+        for case in cases:
+            task_id = case.task.id
+            resume_action = task_plan.get(task_id)
+            if resume_action is None:
+                boundary_hit = True
+                manifest["next_task_id"] = task_id
+                break
+            completed_marker = _r2_task_marker(artifact_root, task_id, "completed.json")
+            started_marker = _r2_task_marker(artifact_root, task_id, "started.json")
+            if resume_action == "skipped_completed":
+                completed_raw: object = json.loads(
+                    completed_marker.read_text(encoding="utf-8")
+                )
+                completed = (
+                    cast(dict[str, object], completed_raw)
+                    if isinstance(completed_raw, dict)
+                    else {}
+                )
+                task_records.append(
+                    {"task_id": task_id, "chronological_index": case.task.chronological_index,
+                     "resume_action": resume_action, "status": completed.get("status")}
+                )
+                continue
+            if resume_action == "skipped_started_no_rerun":
+                task_records.append(
+                    {"task_id": task_id, "chronological_index": case.task.chronological_index,
+                     "resume_action": resume_action}
+                )
+                continue
+            run_id = f"GS-E003-A1-{_revision}-{task_id}-{uuid.uuid4().hex}"
+            _write_json(
+                started_marker,
+                {
+                    "task_id": task_id,
+                    "chronological_index": case.task.chronological_index,
+                    "run_id": run_id,
+                    "configuration_hash": configuration_hash,
+                    "started_at": datetime.now(UTC),
+                },
+            )
+            task_artifact, embedder, _ = _run_task(
+                baseline_root=baseline_root,
+                execution_root=execution_root,
+                artifact_root=artifact_root,
+                configuration=configuration,
+                case=case,
+                environment=environments[task_id],
+                objective=objective,
+                repository=repository,
+                settings=settings,
+                pacing=pacing,
+                embedder=embedder,
+                run_id=run_id,
+                namespace=namespace,
+                condition=condition,
+                artifact_subdirectory=task_artifact_subdirectory,
+            )
+            task_records.append(task_artifact)
+            _write_json(
+                completed_marker,
+                {
+                    "task_id": task_id,
+                    "chronological_index": case.task.chronological_index,
+                    "run_id": run_id,
+                    "configuration_hash": configuration_hash,
+                    "status": task_artifact.get("status"),
+                    "completed_at": datetime.now(UTC),
+                },
+            )
+            new_tasks_started += 1
+            manifest["new_tasks_started"] = new_tasks_started
+            manifest["tasks"] = task_records
+            _write_json(artifact_root / "manifest.json", manifest)
+        manifest["tasks"] = task_records
+        manifest["new_tasks_started"] = new_tasks_started
+        manifest["completed_tasks"] = sum(
+            1 for record in task_records if "resume_action" not in record
+        )
+        blocked = [
+            str(record.get("task_id"))
+            for record in task_records
+            if record.get("resume_action") == "skipped_started_no_rerun"
+            or (
+                "status" in record
+                and not str(record.get("status")).startswith("acquired")
+            )
+        ]
+        if boundary_hit:
+            manifest["status"] = ready_to_resume_status
+            manifest["errors"] = []
+        elif len(task_records) == len(ACQUISITION_TASK_IDS) and not blocked:
+            manifest["status"] = "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION"
+        else:
+            manifest["errors"] = [{"blocked_tasks": blocked}]
+    except Exception as error:
+        manifest["errors"] = [{"type": type(error).__name__, "message": str(error)}]
+    finally:
+        if repository is not None:
+            repository.close()
+        if previous_api_key is None:
+            os.environ.pop("OPENROUTER_API_KEY", None)
+        else:
+            os.environ["OPENROUTER_API_KEY"] = previous_api_key
+        if previous_model is None:
+            os.environ.pop("OPENROUTER_MODEL", None)
+        else:
+            os.environ["OPENROUTER_MODEL"] = previous_model
+    _write_json(artifact_root / "manifest.json", manifest)
+    return str(manifest["status"]), artifact_root
+
+
+def run_gate_a1_acquisition_r3(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run or explicitly resume the fresh Gate A1 Acquisition R3 revision."""
+    return run_gate_a1_acquisition_r2(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+        _revision="R3",
+    )
+
+
 def run_gate_a1_acquisition(project_root: Path) -> tuple[str, Path]:
     """Run exactly T001-T005 acquisition and return final status plus artifact root."""
     project_root = project_root.expanduser().resolve()
@@ -801,4 +1220,8 @@ def run_gate_a1_acquisition(project_root: Path) -> tuple[str, Path]:
     return str(manifest["status"]), artifact_root
 
 
-__all__ = ["run_gate_a1_acquisition"]
+__all__ = [
+    "run_gate_a1_acquisition",
+    "run_gate_a1_acquisition_r2",
+    "run_gate_a1_acquisition_r3",
+]
