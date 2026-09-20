@@ -798,6 +798,37 @@ def _r2_task_plan(
     return tuple(plan)
 
 
+def _first_never_started_task(artifact_root: Path) -> str | None:
+    """Return the first canonical task without a durable started marker."""
+    for task_id in ACQUISITION_TASK_IDS:
+        if not _r2_task_marker(artifact_root, task_id, "started.json").is_file():
+            return task_id
+    return None
+
+
+def _completed_task_count(artifact_root: Path) -> int:
+    """Count canonical tasks with durable completed markers."""
+    return sum(
+        _r2_task_marker(artifact_root, task_id, "completed.json").is_file()
+        for task_id in ACQUISITION_TASK_IDS
+    )
+
+
+def _reconcile_execution_boundary(
+    artifact_root: Path,
+    manifest: dict[str, object],
+    *,
+    boundary_hit: bool,
+) -> bool:
+    """Reconcile a pause report with durable markers before final status write."""
+    next_task_id = _first_never_started_task(artifact_root)
+    if not boundary_hit or next_task_id is None:
+        manifest.pop("next_task_id", None)
+        return False
+    manifest["next_task_id"] = next_task_id
+    return True
+
+
 def _validate_revision_manifest(
     manifest: Mapping[str, object],
     *,
@@ -1057,9 +1088,7 @@ def run_gate_a1_acquisition_r2(
             _write_json(artifact_root / "manifest.json", manifest)
         manifest["tasks"] = task_records
         manifest["new_tasks_started"] = new_tasks_started
-        manifest["completed_tasks"] = sum(
-            1 for record in task_records if "resume_action" not in record
-        )
+        manifest["completed_tasks"] = _completed_task_count(artifact_root)
         blocked = [
             str(record.get("task_id"))
             for record in task_records
@@ -1069,6 +1098,11 @@ def run_gate_a1_acquisition_r2(
                 and not str(record.get("status")).startswith("acquired")
             )
         ]
+        boundary_hit = _reconcile_execution_boundary(
+            artifact_root,
+            manifest,
+            boundary_hit=boundary_hit,
+        )
         if boundary_hit:
             manifest["status"] = ready_to_resume_status
             manifest["errors"] = []

@@ -470,6 +470,46 @@ def test_r2_task_plan_preserves_canonical_order_without_boundary(tmp_path: Path)
     )
 
 
+def test_boundary_reporting_clears_stale_next_task_after_all_markers_complete(
+    tmp_path: Path,
+) -> None:
+    for task_id in acquisition.ACQUISITION_TASK_IDS:
+        for marker_name in ("started.json", "completed.json"):
+            marker = acquisition._r2_task_marker(tmp_path, task_id, marker_name)
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text("{}", encoding="utf-8")
+    manifest: dict[str, object] = {"next_task_id": "GS-T005"}
+
+    assert (
+        acquisition._reconcile_execution_boundary(
+            tmp_path,
+            manifest,
+            boundary_hit=True,
+        )
+        is False
+    )
+    assert "next_task_id" not in manifest
+    assert acquisition._completed_task_count(tmp_path) == 5
+
+
+def test_boundary_reporting_keeps_first_never_started_task(tmp_path: Path) -> None:
+    for task_id in acquisition.ACQUISITION_TASK_IDS[:4]:
+        marker = acquisition._r2_task_marker(tmp_path, task_id, "started.json")
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("{}", encoding="utf-8")
+    manifest: dict[str, object] = {}
+
+    assert (
+        acquisition._reconcile_execution_boundary(
+            tmp_path,
+            manifest,
+            boundary_hit=True,
+        )
+        is True
+    )
+    assert manifest["next_task_id"] == "GS-T005"
+
+
 def test_r2_boundary_does_not_change_task_configuration_hash() -> None:
     configuration = SimpleNamespace(
         model=SimpleNamespace(settings={"temperature": 0}, prompt_version="v1"),
