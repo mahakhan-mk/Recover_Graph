@@ -884,16 +884,41 @@ def write_readiness_artifact(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the development-only Gate A1 readiness check")
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
-    parser.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
         "--prepare-environments",
         action="store_true",
         help="prepare only the frozen Gate A1 acquisition tasks and write the separate contract",
+    )
+    modes.add_argument(
+        "--acquire",
+        action="store_true",
+        help="execute only the frozen T001-T005 Gate A1 acquisition",
+    )
+    modes.add_argument(
+        "--acquisition-preflight",
+        action="store_true",
+        help="validate Gate A1 acquisition prerequisites without executing acquisition",
     )
     args = parser.parse_args()
     project_root = args.project_root.resolve()
     if args.prepare_environments:
         print(prepare_gate_a1_environments(project_root))
         return 0
+    if args.acquisition_preflight:
+        from graph_swarm.research.gate_a1_acquisition import (
+            run_gate_a1_acquisition_preflight,
+        )
+
+        status, artifact_root = run_gate_a1_acquisition_preflight(project_root)
+        print(f"{status} {artifact_root}")
+        return 0 if status == "READY_FOR_GATE_A1_ACQUISITION_EXECUTION" else 2
+    if args.acquire:
+        from graph_swarm.research.gate_a1_acquisition import run_gate_a1_acquisition
+
+        status, artifact_root = run_gate_a1_acquisition(project_root)
+        print(f"{status} {artifact_root}")
+        return 0 if status == "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION" else 2
     statuses = assess_acquisition_environments(project_root)
     artifact_dir = write_readiness_artifact(project_root, statuses)
     if any(not status.ready for status in statuses):
