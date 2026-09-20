@@ -75,7 +75,7 @@ ACQUISITION_R3_NAMESPACE = "GS-E003/Gate-A1/acquisition-r3"
 ACQUISITION_R3_CONDITION = "gate_a1_acquisition_r3"
 ACQUISITION_R3_CONFIG = "configs/experiments/gate_a1_acquisition_r3.yaml"
 FROZEN_CODING_MODEL = "qwen/qwen3-coder:free"
-FROZEN_R3_CODING_MODEL = "qwen/qwen3-coder"
+FROZEN_R3_CODING_MODEL = "cohere/north-mini-code:free"
 
 
 class GateA1AcquisitionPreflightError(RuntimeError):

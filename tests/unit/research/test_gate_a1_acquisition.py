@@ -267,7 +267,7 @@ def test_coding_agent_and_recovery_abstraction_models_are_independent(
     )
     monkeypatch.setattr(acquisition, "get_settings", lambda: base)
     monkeypatch.setenv("OPENROUTER_MODEL", acquisition.FROZEN_RECOVERY_MODEL)
-    monkeypatch.delenv("OPENROUTER_CODING_MODEL", raising=False)
+    monkeypatch.setenv("OPENROUTER_CODING_MODEL", acquisition.FROZEN_CODING_MODEL)
 
     settings = acquisition._settings_for_agent()
 
@@ -326,10 +326,11 @@ def test_r3_resolves_distinct_coding_model_and_frozen_abstraction(
 
     settings = acquisition._settings_for_agent(coding_model=r3.model.model)
 
-    assert r3.model.model == "qwen/qwen3-coder"
-    assert settings.openrouter_model == "qwen/qwen3-coder"
-    assert acquisition.FROZEN_R3_CODING_MODEL == "qwen/qwen3-coder"
+    assert r3.model.model == "cohere/north-mini-code:free"
+    assert settings.openrouter_model == "cohere/north-mini-code:free"
+    assert acquisition.FROZEN_R3_CODING_MODEL == "cohere/north-mini-code:free"
     assert acquisition.FROZEN_RECOVERY_MODEL == "cohere/north-mini-code:free"
+    assert r3.config.model_config_path == "configs/models/openrouter_coding_r3.yaml"
 
 
 def test_r3_preserves_b0_limits_prompt_chronology_and_transfer_contract(
@@ -388,6 +389,9 @@ def test_r3_configuration_hash_differs_from_r2_for_same_runtime_inputs() -> None
     )
 
     assert r3_hash != r2_hash
+    assert r3_hash == (
+        "df6403270e7f0374a689ff0a310f1bf6b05236c3bbc5214d45dab654581b1f05"
+    )
 
 
 def test_r3_starts_with_fresh_t001_plan_and_rejects_r2_resume_root(

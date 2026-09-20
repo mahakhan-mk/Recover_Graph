@@ -1,5 +1,5 @@
 provider: openrouter
-model: qwen/qwen3-coder
+model: cohere/north-mini-code:free
 settings:
   temperature: 0
 prompt_version: v1
