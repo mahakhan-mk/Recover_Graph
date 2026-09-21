@@ -10,6 +10,7 @@ from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
+from graph_swarm.agent import coding_agent as coding_agent_module
 from graph_swarm.agent.coding_agent import (
     MODEL_REQUEST_TIMEOUT_SECONDS,
     AgentConfigurationError,
@@ -125,8 +126,30 @@ async def test_run_coding_agent_async_falls_back_to_settings_request_limit(
 
 
 def test_live_factory_requires_explicit_openrouter_configuration() -> None:
-    with pytest.raises(AgentConfigurationError, match="OPENROUTER_MODEL"):
+    with pytest.raises(AgentConfigurationError, match="OPENROUTER_CODING_MODEL"):
         create_coding_agent(make_settings(load_env_file=False))
+
+
+def test_live_factory_uses_the_explicit_coding_model_without_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={
+            "openrouter_coding_model": "qwen/qwen3-coder:free",
+            "openrouter_api_key": "offline-key",
+        }
+    )
+    selected: dict[str, str] = {}
+
+    def fake_openrouter_model(model: str, *, provider: object) -> TestModel:
+        selected["model"] = model
+        return TestModel()
+
+    monkeypatch.setattr(coding_agent_module, "OpenRouterModel", fake_openrouter_model)
+
+    create_coding_agent(settings)
+
+    assert selected["model"] == "qwen/qwen3-coder:free"
 
 
 def test_live_factory_rejects_unsupported_provider() -> None:
@@ -139,7 +162,7 @@ def test_live_factory_rejects_unsupported_provider() -> None:
 
 def test_openrouter_factory_requires_key_only_when_selected() -> None:
     settings = make_settings(load_env_file=False).model_copy(
-        update={"model_provider": "openrouter", "openrouter_model": "qwen/test"}
+        update={"model_provider": "openrouter", "openrouter_coding_model": "qwen/test"}
     )
     with pytest.raises(AgentConfigurationError, match="OPENROUTER_API_KEY"):
         create_coding_agent(settings)
@@ -147,9 +170,12 @@ def test_openrouter_factory_requires_key_only_when_selected() -> None:
 
 def test_openrouter_factory_requires_model_only_when_selected() -> None:
     settings = make_settings(load_env_file=False).model_copy(
-        update={"model_provider": "openrouter", "openrouter_api_key": "offline-key"}
+        update={
+            "model_provider": "openrouter",
+            "openrouter_api_key": "offline-key",
+        }
     )
-    with pytest.raises(AgentConfigurationError, match="OPENROUTER_MODEL"):
+    with pytest.raises(AgentConfigurationError, match="OPENROUTER_CODING_MODEL"):
         create_coding_agent(settings)
 
 
@@ -157,7 +183,7 @@ def test_openrouter_factory_uses_dedicated_model_and_preserves_configuration() -
     settings = make_settings(load_env_file=False).model_copy(
         update={
             "model_provider": "openrouter",
-            "openrouter_model": "qwen/test",
+            "openrouter_coding_model": "qwen/test",
             "openrouter_api_key": "offline-key",
         }
     )

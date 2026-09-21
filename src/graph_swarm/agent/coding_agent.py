@@ -73,16 +73,17 @@ class ModelRequestTimeoutError(TimeoutError):
 
 
 def _build_openrouter_model(settings: Settings) -> OpenRouterModel:
-    if not settings.openrouter_model or not settings.openrouter_model.strip():
+    if not settings.openrouter_coding_model or not settings.openrouter_coding_model.strip():
         raise AgentConfigurationError(
-            "openrouter_model must be supplied through Settings or OPENROUTER_MODEL"
+            "openrouter_coding_model must be supplied through Settings or "
+            "OPENROUTER_CODING_MODEL"
         )
     if not settings.openrouter_api_key or not settings.openrouter_api_key.strip():
         raise AgentConfigurationError(
             "openrouter_api_key must be supplied through Settings or OPENROUTER_API_KEY"
         )
     return OpenRouterModel(
-        settings.openrouter_model,
+        settings.openrouter_coding_model,
         provider=OpenRouterProvider(api_key=settings.openrouter_api_key),
     )
 

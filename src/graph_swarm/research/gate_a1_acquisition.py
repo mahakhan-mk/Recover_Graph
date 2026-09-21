@@ -10,10 +10,9 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
-import os
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -74,8 +73,17 @@ ACQUISITION_R2_CONFIG = "configs/experiments/gate_a1_acquisition_r2.yaml"
 ACQUISITION_R3_NAMESPACE = "GS-E003/Gate-A1/acquisition-r3"
 ACQUISITION_R3_CONDITION = "gate_a1_acquisition_r3"
 ACQUISITION_R3_CONFIG = "configs/experiments/gate_a1_acquisition_r3.yaml"
+ACQUISITION_R4_NAMESPACE = "GS-E003/Gate-A1/acquisition-r4"
+ACQUISITION_R4_CONDITION = "gate_a1_acquisition_r4"
+ACQUISITION_R4_CONFIG = "configs/experiments/gate_a1_acquisition_r4.yaml"
+ACQUISITION_R5_NAMESPACE = "GS-E003/Gate-A1/acquisition-r5"
+ACQUISITION_R5_CONDITION = "gate_a1_acquisition_r5"
+ACQUISITION_R5_CONFIG = "configs/experiments/gate_a1_acquisition_r5.yaml"
 FROZEN_CODING_MODEL = "qwen/qwen3-coder:free"
 FROZEN_R3_CODING_MODEL = "cohere/north-mini-code:free"
+FROZEN_R4_CODING_MODEL = "cohere/north-mini-code:free"
+R5_EXPECTED_CODING_MODEL = "nex-agi/nex-n2.5-pro:free"
+R5_EXPECTED_ABSTRACTION_MODEL = "cohere/north-mini-code:free"
 
 
 class GateA1AcquisitionPreflightError(RuntimeError):
@@ -99,22 +107,28 @@ def _write_json(path: Path, value: object) -> None:
     )
 
 
-def _settings_for_agent(*, coding_model: str | None = None) -> Any:
+def _settings_for_agent(
+    *,
+    coding_model: str | None = None,
+    abstraction_model: str | None = None,
+) -> Any:
+    """Resolve both OpenRouter roles through the typed Settings object.
+
+    The optional overrides are used only by historical R2-R4 replay paths,
+    whose model identities are part of their frozen provenance. R5 passes no
+    overrides and therefore requires both role-specific environment settings.
+    """
+    cache_clear = getattr(get_settings, "cache_clear", None)
+    if callable(cache_clear):
+        cache_clear()
     base = get_settings()
-    selected_coding_model = (
-        coding_model
-        or os.environ.get("OPENROUTER_CODING_MODEL")
-        or base.openrouter_coding_model
-        or FROZEN_CODING_MODEL
-    )
+    updates: dict[str, object] = {"model_provider": "openrouter"}
+    if coding_model is not None:
+        updates["openrouter_coding_model"] = coding_model
+    if abstraction_model is not None:
+        updates["openrouter_abstraction_model"] = abstraction_model
     return base.model_copy(
-        update={
-            "model_provider": "openrouter",
-            "openrouter_api_key": os.environ.get("OPENROUTER_API_KEY")
-            or base.openrouter_api_key,
-            "openrouter_model": selected_coding_model,
-            "openrouter_coding_model": selected_coding_model,
-        }
+        update=updates,
     )
 
 
@@ -325,19 +339,28 @@ def _validate_preflight_configuration(
     configuration: Any,
     settings: Any,
     *,
-    expected_coding_model: str = FROZEN_CODING_MODEL,
+    expected_coding_model: str | None = FROZEN_CODING_MODEL,
+    expected_abstraction_model: str | None = FROZEN_RECOVERY_MODEL,
 ) -> None:
     if configuration.model.provider != "openrouter" or settings.model_provider != "openrouter":
         raise GateA1AcquisitionPreflightError("Gate A1 coding provider must be OpenRouter")
     if not settings.openrouter_api_key or not settings.openrouter_api_key.strip():
         raise GateA1AcquisitionPreflightError("OPENROUTER_API_KEY is missing")
-    if not settings.openrouter_model or not settings.openrouter_model.strip():
-        raise GateA1AcquisitionPreflightError("OPENROUTER_MODEL is missing")
-    if settings.openrouter_model != expected_coding_model:
+    coding_model = getattr(settings, "openrouter_coding_model", None)
+    abstraction_model = getattr(settings, "openrouter_abstraction_model", None)
+    if not isinstance(coding_model, str) or not coding_model.strip():
+        raise GateA1AcquisitionPreflightError("OPENROUTER_CODING_MODEL is missing")
+    if not isinstance(abstraction_model, str) or not abstraction_model.strip():
+        raise GateA1AcquisitionPreflightError("OPENROUTER_ABSTRACTION_MODEL is missing")
+    if expected_coding_model is not None and coding_model != expected_coding_model:
         raise GateA1AcquisitionPreflightError(
             "Gate A1 coding model must be "
-            f"{expected_coding_model!r}; recovery abstraction remains "
-            f"{FROZEN_RECOVERY_MODEL!r}"
+            f"{expected_coding_model!r}"
+        )
+    if expected_abstraction_model is not None and abstraction_model != expected_abstraction_model:
+        raise GateA1AcquisitionPreflightError(
+            "Gate A1 abstraction model must be "
+            f"{expected_abstraction_model!r}"
         )
 
 
@@ -543,7 +566,7 @@ def _run_task(
         task=task,
         run=run,
         environment=environment,
-        model=settings.openrouter_model,
+        model=getattr(settings, "openrouter_coding_model", None),
         model_settings=configuration.model.settings,
         prompt_version=configuration.model.prompt_version,
         workspace=workspace,
@@ -728,16 +751,29 @@ def _r2_configuration_hash(
     *,
     max_new_tasks: int | None = None,
 ) -> str:
-    """Hash the immutable R2 model, prompt, budget, and runtime boundary.
+    """Hash the immutable model roles, prompt, budget, and runtime boundary.
 
     ``max_new_tasks`` is deliberately an orchestration control, not part of
     the task-level configuration identity.
     """
     del max_new_tasks
+    coding_model = getattr(settings, "openrouter_coding_model", None)
+    if not isinstance(coding_model, str) or not coding_model.strip():
+        # This compatibility branch only supports historical test/replay
+        # inputs that predate role-specific Settings fields. It is not used by
+        # the R5 runtime path.
+        coding_model = getattr(settings, "openrouter_model", None)
+    abstraction_model = getattr(settings, "openrouter_abstraction_model", None)
+    if not isinstance(abstraction_model, str) or not abstraction_model.strip():
+        abstraction_model = FROZEN_RECOVERY_MODEL
+    if not isinstance(coding_model, str) or not coding_model.strip():
+        raise GateA1AcquisitionPreflightError(
+            "OPENROUTER_CODING_MODEL is missing from the resolved run settings"
+        )
     payload = {
         "task_ids": list(ACQUISITION_TASK_IDS),
-        "coding_model": settings.openrouter_model,
-        "abstraction_model": FROZEN_RECOVERY_MODEL,
+        "coding_model": coding_model,
+        "abstraction_model": abstraction_model,
         "prompt_version": configuration.model.prompt_version,
         "model_settings": dict(configuration.model.settings),
         "limits": {
@@ -835,6 +871,8 @@ def _validate_revision_manifest(
     configuration_hash: str,
     revision: str,
     namespace: str,
+    coding_model: str | None = None,
+    abstraction_model: str | None = None,
 ) -> None:
     if manifest.get("run_revision") != revision:
         raise GateA1AcquisitionPreflightError(
@@ -843,6 +881,16 @@ def _validate_revision_manifest(
     if manifest.get("namespace") != namespace:
         raise GateA1AcquisitionPreflightError(
             f"resume requires the fresh Gate A1 Acquisition {revision} namespace"
+        )
+    if coding_model is not None and manifest.get("coding_model") != coding_model:
+        raise GateA1AcquisitionPreflightError(
+            f"{revision} resume coding model configuration does not match the "
+            "immutable run configuration"
+        )
+    if abstraction_model is not None and manifest.get("abstraction_model") != abstraction_model:
+        raise GateA1AcquisitionPreflightError(
+            f"{revision} resume abstraction model configuration does not match the "
+            "immutable run configuration"
         )
     if manifest.get("configuration_hash") != configuration_hash:
         raise GateA1AcquisitionPreflightError(
@@ -886,6 +934,36 @@ def _validate_r3_manifest(
     )
 
 
+def _validate_r4_manifest(
+    manifest: Mapping[str, object],
+    *,
+    configuration_hash: str,
+) -> None:
+    _validate_revision_manifest(
+        manifest,
+        configuration_hash=configuration_hash,
+        revision="R4",
+        namespace=ACQUISITION_R4_NAMESPACE,
+    )
+
+
+def _validate_r5_manifest(
+    manifest: Mapping[str, object],
+    *,
+    configuration_hash: str,
+    coding_model: str,
+    abstraction_model: str,
+) -> None:
+    _validate_revision_manifest(
+        manifest,
+        configuration_hash=configuration_hash,
+        revision="R5",
+        namespace=ACQUISITION_R5_NAMESPACE,
+        coding_model=coding_model,
+        abstraction_model=abstraction_model,
+    )
+
+
 def run_gate_a1_acquisition_r2(
     project_root: Path,
     *,
@@ -900,16 +978,41 @@ def run_gate_a1_acquisition_r2(
     The revision namespace and configuration hash prevent importing A1 state or
     resuming with a different model, prompt, budget, or environment.
     """
-    if _revision not in {"R2", "R3"}:
+    if _revision not in {"R2", "R3", "R4", "R5"}:
         raise ValueError(f"unsupported Gate A1 acquisition revision: {_revision}")
     if max_new_tasks is not None and max_new_tasks <= 0:
         raise GateA1AcquisitionPreflightError("max_new_tasks must be positive")
-    is_r2 = _revision == "R2"
-    namespace = ACQUISITION_R2_NAMESPACE if is_r2 else ACQUISITION_R3_NAMESPACE
-    condition = ACQUISITION_R2_CONDITION if is_r2 else ACQUISITION_R3_CONDITION
-    configuration_path = ACQUISITION_R2_CONFIG if is_r2 else ACQUISITION_R3_CONFIG
-    expected_coding_model = FROZEN_CODING_MODEL if is_r2 else FROZEN_R3_CODING_MODEL
-    run_prefix = "acquisition-r2" if is_r2 else "acquisition-r3"
+    manifest_validator: Callable[..., None]
+    if _revision == "R2":
+        namespace = ACQUISITION_R2_NAMESPACE
+        condition = ACQUISITION_R2_CONDITION
+        configuration_path = ACQUISITION_R2_CONFIG
+        expected_coding_model = FROZEN_CODING_MODEL
+        expected_abstraction_model = FROZEN_RECOVERY_MODEL
+        manifest_validator = _validate_r2_manifest
+    elif _revision == "R3":
+        namespace = ACQUISITION_R3_NAMESPACE
+        condition = ACQUISITION_R3_CONDITION
+        configuration_path = ACQUISITION_R3_CONFIG
+        expected_coding_model = FROZEN_R3_CODING_MODEL
+        expected_abstraction_model = FROZEN_RECOVERY_MODEL
+        manifest_validator = _validate_r3_manifest
+    else:
+        if _revision == "R4":
+            namespace = ACQUISITION_R4_NAMESPACE
+            condition = ACQUISITION_R4_CONDITION
+            configuration_path = ACQUISITION_R4_CONFIG
+            expected_coding_model = FROZEN_R4_CODING_MODEL
+            expected_abstraction_model = FROZEN_RECOVERY_MODEL
+            manifest_validator = _validate_r4_manifest
+        else:
+            namespace = ACQUISITION_R5_NAMESPACE
+            condition = ACQUISITION_R5_CONDITION
+            configuration_path = ACQUISITION_R5_CONFIG
+            expected_coding_model = R5_EXPECTED_CODING_MODEL
+            expected_abstraction_model = R5_EXPECTED_ABSTRACTION_MODEL
+            manifest_validator = _validate_r5_manifest
+    run_prefix = f"acquisition-{_revision.lower()}"
     task_artifact_subdirectory = run_prefix
     ready_to_resume_status = f"READY_TO_RESUME_GATE_A1_ACQUISITION_{_revision}"
     blocked_status = f"BLOCKED_GATE_A1_ACQUISITION_{_revision}"
@@ -945,8 +1048,7 @@ def run_gate_a1_acquisition_r2(
         "errors": [],
     }
     repository: Neo4jRepository | None = None
-    previous_api_key = os.environ.get("OPENROUTER_API_KEY")
-    previous_model = os.environ.get("OPENROUTER_MODEL")
+    resume_validation_failed = False
     try:
         baseline_root = project_root / "benchmark/workspaces"
         execution_root = project_root / "research/evidence/workspaces"
@@ -959,6 +1061,19 @@ def run_gate_a1_acquisition_r2(
             execution_root,
         )
         cases = _task_cases(configuration, ACQUISITION_TASK_IDS)
+        if _revision == "R5":
+            settings = _settings_for_agent()
+        else:
+            settings = _settings_for_agent(
+                coding_model=configuration.model.model,
+                abstraction_model=FROZEN_RECOVERY_MODEL,
+            )
+        _validate_preflight_configuration(
+            configuration,
+            settings,
+            expected_coding_model=expected_coding_model,
+            expected_abstraction_model=expected_abstraction_model,
+        )
         environments, frozen_cases = _preflight(
             project_root=project_root,
             baseline_root=baseline_root,
@@ -966,16 +1081,10 @@ def run_gate_a1_acquisition_r2(
             configuration=configuration,
             cases=cases,
         )
-        settings = _settings_for_agent(coding_model=configuration.model.model)
-        _validate_preflight_configuration(
-            configuration,
-            settings,
-            expected_coding_model=expected_coding_model,
-        )
         configuration_hash = _r2_configuration_hash(configuration, settings, environments)
         manifest["configuration_hash"] = configuration_hash
-        manifest["coding_model"] = settings.openrouter_model
-        manifest["abstraction_model"] = FROZEN_RECOVERY_MODEL
+        manifest["coding_model"] = settings.openrouter_coding_model
+        manifest["abstraction_model"] = settings.openrouter_abstraction_model
         manifest["prompt_version"] = configuration.model.prompt_version
         manifest["limits"] = configuration.config.limits.model_dump(mode="json")
         if resume_root is not None:
@@ -987,8 +1096,17 @@ def run_gate_a1_acquisition_r2(
                     f"{_revision} resume manifest is not an object"
                 )
             existing = cast(dict[str, object], existing_raw)
-            validator = _validate_r2_manifest if is_r2 else _validate_r3_manifest
-            validator(existing, configuration_hash=configuration_hash)
+            resume_validation_failed = True
+            if _revision == "R5":
+                manifest_validator(
+                    existing,
+                    configuration_hash=configuration_hash,
+                    coding_model=settings.openrouter_coding_model,
+                    abstraction_model=settings.openrouter_abstraction_model,
+                )
+            else:
+                manifest_validator(existing, configuration_hash=configuration_hash)
+            resume_validation_failed = False
             manifest = existing
         else:
             _write_json(artifact_root / "manifest.json", manifest)
@@ -999,9 +1117,6 @@ def run_gate_a1_acquisition_r2(
             password=settings.neo4j_password,
             database=settings.neo4j_database,
         )
-        if settings.openrouter_api_key:
-            os.environ["OPENROUTER_API_KEY"] = settings.openrouter_api_key
-        os.environ["OPENROUTER_MODEL"] = FROZEN_RECOVERY_MODEL
         repository.verify_connectivity()
         repository.ensure_recovery_pattern_vector_index()
         objective = FrozenSWEsmithObjective(frozen_cases, environments)
@@ -1111,18 +1226,12 @@ def run_gate_a1_acquisition_r2(
         else:
             manifest["errors"] = [{"blocked_tasks": blocked}]
     except Exception as error:
+        if resume_validation_failed:
+            raise
         manifest["errors"] = [{"type": type(error).__name__, "message": str(error)}]
     finally:
         if repository is not None:
             repository.close()
-        if previous_api_key is None:
-            os.environ.pop("OPENROUTER_API_KEY", None)
-        else:
-            os.environ["OPENROUTER_API_KEY"] = previous_api_key
-        if previous_model is None:
-            os.environ.pop("OPENROUTER_MODEL", None)
-        else:
-            os.environ["OPENROUTER_MODEL"] = previous_model
     _write_json(artifact_root / "manifest.json", manifest)
     return str(manifest["status"]), artifact_root
 
@@ -1139,6 +1248,36 @@ def run_gate_a1_acquisition_r3(
         resume_root=resume_root,
         max_new_tasks=max_new_tasks,
         _revision="R3",
+    )
+
+
+def run_gate_a1_acquisition_r4(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run or explicitly resume the budget-only Gate A1 Acquisition R4 revision."""
+    return run_gate_a1_acquisition_r2(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+        _revision="R4",
+    )
+
+
+def run_gate_a1_acquisition_r5(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run or explicitly resume the role-configured Gate A1 Acquisition R5 revision."""
+    return run_gate_a1_acquisition_r2(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+        _revision="R5",
     )
 
 
@@ -1187,11 +1326,6 @@ def run_gate_a1_acquisition(project_root: Path) -> tuple[str, Path]:
             password=settings.neo4j_password,
             database=settings.neo4j_database,
         )
-        previous_api_key = os.environ.get("OPENROUTER_API_KEY")
-        previous_model = os.environ.get("OPENROUTER_MODEL")
-        if settings.openrouter_api_key:
-            os.environ["OPENROUTER_API_KEY"] = settings.openrouter_api_key
-        os.environ["OPENROUTER_MODEL"] = FROZEN_RECOVERY_MODEL
         try:
             repository.verify_connectivity()
             repository.ensure_recovery_pattern_vector_index()
@@ -1240,14 +1374,6 @@ def run_gate_a1_acquisition(project_root: Path) -> tuple[str, Path]:
                 manifest["errors"] = [{"blocked_tasks": blocked}]
         finally:
             repository.close()
-            if previous_api_key is None:
-                os.environ.pop("OPENROUTER_API_KEY", None)
-            else:
-                os.environ["OPENROUTER_API_KEY"] = previous_api_key
-            if previous_model is None:
-                os.environ.pop("OPENROUTER_MODEL", None)
-            else:
-                os.environ["OPENROUTER_MODEL"] = previous_model
     except Exception as error:
         manifest["errors"] = [{"type": type(error).__name__, "message": str(error)}]
     _write_json(artifact_root / "manifest.json", manifest)
@@ -1258,4 +1384,6 @@ __all__ = [
     "run_gate_a1_acquisition",
     "run_gate_a1_acquisition_r2",
     "run_gate_a1_acquisition_r3",
+    "run_gate_a1_acquisition_r4",
+    "run_gate_a1_acquisition_r5",
 ]

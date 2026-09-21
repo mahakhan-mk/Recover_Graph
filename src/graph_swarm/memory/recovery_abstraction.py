@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -165,23 +164,23 @@ def create_recovery_abstraction_agent(
     *,
     model: Model | None = None,
 ) -> Agent[None, RecoveryAbstractionOutput]:
-    """Create the frozen North Mini Code abstraction agent with test injection."""
+    """Create the OpenRouter abstraction agent with test injection."""
     selected_model = model
     if selected_model is None:
-        configured_model = os.getenv("OPENROUTER_MODEL")
-        if configured_model is not None and configured_model.strip() != FROZEN_RECOVERY_MODEL:
+        configured_model = settings.openrouter_abstraction_model
+        if not configured_model or not configured_model.strip():
             raise RecoveryAbstractionModelError(
-                "OpenRouter model is frozen to "
-                f"{FROZEN_RECOVERY_MODEL!r}; configured OPENROUTER_MODEL does not match"
+                "openrouter_abstraction_model must be supplied through Settings or "
+                "OPENROUTER_ABSTRACTION_MODEL"
             )
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = settings.openrouter_api_key
         if not api_key or not api_key.strip():
             raise RecoveryAbstractionModelError(
                 "OpenRouter provider unavailable: OPENROUTER_API_KEY must be supplied "
-                "through the environment"
+                "through Settings or the environment"
             )
         selected_model = OpenAIChatModel(
-            FROZEN_RECOVERY_MODEL,
+            configured_model,
             provider=OpenRouterProvider(api_key=api_key),
         )
     return Agent(

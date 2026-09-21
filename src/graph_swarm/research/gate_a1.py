@@ -922,11 +922,33 @@ def main() -> int:
         metavar="RUN_ROOT",
         help="resume Gate A1 Acquisition R3 without rerunning started tasks",
     )
+    modes.add_argument(
+        "--acquire-r4",
+        action="store_true",
+        help="execute the explicitly versioned Gate A1 Acquisition R4",
+    )
+    modes.add_argument(
+        "--resume-acquisition-r4",
+        type=Path,
+        metavar="RUN_ROOT",
+        help="resume Gate A1 Acquisition R4 without rerunning started tasks",
+    )
+    modes.add_argument(
+        "--acquire-r5",
+        action="store_true",
+        help="execute the explicitly versioned Gate A1 Acquisition R5",
+    )
+    modes.add_argument(
+        "--resume-acquisition-r5",
+        type=Path,
+        metavar="RUN_ROOT",
+        help="resume Gate A1 Acquisition R5 without rerunning started tasks",
+    )
     parser.add_argument(
         "--max-new-tasks",
         type=int,
         metavar="COUNT",
-        help="start at most COUNT never-started R2 tasks in this invocation",
+        help="start at most COUNT never-started R2/R3/R4/R5 tasks in this invocation",
     )
     args = parser.parse_args()
     project_root = args.project_root.resolve()
@@ -935,9 +957,13 @@ def main() -> int:
         or args.resume_acquisition_r2 is not None
         or args.acquire_r3
         or args.resume_acquisition_r3 is not None
+        or args.acquire_r4
+        or args.resume_acquisition_r4 is not None
+        or args.acquire_r5
+        or args.resume_acquisition_r5 is not None
     ):
         parser.error(
-            "--max-new-tasks requires an R2 or R3 acquisition/resume mode"
+            "--max-new-tasks requires an R2, R3, R4, or R5 acquisition/resume mode"
         )
     if args.prepare_environments:
         print(prepare_gate_a1_environments(project_root))
@@ -964,6 +990,36 @@ def main() -> int:
         return 0 if status in {
             "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
             "READY_TO_RESUME_GATE_A1_ACQUISITION_R3",
+        } else 2
+    if args.acquire_r4 or args.resume_acquisition_r4 is not None:
+        from graph_swarm.research.gate_a1_acquisition import (
+            run_gate_a1_acquisition_r4,
+        )
+
+        status, artifact_root = run_gate_a1_acquisition_r4(
+            project_root,
+            resume_root=args.resume_acquisition_r4,
+            max_new_tasks=args.max_new_tasks,
+        )
+        print(f"{status} {artifact_root}")
+        return 0 if status in {
+            "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
+            "READY_TO_RESUME_GATE_A1_ACQUISITION_R4",
+        } else 2
+    if args.acquire_r5 or args.resume_acquisition_r5 is not None:
+        from graph_swarm.research.gate_a1_acquisition import (
+            run_gate_a1_acquisition_r5,
+        )
+
+        status, artifact_root = run_gate_a1_acquisition_r5(
+            project_root,
+            resume_root=args.resume_acquisition_r5,
+            max_new_tasks=args.max_new_tasks,
+        )
+        print(f"{status} {artifact_root}")
+        return 0 if status in {
+            "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
+            "READY_TO_RESUME_GATE_A1_ACQUISITION_R5",
         } else 2
     if args.acquire_r2 or args.resume_acquisition_r2 is not None:
         from graph_swarm.research.gate_a1_acquisition import (

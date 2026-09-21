@@ -21,3 +21,22 @@ def test_settings_loads_neo4j_values_from_environment(
     assert settings.neo4j_username == "example-user"
     assert settings.neo4j_password == "example-password"
     assert settings.neo4j_database == "example-db"
+
+
+def test_settings_loads_independent_openrouter_model_roles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NEO4J_URI", "neo4j://example")
+    monkeypatch.setenv("NEO4J_USERNAME", "user")
+    monkeypatch.setenv("NEO4J_PASSWORD", "password")
+    monkeypatch.setenv("NEO4J_DATABASE", "database")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "offline-key")
+    monkeypatch.setenv("OPENROUTER_CODING_MODEL", "coding/model")
+    monkeypatch.setenv("OPENROUTER_ABSTRACTION_MODEL", "abstraction/model")
+
+    settings_factory = cast(Callable[..., Settings], Settings)
+    settings = settings_factory(_env_file=None)
+
+    assert settings.openrouter_coding_model == "coding/model"
+    assert settings.openrouter_abstraction_model == "abstraction/model"
+    assert settings.openrouter_coding_model != settings.openrouter_abstraction_model

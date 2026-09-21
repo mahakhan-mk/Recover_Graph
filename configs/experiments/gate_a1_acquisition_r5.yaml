@@ -1,0 +1,17 @@
+experiment_id: GS-E003
+rollout: track_a_gate_a1_acquisition_r5
+config_version: gate-a1-r5-v1
+development: true
+pilot: true
+model_config: configs/models/openrouter_coding.yaml
+task_manifest: benchmark/manifests/pilot.jsonl
+task_problems: benchmark/annotations/recurrence_validation.csv
+artifact_root: research/evidence/results
+workspace_baseline_root: benchmark/workspaces
+workspace_execution_root: research/evidence/workspaces
+conditions:
+  - B0
+limits:
+  max_actions: 40
+  max_requests: 48
+  timeout_seconds: 600

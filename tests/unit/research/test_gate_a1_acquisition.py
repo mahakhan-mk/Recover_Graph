@@ -229,7 +229,8 @@ def test_preflight_has_zero_attempts_and_zero_provider_calls(
         return SimpleNamespace(
                 model_provider="openrouter",
                 openrouter_api_key="key",
-                openrouter_model=acquisition.FROZEN_CODING_MODEL,
+                openrouter_coding_model=acquisition.FROZEN_CODING_MODEL,
+                openrouter_abstraction_model=acquisition.FROZEN_RECOVERY_MODEL,
             neo4j_uri="neo4j://test",
             neo4j_username="user",
             neo4j_password="password",
@@ -263,16 +264,14 @@ def test_coding_agent_and_recovery_abstraction_models_are_independent(
         neo4j_username="user",
         neo4j_password="password",
         neo4j_database="database",
-        openrouter_model=acquisition.FROZEN_RECOVERY_MODEL,
-    )
+            openrouter_coding_model=acquisition.FROZEN_CODING_MODEL,
+            openrouter_abstraction_model=acquisition.FROZEN_RECOVERY_MODEL,
+        )
     monkeypatch.setattr(acquisition, "get_settings", lambda: base)
-    monkeypatch.setenv("OPENROUTER_MODEL", acquisition.FROZEN_RECOVERY_MODEL)
-    monkeypatch.setenv("OPENROUTER_CODING_MODEL", acquisition.FROZEN_CODING_MODEL)
-
     settings = acquisition._settings_for_agent()
 
-    assert settings.openrouter_model == acquisition.FROZEN_CODING_MODEL
-    assert settings.openrouter_model != acquisition.FROZEN_RECOVERY_MODEL
+    assert settings.openrouter_coding_model == acquisition.FROZEN_CODING_MODEL
+    assert settings.openrouter_abstraction_model == acquisition.FROZEN_RECOVERY_MODEL
     assert acquisition.FROZEN_RECOVERY_MODEL == "cohere/north-mini-code:free"
 
 
@@ -322,12 +321,10 @@ def test_r3_resolves_distinct_coding_model_and_frozen_abstraction(
         project_root / acquisition.ACQUISITION_R3_CONFIG,
         project_root=project_root,
     )
-    monkeypatch.setenv("OPENROUTER_MODEL", acquisition.FROZEN_RECOVERY_MODEL)
-
     settings = acquisition._settings_for_agent(coding_model=r3.model.model)
 
     assert r3.model.model == "cohere/north-mini-code:free"
-    assert settings.openrouter_model == "cohere/north-mini-code:free"
+    assert settings.openrouter_coding_model == "cohere/north-mini-code:free"
     assert acquisition.FROZEN_R3_CODING_MODEL == "cohere/north-mini-code:free"
     assert acquisition.FROZEN_RECOVERY_MODEL == "cohere/north-mini-code:free"
     assert r3.config.model_config_path == "configs/models/openrouter_coding_r3.yaml"
@@ -392,6 +389,340 @@ def test_r3_configuration_hash_differs_from_r2_for_same_runtime_inputs() -> None
     assert r3_hash == (
         "df6403270e7f0374a689ff0a310f1bf6b05236c3bbc5214d45dab654581b1f05"
     )
+
+
+def test_r4_freezes_models_and_changes_only_the_resource_budget(
+    project_root: Path,
+) -> None:
+    r3 = load_experiment_configuration(
+        project_root / acquisition.ACQUISITION_R3_CONFIG,
+        project_root=project_root,
+    )
+    r4 = load_experiment_configuration(
+        project_root / acquisition.ACQUISITION_R4_CONFIG,
+        project_root=project_root,
+    )
+
+    assert r4.model.model == "cohere/north-mini-code:free"
+    assert acquisition.FROZEN_R4_CODING_MODEL == "cohere/north-mini-code:free"
+    assert acquisition.FROZEN_RECOVERY_MODEL == "cohere/north-mini-code:free"
+    assert r4.config.model_config_path == r3.config.model_config_path
+    assert r4.model.prompt_version == r3.model.prompt_version == "v1"
+    assert r4.config.limits.max_actions == 40
+    assert r4.config.limits.max_requests == 48
+    assert r4.config.limits.timeout_seconds == 600
+    assert r3.config.limits.max_actions == 20
+    assert r3.config.limits.max_requests == 24
+    assert r3.config.limits.timeout_seconds == 300
+
+
+def test_r4_configuration_hash_is_stable_for_frozen_budget(
+    project_root: Path,
+) -> None:
+    r4 = load_experiment_configuration(
+        project_root / acquisition.ACQUISITION_R4_CONFIG,
+        project_root=project_root,
+    )
+    environments = {
+        task_id: IsolatedTaskEnvironment(
+            task_id=task_id,
+            python_executable=Path("docker"),
+            runtime_type="docker",
+            container_image=f"image:{task_id.lower()}",
+            container_python_executable="python",
+            environment_fingerprint=f"fingerprint-{task_id.lower()}",
+        )
+        for task_id in acquisition.ACQUISITION_TASK_IDS
+    }
+    settings = SimpleNamespace(openrouter_coding_model=acquisition.FROZEN_R4_CODING_MODEL)
+
+    first = acquisition._r2_configuration_hash(r4, settings, environments)
+    second = acquisition._r2_configuration_hash(r4, settings, environments)
+
+    assert first == second
+
+
+def test_r4_starts_fresh_at_t001_and_rejects_r3_and_r2_roots(
+    tmp_path: Path,
+    project_root: Path,
+) -> None:
+    r4_root = tmp_path / "acquisition-r4-20260921T000000Z"
+    r4_root.mkdir()
+    assert acquisition._r2_task_plan(r4_root, max_new_tasks=1) == (
+        ("GS-T001", "start"),
+    )
+
+    for revision in ("r3", "r2"):
+        prior_root = tmp_path / f"acquisition-{revision}-20260921T000000Z"
+        prior_root.mkdir()
+        sentinel = prior_root / "immutable-sentinel.txt"
+        sentinel.write_text(revision, encoding="utf-8")
+        with pytest.raises(acquisition.GateA1AcquisitionPreflightError):
+            acquisition.run_gate_a1_acquisition_r4(
+                project_root,
+                resume_root=prior_root,
+                max_new_tasks=1,
+            )
+        assert sentinel.read_text(encoding="utf-8") == revision
+
+
+def test_r5_uses_explicit_role_models_and_preserves_r4_budget(
+    project_root: Path,
+) -> None:
+    r4 = load_experiment_configuration(
+        project_root / acquisition.ACQUISITION_R4_CONFIG,
+        project_root=project_root,
+    )
+    r5 = load_experiment_configuration(
+        project_root / acquisition.ACQUISITION_R5_CONFIG,
+        project_root=project_root,
+    )
+
+    assert r5.config.limits.max_actions == r4.config.limits.max_actions == 40
+    assert r5.config.limits.max_requests == r4.config.limits.max_requests == 48
+    assert r5.config.limits.timeout_seconds == r4.config.limits.timeout_seconds == 600
+    assert r5.model.prompt_version == "v1"
+    assert r5.model.settings == {"temperature": 0}
+    assert r5.model.model == "runtime-selected-from-OPENROUTER_CODING_MODEL"
+    assert acquisition.ACQUISITION_R5_NAMESPACE == "GS-E003/Gate-A1/acquisition-r5"
+
+
+def test_r5_preflight_freezes_both_experimental_model_roles() -> None:
+    configuration = SimpleNamespace(model=SimpleNamespace(provider="openrouter"))
+
+    accepted = SimpleNamespace(
+        model_provider="openrouter",
+        openrouter_api_key="offline-key",
+        openrouter_coding_model=acquisition.R5_EXPECTED_CODING_MODEL,
+        openrouter_abstraction_model=acquisition.R5_EXPECTED_ABSTRACTION_MODEL,
+    )
+    acquisition._validate_preflight_configuration(
+        configuration,
+        accepted,
+        expected_coding_model=acquisition.R5_EXPECTED_CODING_MODEL,
+        expected_abstraction_model=acquisition.R5_EXPECTED_ABSTRACTION_MODEL,
+    )
+
+    with pytest.raises(
+        acquisition.GateA1AcquisitionPreflightError,
+        match="coding model",
+    ):
+        acquisition._validate_preflight_configuration(
+            configuration,
+            SimpleNamespace(
+                model_provider="openrouter",
+                openrouter_api_key="offline-key",
+                openrouter_coding_model="another/coding-model",
+                openrouter_abstraction_model=acquisition.R5_EXPECTED_ABSTRACTION_MODEL,
+            ),
+            expected_coding_model=acquisition.R5_EXPECTED_CODING_MODEL,
+            expected_abstraction_model=acquisition.R5_EXPECTED_ABSTRACTION_MODEL,
+        )
+
+    with pytest.raises(
+        acquisition.GateA1AcquisitionPreflightError,
+        match="abstraction model",
+    ):
+        acquisition._validate_preflight_configuration(
+            configuration,
+            SimpleNamespace(
+                model_provider="openrouter",
+                openrouter_api_key="offline-key",
+                openrouter_coding_model=acquisition.R5_EXPECTED_CODING_MODEL,
+                openrouter_abstraction_model="another/abstraction-model",
+            ),
+            expected_coding_model=acquisition.R5_EXPECTED_CODING_MODEL,
+            expected_abstraction_model=acquisition.R5_EXPECTED_ABSTRACTION_MODEL,
+        )
+
+
+def test_r5_starts_fresh_at_t001_and_rejects_prior_revision_roots(
+    tmp_path: Path,
+    project_root: Path,
+) -> None:
+    r5_root = tmp_path / "acquisition-r5-20260921T000000Z"
+    r5_root.mkdir()
+    assert acquisition._r2_task_plan(r5_root, max_new_tasks=1) == (
+        ("GS-T001", "start"),
+    )
+
+    for revision in ("r2", "r3", "r4"):
+        prior_root = tmp_path / f"acquisition-{revision}-20260921T000000Z"
+        prior_root.mkdir()
+        with pytest.raises(acquisition.GateA1AcquisitionPreflightError):
+            acquisition.run_gate_a1_acquisition_r5(
+                project_root,
+                resume_root=prior_root,
+                max_new_tasks=1,
+            )
+
+
+def test_r5_hash_changes_only_when_a_resolved_role_model_changes() -> None:
+    configuration = SimpleNamespace(
+        model=SimpleNamespace(settings={"temperature": 0}, prompt_version="v1"),
+        config=SimpleNamespace(
+            limits=SimpleNamespace(max_actions=40, max_requests=48, timeout_seconds=600)
+        ),
+    )
+    environments = {
+        task_id: IsolatedTaskEnvironment(
+            task_id=task_id,
+            python_executable=Path("docker"),
+            runtime_type="docker",
+            container_image=f"image:{task_id.lower()}",
+            container_python_executable="python",
+            environment_fingerprint=f"fingerprint-{task_id.lower()}",
+        )
+        for task_id in acquisition.ACQUISITION_TASK_IDS
+    }
+    base = SimpleNamespace(
+        openrouter_coding_model="nex-agi/nex-n2.5-pro:free",
+        openrouter_abstraction_model="cohere/north-mini-code:free",
+    )
+
+    coding_changed = SimpleNamespace(
+        openrouter_coding_model="another/coding-model",
+        openrouter_abstraction_model=base.openrouter_abstraction_model,
+    )
+    abstraction_changed = SimpleNamespace(
+        openrouter_coding_model=base.openrouter_coding_model,
+        openrouter_abstraction_model="another/abstraction-model",
+    )
+
+    base_hash = acquisition._r2_configuration_hash(configuration, base, environments)
+    assert base_hash != acquisition._r2_configuration_hash(
+        configuration, coding_changed, environments
+    )
+    assert base_hash != acquisition._r2_configuration_hash(
+        configuration, abstraction_changed, environments
+    )
+    assert base_hash == acquisition._r2_configuration_hash(configuration, base, environments)
+
+
+def test_r5_resume_rejects_model_role_mismatches() -> None:
+    manifest = {
+        "run_revision": "R5",
+        "namespace": acquisition.ACQUISITION_R5_NAMESPACE,
+        "task_ids": list(acquisition.ACQUISITION_TASK_IDS),
+        "coding_model": "nex-agi/nex-n2.5-pro:free",
+        "abstraction_model": "cohere/north-mini-code:free",
+        "configuration_hash": "hash",
+    }
+
+    with pytest.raises(
+        acquisition.GateA1AcquisitionPreflightError,
+        match="coding model configuration",
+    ):
+        acquisition._validate_r5_manifest(
+            manifest,
+            configuration_hash="hash",
+            coding_model="another/coding-model",
+            abstraction_model="cohere/north-mini-code:free",
+        )
+    with pytest.raises(
+        acquisition.GateA1AcquisitionPreflightError,
+        match="abstraction model configuration",
+    ):
+        acquisition._validate_r5_manifest(
+            manifest,
+            configuration_hash="hash",
+            coding_model="nex-agi/nex-n2.5-pro:free",
+            abstraction_model="another/abstraction-model",
+        )
+
+
+def test_r5_manifest_records_resolved_roles_without_api_key(
+    tmp_path: Path,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configuration = load_experiment_configuration(
+        project_root / acquisition.ACQUISITION_R5_CONFIG,
+        project_root=project_root,
+    )
+    tasks = [
+        BenchmarkTaskCase(
+            task=Task(
+                id=task_id,
+                problem_statement="Fix the benchmark issue.",
+                family_id="hidden-from-agent",
+                repository="repo",
+                chronological_index=index,
+            ),
+            occurrence_index=1,
+        )
+        for index, task_id in enumerate(acquisition.ACQUISITION_TASK_IDS, start=1)
+    ]
+    environments = {
+        task_id: IsolatedTaskEnvironment(
+            task_id=task_id,
+            python_executable=Path("docker"),
+            runtime_type="docker",
+            container_image=f"image:{task_id.lower()}",
+            container_python_executable="python",
+            environment_fingerprint=f"fingerprint-{task_id.lower()}",
+        )
+        for task_id in acquisition.ACQUISITION_TASK_IDS
+    }
+    secret = "offline-secret-that-must-not-be-persisted"
+    settings = SimpleNamespace(
+        model_provider="openrouter",
+        openrouter_api_key=secret,
+        openrouter_coding_model="nex-agi/nex-n2.5-pro:free",
+        openrouter_abstraction_model="cohere/north-mini-code:free",
+        neo4j_uri="neo4j://test",
+        neo4j_username="user",
+        neo4j_password="password",
+        neo4j_database="database",
+    )
+
+    class FakeRepository:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def verify_connectivity(self) -> None:
+            pass
+
+        def ensure_recovery_pattern_vector_index(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        acquisition,
+        "load_experiment_configuration",
+        lambda *_args, **_kwargs: configuration,
+    )
+    monkeypatch.setattr(acquisition, "_configured_runtime", lambda loaded, *_args: loaded)
+    monkeypatch.setattr(acquisition, "_task_cases", lambda *_args, **_kwargs: tasks)
+    monkeypatch.setattr(
+        acquisition,
+        "_preflight",
+        lambda **_kwargs: (environments, {}),
+    )
+    monkeypatch.setattr(acquisition, "_settings_for_agent", lambda: settings)
+    monkeypatch.setattr(acquisition, "Neo4jRepository", FakeRepository)
+    def fake_run_task(**kwargs: Any) -> tuple[dict[str, object], None, bool]:
+        case = cast(BenchmarkTaskCase, kwargs["case"])
+        return {"task_id": case.task.id, "status": "acquired_success"}, None, True
+
+    monkeypatch.setattr(acquisition, "_run_task", fake_run_task)
+
+    status, artifact_root = acquisition.run_gate_a1_acquisition_r5(
+        tmp_path,
+        max_new_tasks=1,
+    )
+
+    manifest_text = (artifact_root / "manifest.json").read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    assert status == "READY_TO_RESUME_GATE_A1_ACQUISITION_R5"
+    assert manifest["coding_model"] == settings.openrouter_coding_model
+    assert manifest["abstraction_model"] == settings.openrouter_abstraction_model
+    assert secret not in manifest_text
+    assert secret not in (
+        project_root / acquisition.ACQUISITION_R5_CONFIG
+    ).read_text(encoding="utf-8")
 
 
 def test_r3_starts_with_fresh_t001_plan_and_rejects_r2_resume_root(

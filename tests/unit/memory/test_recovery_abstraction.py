@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 from pydantic import ValidationError
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
 
 from graph_swarm.domain.action import ActionResult
@@ -358,12 +359,13 @@ def test_model_failure_is_explicit_and_does_not_persist() -> None:
     repository.save_recovery_pattern.assert_not_called()
 
 
-def test_configured_openrouter_model_must_remain_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.setenv("OPENROUTER_MODEL", "another/model")
-
-    with pytest.raises(RecoveryAbstractionModelError, match="frozen"):
-        create_recovery_abstraction_agent(make_settings())
+def test_configured_abstraction_model_is_role_specific() -> None:
+    settings = make_settings().model_copy(
+        update={"openrouter_abstraction_model": "another/model"}
+    )
+    agent = create_recovery_abstraction_agent(settings)
+    assert isinstance(agent.model, OpenAIChatModel)
+    assert agent.model.model_name == "another/model"
 
 
 def test_malformed_structured_output_is_explicit_and_does_not_persist() -> None:
