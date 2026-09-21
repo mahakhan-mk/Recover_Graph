@@ -27,6 +27,7 @@ from graph_swarm.agent.advisory import (
     record_post_advice_action,
 )
 from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.model_output import model_visible_action_result
 from graph_swarm.agent.pacing import ProviderRequestPacing, attach_provider_request_pacing
 from graph_swarm.agent.prompts import ROLLOUT1_SYSTEM_PROMPT
 from graph_swarm.agent.tools.read_file import (
@@ -141,7 +142,7 @@ def create_coding_agent(
             action_id=action.id,
         )
         record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
-        return result
+        return model_visible_action_result(result, ctx.deps.model_output_telemetry)
 
     agent.tool(read_file)
 
@@ -159,7 +160,7 @@ def create_coding_agent(
         )
         result = controlled_write_file(ctx.deps, path, content, action_id=action.id)
         record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
-        return result
+        return model_visible_action_result(result, ctx.deps.model_output_telemetry)
 
     agent.tool(write_file)
 
@@ -172,7 +173,7 @@ def create_coding_agent(
             action_id=action.id,
         )
         record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
-        return result
+        return model_visible_action_result(result, ctx.deps.model_output_telemetry)
 
     agent.tool(run_tests)
 
@@ -194,7 +195,7 @@ def create_coding_agent(
             action_id=action.id,
         )
         record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
-        return result
+        return model_visible_action_result(result, ctx.deps.model_output_telemetry)
 
     agent.tool(run_command)
 

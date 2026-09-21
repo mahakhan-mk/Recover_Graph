@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -19,6 +20,11 @@ from graph_swarm.agent.coding_agent import (
     run_coding_agent_async,
 )
 from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.model_output import (
+    MAX_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+    MODEL_OUTPUT_TRUNCATION_MARKER,
+    model_visible_action_result,
+)
 from graph_swarm.agent.prompts import ROLLOUT1_SYSTEM_PROMPT
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.settings import Settings
@@ -278,3 +284,76 @@ def test_offline_agent_preserves_controlled_read_failure(tmp_path: Path) -> None
     assert len(tool_returns) == 1
     assert isinstance(tool_returns[0].content, ActionResult)
     assert tool_returns[0].content.error == "file does not exist"
+
+
+def test_model_visible_tool_output_is_bounded_without_mutating_durable_result(
+    tmp_path: Path,
+) -> None:
+    started = datetime.now(UTC)
+    raw = "beginning\n" + ("x" * (MAX_MODEL_VISIBLE_TOOL_OUTPUT_CHARS + 100)) + "\nending"
+    durable = ActionResult(
+        action_id="action-long",
+        tool_name="run_command",
+        success=True,
+        exit_code=0,
+        output=raw,
+        started_at=started,
+        completed_at=started,
+    )
+    dependencies = make_dependencies(tmp_path)
+
+    visible = model_visible_action_result(durable, dependencies.model_output_telemetry)
+
+    assert durable.output == raw
+    assert visible.output is not None
+    assert len(visible.output) == MAX_MODEL_VISIBLE_TOOL_OUTPUT_CHARS
+    assert visible.output.startswith("beginning")
+    assert visible.output.endswith("ending")
+    assert MODEL_OUTPUT_TRUNCATION_MARKER in visible.output
+    assert dependencies.model_output_telemetry == [
+        {
+            "tool_name": "run_command",
+            "action_id": "action-long",
+            "raw_output_chars": len(raw),
+            "model_visible_output_chars": MAX_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+            "output_truncated": True,
+        }
+    ]
+
+
+def test_model_visible_output_and_error_share_one_total_cap(tmp_path: Path) -> None:
+    started = datetime.now(UTC)
+    raw_output = "output-begin\n" + ("o" * MAX_MODEL_VISIBLE_TOOL_OUTPUT_CHARS) + "\noutput-end"
+    raw_error = "error-begin\n" + ("e" * MAX_MODEL_VISIBLE_TOOL_OUTPUT_CHARS) + "\nerror-end"
+    durable = ActionResult(
+        action_id="action-both-long",
+        tool_name="run_command",
+        success=False,
+        exit_code=1,
+        output=raw_output,
+        error=raw_error,
+        started_at=started,
+        completed_at=started,
+    )
+    dependencies = make_dependencies(tmp_path)
+
+    visible = model_visible_action_result(durable, dependencies.model_output_telemetry)
+
+    assert durable.output == raw_output
+    assert durable.error == raw_error
+    assert visible.output is not None
+    assert visible.error is not None
+    assert len(visible.output) + len(visible.error) <= MAX_MODEL_VISIBLE_TOOL_OUTPUT_CHARS
+    assert visible.output.startswith("output-begin")
+    assert visible.error.startswith("error-begin")
+    assert visible.output.endswith("output-end")
+    assert visible.error.endswith("error-end")
+    assert MODEL_OUTPUT_TRUNCATION_MARKER in visible.output
+    assert MODEL_OUTPUT_TRUNCATION_MARKER in visible.error
+    assert dependencies.model_output_telemetry[-1] == {
+        "tool_name": "run_command",
+        "action_id": "action-both-long",
+        "raw_output_chars": len(raw_output) + len(raw_error),
+        "model_visible_output_chars": len(visible.output) + len(visible.error),
+        "output_truncated": True,
+    }

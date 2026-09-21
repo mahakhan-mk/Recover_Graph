@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -632,7 +633,7 @@ def test_container_agent_runtime_separates_docker_cli_and_python() -> None:
     assert runtime.python_executable is None
 
 
-def test_local_venv_objective_command_is_unchanged(
+def test_local_venv_objective_command_disables_coverage(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -660,8 +661,139 @@ def test_local_venv_objective_command_is_unchanged(
     objective(task_case.task, tmp_path)
 
     assert commands == [
-        ("venv-python", "-m", "pytest", "test_missing.py", "-q")
+        ("venv-python", "-m", "pytest", "--no-cov", "test_missing.py", "-q")
     ]
+
+
+def test_objective_command_disables_coverage_thresholds_only_at_objective_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_case = _case(2)
+    objective = FrozenSWEsmithObjective(
+        {"GS-T006": FrozenSWEsmithCase("example", ("test_target.py",), "")},
+        {"GS-T006": IsolatedTaskEnvironment("GS-T006", Path("venv-python"))},
+    )
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
+        commands.append(command)
+        return type(
+            "Completed",
+            (),
+            {"returncode": 0, "stdout": "1 passed", "stderr": "coverage fail-under ignored"},
+        )()
+
+    monkeypatch.setattr(sprint3.subprocess, "run", fake_run)
+
+    assert objective(task_case.task, tmp_path) is True
+    assert "--no-cov" in commands[0]
+    assert objective.observations[-1].status == "passed"
+
+
+def test_objective_preflight_falls_back_when_no_cov_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_case = _case(2)
+    objective = FrozenSWEsmithObjective(
+        {"GS-T006": FrozenSWEsmithCase("example", ("test_target.py",), "")},
+        {"GS-T006": IsolatedTaskEnvironment("GS-T006", Path("venv-python"))},
+        objective_coverage_policy="no_cov",
+    )
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
+        commands.append(command)
+        if len(commands) == 1:
+            return type(
+                "Completed",
+                (),
+                {"returncode": 2, "stdout": "", "stderr": "unknown option"},
+            )()
+        return type(
+            "Completed", (), {"returncode": 1, "stdout": "FAILED test_target.py", "stderr": ""}
+        )()
+
+    monkeypatch.setattr(sprint3.subprocess, "run", fake_run)
+
+    observation = objective.preflight(task_case.task, tmp_path)
+
+    assert observation.status == "test_failure"
+    assert commands[0][0:4] == ("venv-python", "-m", "pytest", "--no-cov")
+    assert commands[0][-1] == "--help"
+    assert "-o" in commands[1]
+    assert "addopts=" in commands[1]
+
+
+def test_git_worktree_materialization_preserves_attributes_mutation_binary_and_modes(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    subprocess.run(["git", "-C", str(workspace), "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "-C", str(workspace), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace), "config", "user.name", "Test"],
+        check=True,
+    )
+    normal_file = workspace / "normal.py"
+    sensitive_file = workspace / "sensitive.txt"
+    binary_file = workspace / "image.bin"
+    attributes_file = workspace / ".gitattributes"
+    normal_file.write_bytes(b"print('baseline')\n")
+    sensitive_file.write_bytes(b"line one\nline two\n")
+    binary = b"\x89PNG\r\n\x00\xff\r\n"
+    binary_file.write_bytes(binary)
+    attributes_file.write_text("sensitive.txt text eol=crlf\n", encoding="utf-8")
+    normal_file.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    subprocess.run(
+        ["git", "-C", str(workspace), "add", "."],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace), "update-index", "--chmod=+x", "normal.py"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace), "commit", "-qm", "baseline"],
+        check=True,
+    )
+    index_blob = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", ":normal.py"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    normal_file.write_bytes(b"print('baseline')\r\n")
+    mode_before = stat.S_IMODE(normal_file.stat().st_mode)
+
+    prepared = sprint3._materialize_git_worktree(workspace)  # pyright: ignore[reportPrivateUsage]
+
+    assert prepared.returncode == 0
+    assert normal_file.read_bytes() == b"print('baseline')\n"
+    assert sensitive_file.read_bytes() == b"line one\r\nline two\r\n"
+    assert binary_file.read_bytes() == binary
+    assert stat.S_IMODE(normal_file.stat().st_mode) == mode_before
+    assert (
+        subprocess.run(
+            ["git", "-C", str(workspace), "rev-parse", ":normal.py"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        == index_blob
+    )
+    assert subprocess.run(
+        ["git", "-C", str(workspace), "diff", "--cached", "--quiet"],
+        check=False,
+    ).returncode == 0
+
+    normal_file.write_bytes(b"print('GS-T001 mutation')\n")
+    assert b"GS-T001 mutation" in normal_file.read_bytes()
 
 
 def test_preflight_does_not_validate_unexpectedly_passing_mutation(

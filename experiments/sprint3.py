@@ -89,8 +89,13 @@ class BenchmarkPreflightError(RuntimeError):
 # SunPy's frozen image omits its repository-declared build/runtime
 # ``setuptools_scm`` dependency, which prevents pytest collection.  Keep the
 # repair task-scoped so the other frozen environments remain unchanged.
+# Stackprinter's frozen repository has no declared dependency metadata, but
+# its frozen objective imports numpy through tests/source.py.  Pin the
+# validated resolver result for reproducibility because the repository has no
+# dependency version constraint for this objective-only requirement.
 TASK_DEPENDENCY_OVERLAYS: Mapping[str, Sequence[str]] = {
     "GS-T003": ("setuptools_scm[toml]>=8.0.1",),
+    "GS-T005": ("numpy==2.5.3",),
 }
 
 
@@ -181,48 +186,25 @@ class FrozenSWEsmithObjective:
         self,
         cases: Mapping[str, FrozenSWEsmithCase],
         environments: Mapping[str, IsolatedTaskEnvironment],
+        *,
+        objective_coverage_policy: str | None = None,
     ) -> None:
         self.cases = cases
         self.environments = environments
+        self._validate_coverage = objective_coverage_policy is not None
+        self.objective_coverage_policy = objective_coverage_policy or "no_cov"
+        self._coverage_policy_by_task: dict[str, str] = {}
         self.observations: list[ObjectiveObservation] = []
 
     def __call__(self, task: Any, workspace: Path) -> bool:
-        case = self.cases[task.id]
         environment = self.environments.get(task.id)
         if environment is None:
             raise BenchmarkPreflightError(
                 f"no isolated SWE-smith executable was selected for {task.id}"
             )
-        pytest_arguments = (
-            "-m",
-            "pytest",
-            *(_pytest_target(test_id) for test_id in case.fail_to_pass),
-            "-q",
-        )
-        if environment.runtime_type == "docker":
-            if not environment.container_image:
-                raise BenchmarkPreflightError(
-                    f"container image is missing for {task.id}"
-                )
-            container_python = environment.container_python_executable or "python"
-            command = (
-                "docker",
-                "run",
-                "--rm",
-                "--network",
-                "none",
-                "--mount",
-                f"type=bind,source={workspace.resolve()},target=/workspace",
-                "--workdir",
-                "/workspace",
-                "--env",
-                "PYTHONPATH=/workspace/src:/workspace",
-                environment.container_image,
-                container_python,
-                *pytest_arguments,
-            )
-        else:
-            command = (str(environment.python_executable), *pytest_arguments)
+        if self._validate_coverage and task.id not in self._coverage_policy_by_task:
+            self._validate_coverage_policy(task.id, workspace)
+        command = self._objective_command(task.id, workspace, environment)
         condition = _condition_from_workspace(workspace)
         started = datetime.now(UTC)
         try:
@@ -279,6 +261,8 @@ class FrozenSWEsmithObjective:
         workspace: Path,
     ) -> ObjectiveObservation:
         """Verify the mutated task can collect and execute before model calls."""
+        if self._validate_coverage and self.objective_coverage_policy == "no_cov":
+            self._validate_coverage_policy(task.id, workspace)
         before = len(self.observations)
         self(task, workspace)
         observation = self.observations[-1]
@@ -305,6 +289,91 @@ class FrozenSWEsmithObjective:
                 f"SWE-smith preflight produced invalid evidence for {task.id}"
             )
         return observation
+
+    def _pytest_arguments(self, task_id: str) -> tuple[str, ...]:
+        case = self.cases[task_id]
+        coverage_policy = self._coverage_policy_by_task.get(
+            task_id,
+            self.objective_coverage_policy,
+        )
+        if coverage_policy == "no_cov":
+            coverage_arguments = ("--no-cov",)
+        elif coverage_policy == "no_cov_addopts":
+            coverage_arguments = ("-o", "addopts=")
+        else:
+            raise BenchmarkPreflightError(
+                f"unsupported objective coverage policy: {coverage_policy}"
+            )
+        return (
+            "-m",
+            "pytest",
+            *coverage_arguments,
+            *(_pytest_target(test_id) for test_id in case.fail_to_pass),
+            "-q",
+        )
+
+    def _objective_command(
+        self,
+        task_id: str,
+        workspace: Path,
+        environment: IsolatedTaskEnvironment,
+        *,
+        pytest_arguments: tuple[str, ...] | None = None,
+    ) -> tuple[str, ...]:
+        arguments = pytest_arguments or self._pytest_arguments(task_id)
+        if environment.runtime_type == "docker":
+            if not environment.container_image:
+                raise BenchmarkPreflightError(
+                    f"container image is missing for {task_id}"
+                )
+            container_python = environment.container_python_executable or "python"
+            return (
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--mount",
+                f"type=bind,source={workspace.resolve()},target=/workspace",
+                "--workdir",
+                "/workspace",
+                "--env",
+                "PYTHONPATH=/workspace/src:/workspace",
+                environment.container_image,
+                container_python,
+                *arguments,
+            )
+        return (str(environment.python_executable), *arguments)
+
+    def _validate_coverage_policy(self, task_id: str, workspace: Path) -> None:
+        environment = self.environments[task_id]
+        probe_arguments = ("-m", "pytest", "--no-cov", "--help")
+        command = self._objective_command(
+            task_id,
+            workspace,
+            environment,
+            pytest_arguments=probe_arguments,
+        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=workspace,
+                env=workspace_process_environment(workspace),
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise BenchmarkPreflightError(
+                f"objective coverage policy probe failed for {task_id}: {error}"
+            ) from error
+        if completed.returncode == 0:
+            self._coverage_policy_by_task[task_id] = "no_cov"
+            return
+        self._coverage_policy_by_task[task_id] = "no_cov_addopts"
 
 
 def load_frozen_swesmith_cases(
@@ -1507,6 +1576,12 @@ def _materialize_workspace(
     destination = execution_root / "GS-E003" / condition / task.id / uuid.uuid4().hex / "workspace"
     destination.parent.mkdir(parents=True, exist_ok=False)
     shutil.copytree(source, destination, dirs_exist_ok=False)
+    materialized = _materialize_git_worktree(destination)
+    if materialized.returncode != 0:
+        raise RuntimeError(
+            f"could not materialize benchmark Git worktree for {task.id}: "
+            f"{materialized.stderr.strip()}"
+        )
     refreshed = subprocess.run(
         ["git", "-C", str(destination), "update-index", "--refresh"],
         check=False,
@@ -1523,6 +1598,74 @@ def _materialize_workspace(
             f"could not materialize frozen SWE-smith task {task.id}: {applied.stderr.strip()}"
         )
     return destination
+
+
+def _materialize_git_worktree(workspace: Path) -> subprocess.CompletedProcess[str]:
+    """Materialize the untouched tracked baseline through Git attributes."""
+    materialized = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
+            "checkout",
+            "--force",
+            "--",
+            ".",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if materialized.returncode == 0:
+        _apply_explicit_git_eol_attributes(workspace)
+    return materialized
+
+
+def _apply_explicit_git_eol_attributes(workspace: Path) -> None:
+    """Apply only explicit tracked ``eol`` attributes after Git checkout."""
+    tracked = subprocess.run(
+        ["git", "-C", str(workspace), "ls-files", "-z"],
+        check=False,
+        capture_output=True,
+    )
+    if tracked.returncode != 0:
+        raise RuntimeError(f"could not inspect Git tracked files: {tracked.stderr!r}")
+    candidates: list[str] = []
+    for raw_path in tracked.stdout.split(b"\0"):
+        if not raw_path:
+            continue
+        candidates.append(raw_path.decode("utf-8"))
+
+    for offset in range(0, len(candidates), 200):
+        batch = candidates[offset : offset + 200]
+        attributes = subprocess.run(
+            ["git", "-C", str(workspace), "check-attr", "-z", "eol", "--", *batch],
+            check=False,
+            capture_output=True,
+        )
+        if attributes.returncode != 0:
+            raise RuntimeError(f"could not inspect Git eol attributes: {attributes.stderr!r}")
+        fields = attributes.stdout.split(b"\0")
+        for index in range(0, len(fields) - 2, 3):
+            relative_path = fields[index].decode("utf-8")
+            value = fields[index + 2].decode("utf-8")
+            if value not in {"crlf", "lf"}:
+                continue
+            path = workspace / Path(relative_path)
+            content = path.read_bytes()
+            normalized = content.replace(b"\r\n", b"\n")
+            if value == "crlf":
+                normalized = normalized.replace(b"\n", b"\r\n")
+            if normalized == content:
+                continue
+            metadata = path.stat()
+            path.write_bytes(normalized)
+            os.chmod(path, metadata.st_mode)
+            os.utime(path, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
 
 
 def _make_workspace_resolver(
@@ -1930,7 +2073,15 @@ def run_preflight(
         for case in cases
     }
     _verify_frozen_patches(cases, baseline_root, frozen_cases)
-    objective = FrozenSWEsmithObjective(frozen_cases, environments)
+    objective = FrozenSWEsmithObjective(
+        frozen_cases,
+        environments,
+        objective_coverage_policy=getattr(
+            b0_config.config,
+            "objective_coverage_policy",
+            None,
+        ),
+    )
     observations: list[dict[str, Any]] = []
     for case in cases:
         workspace = _materialize_workspace(
@@ -2217,4 +2368,3 @@ def _write_exclusive(path: Path, content: Any) -> None:
         handle.write(serialized)
         if not serialized.endswith("\n"):
             handle.write("\n")
-

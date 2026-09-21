@@ -631,6 +631,219 @@ def test_r5_resume_rejects_model_role_mismatches() -> None:
         )
 
 
+def test_r6_freezes_r5_roles_and_preserves_budget_with_a_new_revision_reason(
+    project_root: Path,
+) -> None:
+    r5 = load_experiment_configuration(
+        project_root / acquisition.ACQUISITION_R5_CONFIG,
+        project_root=project_root,
+    )
+    r6 = load_experiment_configuration(
+        project_root / acquisition.ACQUISITION_R6_CONFIG,
+        project_root=project_root,
+    )
+
+    assert r6.config.limits == r5.config.limits
+    assert r6.model.model == r5.model.model
+    assert r6.config.revision_reason == (
+        "harness_hardening_after_r5_context_and_evaluator_failures"
+    )
+    assert r6.config.model_visible_tool_output_chars == 16000
+    assert r6.config.objective_coverage_policy == "no_cov"
+    assert r6.config.workspace_line_ending_policy == "git_aware_line_endings_v1"
+    assert acquisition.ACQUISITION_R6_NAMESPACE == "GS-E003/Gate-A1/acquisition-r6"
+
+
+def test_r6_accepts_only_the_frozen_role_models() -> None:
+    configuration = SimpleNamespace(model=SimpleNamespace(provider="openrouter"))
+    accepted = SimpleNamespace(
+        model_provider="openrouter",
+        openrouter_api_key="offline-key",
+        openrouter_coding_model="nex-agi/nex-n2.5-pro:free",
+        openrouter_abstraction_model="cohere/north-mini-code:free",
+    )
+
+    acquisition._validate_preflight_configuration(
+        configuration,
+        accepted,
+        expected_coding_model=acquisition.R6_EXPECTED_CODING_MODEL,
+        expected_abstraction_model=acquisition.R6_EXPECTED_ABSTRACTION_MODEL,
+    )
+
+    for field, value in (
+        ("openrouter_coding_model", "different/coding-model"),
+        ("openrouter_abstraction_model", "different/abstraction-model"),
+    ):
+        rejected = SimpleNamespace(**vars(accepted))
+        setattr(rejected, field, value)
+        with pytest.raises(acquisition.GateA1AcquisitionPreflightError):
+            acquisition._validate_preflight_configuration(
+                configuration,
+                rejected,
+                expected_coding_model=acquisition.R6_EXPECTED_CODING_MODEL,
+                expected_abstraction_model=acquisition.R6_EXPECTED_ABSTRACTION_MODEL,
+            )
+
+
+def test_r6_configuration_hash_includes_revision_configuration_metadata() -> None:
+    configuration = SimpleNamespace(
+        model=SimpleNamespace(settings={"temperature": 0}, prompt_version="v1"),
+        config=SimpleNamespace(
+            limits=SimpleNamespace(max_actions=40, max_requests=48, timeout_seconds=600),
+            config_version="gate-a1-r6-v1",
+            revision_reason="harness_hardening_after_r5_context_and_evaluator_failures",
+            model_visible_tool_output_chars=16000,
+            objective_coverage_policy="no_cov",
+            workspace_line_ending_policy="git_aware_line_endings_v1",
+        ),
+    )
+    environments = {
+        task_id: IsolatedTaskEnvironment(
+            task_id=task_id,
+            python_executable=Path("docker"),
+            runtime_type="docker",
+            container_image=f"image:{task_id.lower()}",
+            container_python_executable="python",
+            environment_fingerprint=f"fingerprint-{task_id.lower()}",
+        )
+        for task_id in acquisition.ACQUISITION_TASK_IDS
+    }
+    settings = SimpleNamespace(
+        openrouter_coding_model=acquisition.R5_EXPECTED_CODING_MODEL,
+        openrouter_abstraction_model=acquisition.R5_EXPECTED_ABSTRACTION_MODEL,
+    )
+
+    r6_hash = acquisition._r2_configuration_hash(
+        configuration, settings, environments, revision="R6"
+    )
+    changed_reason = SimpleNamespace(
+        model=configuration.model,
+        config=SimpleNamespace(
+            limits=configuration.config.limits,
+            config_version=configuration.config.config_version,
+            revision_reason="different-reason",
+            model_visible_tool_output_chars=16000,
+            objective_coverage_policy="no_cov",
+            workspace_line_ending_policy="git_aware_line_endings_v1",
+        ),
+    )
+    assert r6_hash != acquisition._r2_configuration_hash(
+        changed_reason, settings, environments, revision="R6"
+    )
+
+    changed_policy = SimpleNamespace(
+        model=configuration.model,
+        config=SimpleNamespace(
+            limits=configuration.config.limits,
+            config_version=configuration.config.config_version,
+            revision_reason=configuration.config.revision_reason,
+            model_visible_tool_output_chars=16001,
+            objective_coverage_policy="no_cov",
+            workspace_line_ending_policy="git_aware_line_endings_v1",
+        ),
+    )
+    assert r6_hash != acquisition._r2_configuration_hash(
+        changed_policy, settings, environments, revision="R6"
+    )
+
+
+def test_r6_resume_rejects_harness_policy_mismatches() -> None:
+    manifest = {
+        "run_revision": "R6",
+        "namespace": acquisition.ACQUISITION_R6_NAMESPACE,
+        "task_ids": list(acquisition.ACQUISITION_TASK_IDS),
+        "coding_model": acquisition.R6_EXPECTED_CODING_MODEL,
+        "abstraction_model": acquisition.R6_EXPECTED_ABSTRACTION_MODEL,
+        "configuration_hash": "hash",
+        "revision_reason": acquisition.R6_REVISION_REASON,
+        "model_visible_tool_output_chars": 16000,
+        "objective_coverage_policy": "no_cov",
+        "workspace_line_ending_policy": "git_aware_line_endings_v1",
+    }
+
+    for field, value in (
+        ("model_visible_tool_output_chars", 8000),
+        ("objective_coverage_policy", "coverage_enabled"),
+        ("workspace_line_ending_policy", "blanket_utf8_rewrite_v1"),
+    ):
+        changed = dict(manifest)
+        changed[field] = value
+        with pytest.raises(acquisition.GateA1AcquisitionPreflightError, match=field):
+            acquisition._validate_r6_manifest(
+                changed,
+                configuration_hash="hash",
+                coding_model=acquisition.R6_EXPECTED_CODING_MODEL,
+                abstraction_model=acquisition.R6_EXPECTED_ABSTRACTION_MODEL,
+            )
+
+
+def test_r6_starts_fresh_and_rejects_r2_through_r5_resume_roots(
+    tmp_path: Path,
+    project_root: Path,
+) -> None:
+    r6_root = tmp_path / "acquisition-r6-20260921T000000Z"
+    r6_root.mkdir()
+    assert acquisition._r2_task_plan(r6_root, max_new_tasks=1) == (("GS-T001", "start"),)
+
+    for revision in ("r2", "r3", "r4", "r5"):
+        prior_root = tmp_path / f"acquisition-{revision}-20260921T000000Z"
+        prior_root.mkdir()
+        with pytest.raises(acquisition.GateA1AcquisitionPreflightError):
+            acquisition.run_gate_a1_acquisition_r6(
+                project_root,
+                resume_root=prior_root,
+                max_new_tasks=1,
+            )
+
+
+def test_r6_model_mismatch_blocks_before_provider_or_repository_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        acquisition,
+        "_settings_for_agent",
+        lambda: SimpleNamespace(
+            model_provider="openrouter",
+            openrouter_api_key="offline-key",
+            openrouter_coding_model="wrong/coding-model",
+            openrouter_abstraction_model=acquisition.R5_EXPECTED_ABSTRACTION_MODEL,
+        ),
+    )
+    monkeypatch.setattr(
+        acquisition,
+        "load_experiment_configuration",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            model=SimpleNamespace(provider="openrouter"),
+            config=SimpleNamespace(
+                limits=SimpleNamespace(max_actions=40, max_requests=48, timeout_seconds=600),
+                revision_reason="harness_hardening_after_r5_context_and_evaluator_failures",
+                model_visible_tool_output_chars=16000,
+                objective_coverage_policy="no_cov",
+                workspace_line_ending_policy="git_aware_line_endings_v1",
+            ),
+        ),
+    )
+    monkeypatch.setattr(acquisition, "_configured_runtime", lambda configuration, *_: configuration)
+    monkeypatch.setattr(acquisition, "_task_cases", lambda *_args: ())
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("provider/repository execution boundary was reached")
+
+    monkeypatch.setattr(acquisition, "_preflight", fail_if_called)
+    monkeypatch.setattr(acquisition, "Neo4jRepository", fail_if_called)
+
+    status, artifact_root = acquisition.run_gate_a1_acquisition_r6(
+        tmp_path,
+        max_new_tasks=1,
+    )
+
+    assert status == "BLOCKED_GATE_A1_ACQUISITION_R6"
+    manifest = json.loads((artifact_root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["new_tasks_started"] == 0
+    assert "coding model" in manifest["errors"][0]["message"]
+
+
 def test_r5_manifest_records_resolved_roles_without_api_key(
     tmp_path: Path,
     project_root: Path,

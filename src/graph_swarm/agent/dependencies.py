@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Literal
 
+from graph_swarm.agent.model_output import ModelOutputTelemetry
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.behavior import BehaviorChangeEvidence
 from graph_swarm.domain.events import AdviceEvent, AgentEvent
@@ -74,6 +75,9 @@ class AgentDependencies:
     )
     advisory_errors: list[str] = field(default_factory=lambda: list[str]())
     artifact_errors: list[str] = field(default_factory=lambda: list[str]())
+    model_output_telemetry: list[ModelOutputTelemetry] = field(
+        default_factory=lambda: list[ModelOutputTelemetry]()
+    )
     _advised_action_keys: set[str] = field(default_factory=lambda: set[str](), repr=False)
     _pending_advice_events: list[AdviceEvent] = field(
         default_factory=lambda: list[AdviceEvent](), repr=False

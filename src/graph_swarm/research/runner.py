@@ -116,6 +116,10 @@ class ExperimentConfiguration(BaseModel):
     workspace_baseline_root: str = "benchmark/workspaces"
     workspace_execution_root: str = "research/evidence/workspaces"
     config_version: str = "v1"
+    revision_reason: str | None = None
+    model_visible_tool_output_chars: int | None = Field(default=None, gt=0)
+    objective_coverage_policy: str | None = None
+    workspace_line_ending_policy: str | None = None
     development: bool = False
     pilot: bool = False
 
@@ -124,6 +128,13 @@ class ExperimentConfiguration(BaseModel):
     def require_non_empty_text(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("experiment configuration text must be non-empty")
+        return value
+
+    @field_validator("objective_coverage_policy", "workspace_line_ending_policy")
+    @classmethod
+    def require_optional_policy_text(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("configuration policy text must be non-empty when supplied")
         return value
 
     @model_validator(mode="after")

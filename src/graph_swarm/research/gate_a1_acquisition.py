@@ -79,11 +79,20 @@ ACQUISITION_R4_CONFIG = "configs/experiments/gate_a1_acquisition_r4.yaml"
 ACQUISITION_R5_NAMESPACE = "GS-E003/Gate-A1/acquisition-r5"
 ACQUISITION_R5_CONDITION = "gate_a1_acquisition_r5"
 ACQUISITION_R5_CONFIG = "configs/experiments/gate_a1_acquisition_r5.yaml"
+ACQUISITION_R6_NAMESPACE = "GS-E003/Gate-A1/acquisition-r6"
+ACQUISITION_R6_CONDITION = "gate_a1_acquisition_r6"
+ACQUISITION_R6_CONFIG = "configs/experiments/gate_a1_acquisition_r6.yaml"
 FROZEN_CODING_MODEL = "qwen/qwen3-coder:free"
 FROZEN_R3_CODING_MODEL = "cohere/north-mini-code:free"
 FROZEN_R4_CODING_MODEL = "cohere/north-mini-code:free"
 R5_EXPECTED_CODING_MODEL = "nex-agi/nex-n2.5-pro:free"
 R5_EXPECTED_ABSTRACTION_MODEL = "cohere/north-mini-code:free"
+R6_EXPECTED_CODING_MODEL = R5_EXPECTED_CODING_MODEL
+R6_EXPECTED_ABSTRACTION_MODEL = R5_EXPECTED_ABSTRACTION_MODEL
+R6_REVISION_REASON = "harness_hardening_after_r5_context_and_evaluator_failures"
+R6_MODEL_VISIBLE_TOOL_OUTPUT_CHARS = 16_000
+R6_OBJECTIVE_COVERAGE_POLICY = "no_cov"
+R6_WORKSPACE_LINE_ENDING_POLICY = "git_aware_line_endings_v1"
 
 
 class GateA1AcquisitionPreflightError(RuntimeError):
@@ -364,6 +373,20 @@ def _validate_preflight_configuration(
         )
 
 
+def _validate_r6_harness_configuration(configuration: Any) -> None:
+    resolved = configuration.config
+    expected = {
+        "model_visible_tool_output_chars": R6_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+        "objective_coverage_policy": R6_OBJECTIVE_COVERAGE_POLICY,
+        "workspace_line_ending_policy": R6_WORKSPACE_LINE_ENDING_POLICY,
+    }
+    for field, expected_value in expected.items():
+        if getattr(resolved, field, None) != expected_value:
+            raise GateA1AcquisitionPreflightError(
+                f"R6 {field} must be {expected_value!r}"
+            )
+
+
 def run_gate_a1_acquisition_preflight(project_root: Path) -> tuple[str, Path]:
     """Validate Gate A1 execution prerequisites without objective/provider execution."""
     project_root = project_root.expanduser().resolve()
@@ -434,6 +457,10 @@ def run_gate_a1_acquisition_preflight(project_root: Path) -> tuple[str, Path]:
 
 def _event_trace(dependencies: AgentDependencies) -> list[dict[str, object]]:
     return [event.model_dump(mode="json") for event in dependencies.events]
+
+
+def _model_output_telemetry(dependencies: AgentDependencies) -> list[dict[str, object]]:
+    return [dict(record) for record in dependencies.model_output_telemetry]
 
 
 def _trusted_actions(dependencies: AgentDependencies) -> list[dict[str, object]]:
@@ -518,7 +545,15 @@ def _preflight(
     _verify_frozen_patches(cases, baseline_root, frozen_cases)
     if tuple(policy.task_order) != ACQUISITION_TASK_IDS:
         raise GateA1AcquisitionPreflightError("Gate A1 benchmark policy chronology changed")
-    objective = FrozenSWEsmithObjective(frozen_cases, environments)
+    objective = FrozenSWEsmithObjective(
+        frozen_cases,
+        environments,
+        objective_coverage_policy=getattr(
+            configuration.config,
+            "objective_coverage_policy",
+            None,
+        ),
+    )
     for case in cases:
         workspace = _materialize_workspace(
             source_root=baseline_root,
@@ -733,6 +768,7 @@ def _run_task(
             ),
             "trusted_planned_action_provenance": trusted,
             "events": _event_trace(dependencies),
+            "model_output_telemetry": _model_output_telemetry(dependencies),
             "trusted_planned_actions": _trusted_actions(dependencies),
             "messages": _result_messages(result),
             "agent_output": None if result is None else result.output,
@@ -750,6 +786,7 @@ def _r2_configuration_hash(
     environments: Mapping[str, IsolatedTaskEnvironment],
     *,
     max_new_tasks: int | None = None,
+    revision: str | None = None,
 ) -> str:
     """Hash the immutable model roles, prompt, budget, and runtime boundary.
 
@@ -790,6 +827,21 @@ def _r2_configuration_hash(
             for task_id in ACQUISITION_TASK_IDS
         ],
     }
+    if revision == "R6":
+        payload["revision"] = revision
+        payload["config_version"] = getattr(configuration.config, "config_version", None)
+        payload["revision_reason"] = getattr(configuration.config, "revision_reason", None)
+        payload["harness"] = {
+            "model_visible_tool_output_chars": getattr(
+                configuration.config, "model_visible_tool_output_chars", None
+            ),
+            "objective_coverage_policy": getattr(
+                configuration.config, "objective_coverage_policy", None
+            ),
+            "workspace_line_ending_policy": getattr(
+                configuration.config, "workspace_line_ending_policy", None
+            ),
+        }
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
@@ -964,6 +1016,41 @@ def _validate_r5_manifest(
     )
 
 
+def _validate_r6_manifest(
+    manifest: Mapping[str, object],
+    *,
+    configuration_hash: str,
+    coding_model: str,
+    abstraction_model: str,
+    revision_reason: str = R6_REVISION_REASON,
+    model_visible_tool_output_chars: int = R6_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+    objective_coverage_policy: str = R6_OBJECTIVE_COVERAGE_POLICY,
+    workspace_line_ending_policy: str = R6_WORKSPACE_LINE_ENDING_POLICY,
+) -> None:
+    _validate_revision_manifest(
+        manifest,
+        configuration_hash=configuration_hash,
+        revision="R6",
+        namespace=ACQUISITION_R6_NAMESPACE,
+        coding_model=coding_model,
+        abstraction_model=abstraction_model,
+    )
+    if manifest.get("revision_reason") != revision_reason:
+        raise GateA1AcquisitionPreflightError(
+            "R6 resume revision reason does not match the frozen harness configuration"
+        )
+    expected_harness = {
+        "model_visible_tool_output_chars": model_visible_tool_output_chars,
+        "objective_coverage_policy": objective_coverage_policy,
+        "workspace_line_ending_policy": workspace_line_ending_policy,
+    }
+    for field, expected_value in expected_harness.items():
+        if manifest.get(field) != expected_value:
+            raise GateA1AcquisitionPreflightError(
+                f"R6 resume {field} does not match the frozen harness configuration"
+            )
+
+
 def run_gate_a1_acquisition_r2(
     project_root: Path,
     *,
@@ -978,7 +1065,7 @@ def run_gate_a1_acquisition_r2(
     The revision namespace and configuration hash prevent importing A1 state or
     resuming with a different model, prompt, budget, or environment.
     """
-    if _revision not in {"R2", "R3", "R4", "R5"}:
+    if _revision not in {"R2", "R3", "R4", "R5", "R6"}:
         raise ValueError(f"unsupported Gate A1 acquisition revision: {_revision}")
     if max_new_tasks is not None and max_new_tasks <= 0:
         raise GateA1AcquisitionPreflightError("max_new_tasks must be positive")
@@ -1005,13 +1092,20 @@ def run_gate_a1_acquisition_r2(
             expected_coding_model = FROZEN_R4_CODING_MODEL
             expected_abstraction_model = FROZEN_RECOVERY_MODEL
             manifest_validator = _validate_r4_manifest
-        else:
+        elif _revision == "R5":
             namespace = ACQUISITION_R5_NAMESPACE
             condition = ACQUISITION_R5_CONDITION
             configuration_path = ACQUISITION_R5_CONFIG
             expected_coding_model = R5_EXPECTED_CODING_MODEL
             expected_abstraction_model = R5_EXPECTED_ABSTRACTION_MODEL
             manifest_validator = _validate_r5_manifest
+        else:
+            namespace = ACQUISITION_R6_NAMESPACE
+            condition = ACQUISITION_R6_CONDITION
+            configuration_path = ACQUISITION_R6_CONFIG
+            expected_coding_model = R6_EXPECTED_CODING_MODEL
+            expected_abstraction_model = R6_EXPECTED_ABSTRACTION_MODEL
+            manifest_validator = _validate_r6_manifest
     run_prefix = f"acquisition-{_revision.lower()}"
     task_artifact_subdirectory = run_prefix
     ready_to_resume_status = f"READY_TO_RESUME_GATE_A1_ACQUISITION_{_revision}"
@@ -1047,6 +1141,11 @@ def run_gate_a1_acquisition_r2(
         "tasks": [],
         "errors": [],
     }
+    if _revision == "R6":
+        manifest["revision_reason"] = R6_REVISION_REASON
+        manifest["model_visible_tool_output_chars"] = R6_MODEL_VISIBLE_TOOL_OUTPUT_CHARS
+        manifest["objective_coverage_policy"] = R6_OBJECTIVE_COVERAGE_POLICY
+        manifest["workspace_line_ending_policy"] = R6_WORKSPACE_LINE_ENDING_POLICY
     repository: Neo4jRepository | None = None
     resume_validation_failed = False
     try:
@@ -1060,8 +1159,10 @@ def run_gate_a1_acquisition_r2(
             baseline_root,
             execution_root,
         )
+        if _revision == "R6":
+            _validate_r6_harness_configuration(configuration)
         cases = _task_cases(configuration, ACQUISITION_TASK_IDS)
-        if _revision == "R5":
+        if _revision in {"R5", "R6"}:
             settings = _settings_for_agent()
         else:
             settings = _settings_for_agent(
@@ -1081,12 +1182,26 @@ def run_gate_a1_acquisition_r2(
             configuration=configuration,
             cases=cases,
         )
-        configuration_hash = _r2_configuration_hash(configuration, settings, environments)
+        configuration_hash = _r2_configuration_hash(
+            configuration,
+            settings,
+            environments,
+            revision=_revision if _revision == "R6" else None,
+        )
         manifest["configuration_hash"] = configuration_hash
         manifest["coding_model"] = settings.openrouter_coding_model
         manifest["abstraction_model"] = settings.openrouter_abstraction_model
         manifest["prompt_version"] = configuration.model.prompt_version
         manifest["limits"] = configuration.config.limits.model_dump(mode="json")
+        if _revision == "R6":
+            manifest["revision_reason"] = configuration.config.revision_reason
+            manifest["model_visible_tool_output_chars"] = (
+                configuration.config.model_visible_tool_output_chars
+            )
+            manifest["objective_coverage_policy"] = configuration.config.objective_coverage_policy
+            manifest["workspace_line_ending_policy"] = (
+                configuration.config.workspace_line_ending_policy
+            )
         if resume_root is not None:
             existing_raw: object = json.loads(
                 (artifact_root / "manifest.json").read_text(encoding="utf-8")
@@ -1097,7 +1212,20 @@ def run_gate_a1_acquisition_r2(
                 )
             existing = cast(dict[str, object], existing_raw)
             resume_validation_failed = True
-            if _revision == "R5":
+            if _revision == "R6":
+                manifest_validator(
+                    existing,
+                    configuration_hash=configuration_hash,
+                    coding_model=settings.openrouter_coding_model,
+                    abstraction_model=settings.openrouter_abstraction_model,
+                    revision_reason=configuration.config.revision_reason,
+                    model_visible_tool_output_chars=(
+                        configuration.config.model_visible_tool_output_chars
+                    ),
+                    objective_coverage_policy=configuration.config.objective_coverage_policy,
+                    workspace_line_ending_policy=configuration.config.workspace_line_ending_policy,
+                )
+            elif _revision == "R5":
                 manifest_validator(
                     existing,
                     configuration_hash=configuration_hash,
@@ -1119,7 +1247,15 @@ def run_gate_a1_acquisition_r2(
         )
         repository.verify_connectivity()
         repository.ensure_recovery_pattern_vector_index()
-        objective = FrozenSWEsmithObjective(frozen_cases, environments)
+        objective = FrozenSWEsmithObjective(
+            frozen_cases,
+            environments,
+            objective_coverage_policy=getattr(
+                configuration.config,
+                "objective_coverage_policy",
+                None,
+            ),
+        )
         pacing = ProviderRequestPacing()
         embedder: RecoveryPatternEmbedder | None = None
         task_records: list[dict[str, object]] = []
@@ -1281,6 +1417,21 @@ def run_gate_a1_acquisition_r5(
     )
 
 
+def run_gate_a1_acquisition_r6(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run or explicitly resume the harness-hardened Gate A1 Acquisition R6."""
+    return run_gate_a1_acquisition_r2(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+        _revision="R6",
+    )
+
+
 def run_gate_a1_acquisition(project_root: Path) -> tuple[str, Path]:
     """Run exactly T001-T005 acquisition and return final status plus artifact root."""
     project_root = project_root.expanduser().resolve()
@@ -1386,4 +1537,5 @@ __all__ = [
     "run_gate_a1_acquisition_r3",
     "run_gate_a1_acquisition_r4",
     "run_gate_a1_acquisition_r5",
+    "run_gate_a1_acquisition_r6",
 ]

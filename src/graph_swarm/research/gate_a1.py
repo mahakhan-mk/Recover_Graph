@@ -944,6 +944,17 @@ def main() -> int:
         metavar="RUN_ROOT",
         help="resume Gate A1 Acquisition R5 without rerunning started tasks",
     )
+    modes.add_argument(
+        "--acquire-r6",
+        action="store_true",
+        help="execute the explicitly versioned Gate A1 Acquisition R6",
+    )
+    modes.add_argument(
+        "--resume-acquisition-r6",
+        type=Path,
+        metavar="RUN_ROOT",
+        help="resume Gate A1 Acquisition R6 without rerunning started tasks",
+    )
     parser.add_argument(
         "--max-new-tasks",
         type=int,
@@ -961,9 +972,11 @@ def main() -> int:
         or args.resume_acquisition_r4 is not None
         or args.acquire_r5
         or args.resume_acquisition_r5 is not None
+        or args.acquire_r6
+        or args.resume_acquisition_r6 is not None
     ):
         parser.error(
-            "--max-new-tasks requires an R2, R3, R4, or R5 acquisition/resume mode"
+            "--max-new-tasks requires an R2, R3, R4, R5, or R6 acquisition/resume mode"
         )
     if args.prepare_environments:
         print(prepare_gate_a1_environments(project_root))
@@ -1020,6 +1033,21 @@ def main() -> int:
         return 0 if status in {
             "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
             "READY_TO_RESUME_GATE_A1_ACQUISITION_R5",
+        } else 2
+    if args.acquire_r6 or args.resume_acquisition_r6 is not None:
+        from graph_swarm.research.gate_a1_acquisition import (
+            run_gate_a1_acquisition_r6,
+        )
+
+        status, artifact_root = run_gate_a1_acquisition_r6(
+            project_root,
+            resume_root=args.resume_acquisition_r6,
+            max_new_tasks=args.max_new_tasks,
+        )
+        print(f"{status} {artifact_root}")
+        return 0 if status in {
+            "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
+            "READY_TO_RESUME_GATE_A1_ACQUISITION_R6",
         } else 2
     if args.acquire_r2 or args.resume_acquisition_r2 is not None:
         from graph_swarm.research.gate_a1_acquisition import (
