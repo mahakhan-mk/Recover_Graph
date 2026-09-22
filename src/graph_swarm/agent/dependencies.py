@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Literal
@@ -75,6 +76,12 @@ class AgentDependencies:
     )
     advisory_errors: list[str] = field(default_factory=lambda: list[str]())
     artifact_errors: list[str] = field(default_factory=lambda: list[str]())
+    before_tool_action: Callable[[PlannedAction], None] | None = field(
+        default=None, repr=False
+    )
+    after_tool_event: Callable[[AgentEvent], None] | None = field(
+        default=None, repr=False
+    )
     model_output_telemetry: list[ModelOutputTelemetry] = field(
         default_factory=lambda: list[ModelOutputTelemetry]()
     )

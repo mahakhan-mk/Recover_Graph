@@ -79,7 +79,7 @@ class OracleEvidenceRequired(ExperimentConfigurationError):
 class ExperimentLimits(BaseModel):
     """Resource limits shared by comparable Track B conditions."""
 
-    max_actions: int = Field(gt=0)
+    max_actions: int | None = Field(default=None, gt=0)
     max_requests: int | None = Field(default=None, gt=0)
     timeout_seconds: float = Field(gt=0)
 
@@ -116,10 +116,16 @@ class ExperimentConfiguration(BaseModel):
     workspace_baseline_root: str = "benchmark/workspaces"
     workspace_execution_root: str = "research/evidence/workspaces"
     config_version: str = "v1"
+    run_revision: str | None = None
     revision_reason: str | None = None
     model_visible_tool_output_chars: int | None = Field(default=None, gt=0)
     objective_coverage_policy: str | None = None
+    objective_coverage_policy_selection_version: str | None = None
     workspace_line_ending_policy: str | None = None
+    persistence_session_policy: str | None = None
+    persistence_retry_policy: str | None = None
+    stopping_policy: str | None = None
+    objective_mutation_check_policy: str | None = None
     development: bool = False
     pilot: bool = False
 
@@ -130,7 +136,15 @@ class ExperimentConfiguration(BaseModel):
             raise ValueError("experiment configuration text must be non-empty")
         return value
 
-    @field_validator("objective_coverage_policy", "workspace_line_ending_policy")
+    @field_validator(
+        "objective_coverage_policy",
+        "objective_coverage_policy_selection_version",
+        "workspace_line_ending_policy",
+        "persistence_session_policy",
+        "persistence_retry_policy",
+        "stopping_policy",
+        "objective_mutation_check_policy",
+    )
     @classmethod
     def require_optional_policy_text(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
@@ -1077,7 +1091,7 @@ def _budget_termination(
     if not isinstance(error, UsageLimitExceeded):
         return None
     message = str(error)
-    if f"tool_calls_limit of {limits.max_actions}" in message:
+    if limits.max_actions is not None and f"tool_calls_limit of {limits.max_actions}" in message:
         return BoundedTermination(budget="tool_calls", configured_limit=limits.max_actions)
     if limits.max_requests is not None and f"request_limit of {limits.max_requests}" in message:
         return BoundedTermination(budget="requests", configured_limit=limits.max_requests)

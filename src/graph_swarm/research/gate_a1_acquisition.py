@@ -21,6 +21,7 @@ from pydantic_ai import AgentRunResult, ModelSettings
 from pydantic_ai_harness.step_persistence import SqliteStepStore, StepPersistence
 
 from experiments.sprint3 import (
+    OBJECTIVE_COVERAGE_POLICY_SELECTION_VERSION,
     FrozenSWEsmithCase,
     FrozenSWEsmithObjective,
     IsolatedTaskEnvironment,
@@ -82,6 +83,9 @@ ACQUISITION_R5_CONFIG = "configs/experiments/gate_a1_acquisition_r5.yaml"
 ACQUISITION_R6_NAMESPACE = "GS-E003/Gate-A1/acquisition-r6"
 ACQUISITION_R6_CONDITION = "gate_a1_acquisition_r6"
 ACQUISITION_R6_CONFIG = "configs/experiments/gate_a1_acquisition_r6.yaml"
+ACQUISITION_R7_NAMESPACE = "GS-E003/Gate-A1/acquisition-r7"
+ACQUISITION_R7_CONDITION = "gate_a1_acquisition_r7"
+ACQUISITION_R7_CONFIG = "configs/experiments/gate_a1_acquisition_r7.yaml"
 FROZEN_CODING_MODEL = "qwen/qwen3-coder:free"
 FROZEN_R3_CODING_MODEL = "cohere/north-mini-code:free"
 FROZEN_R4_CODING_MODEL = "cohere/north-mini-code:free"
@@ -93,6 +97,25 @@ R6_REVISION_REASON = "harness_hardening_after_r5_context_and_evaluator_failures"
 R6_MODEL_VISIBLE_TOOL_OUTPUT_CHARS = 16_000
 R6_OBJECTIVE_COVERAGE_POLICY = "no_cov"
 R6_WORKSPACE_LINE_ENDING_POLICY = "git_aware_line_endings_v1"
+R7_EXPECTED_CODING_MODEL = R5_EXPECTED_CODING_MODEL
+R7_EXPECTED_ABSTRACTION_MODEL = R5_EXPECTED_ABSTRACTION_MODEL
+R7_REVISION_REASON = "objective_coverage_compatibility_after_r6_preflight"
+R7_MODEL_VISIBLE_TOOL_OUTPUT_CHARS = 16_000
+R7_OBJECTIVE_COVERAGE_POLICY = "no_cov"
+R7_WORKSPACE_LINE_ENDING_POLICY = "git_aware_line_endings_v1"
+R7_COVERAGE_POLICY_SELECTION_VERSION = OBJECTIVE_COVERAGE_POLICY_SELECTION_VERSION
+R8_NAMESPACE = "GS-E003/Gate-A1/acquisition-r8"
+R8_CONDITION = "gate_a1_acquisition_r8"
+R8_CONFIG = "configs/experiments/gate_a1_acquisition_r8.yaml"
+R8_EXPECTED_CODING_MODEL = R5_EXPECTED_CODING_MODEL
+R8_EXPECTED_ABSTRACTION_MODEL = R5_EXPECTED_ABSTRACTION_MODEL
+R8_REVISION_REASON = "workspace_persistence_and_objective_completion_after_r7"
+R8_MODEL_VISIBLE_TOOL_OUTPUT_CHARS = 16_000
+R8_OBJECTIVE_COVERAGE_POLICY = "no_cov"
+R8_WORKSPACE_LINE_ENDING_POLICY = "git_index_consistent_line_endings_v2"
+R8_STOPPING_POLICY = "objective_success_or_timeout_v1"
+R8_PERSISTENCE_SESSION_POLICY = "short_lived_session_v1"
+R8_PERSISTENCE_RETRY_POLICY = "retryable_transient_max_2_v1"
 
 
 class GateA1AcquisitionPreflightError(RuntimeError):
@@ -524,6 +547,7 @@ def _preflight(
     execution_root: Path,
     configuration: Any,
     cases: Sequence[BenchmarkTaskCase],
+    effective_coverage_policies: dict[str, str] | None = None,
 ) -> tuple[dict[str, IsolatedTaskEnvironment], dict[str, FrozenSWEsmithCase]]:
     environments = resolve_gate_a1_environments(project_root)
     policy = load_benchmark_environment_policy(
@@ -553,6 +577,11 @@ def _preflight(
             "objective_coverage_policy",
             None,
         ),
+        coverage_policy_selection_version=getattr(
+            configuration.config,
+            "objective_coverage_policy_selection_version",
+            None,
+        ),
     )
     for case in cases:
         workspace = _materialize_workspace(
@@ -563,6 +592,10 @@ def _preflight(
             task=case.task,
         )
         objective.preflight(case.task, workspace)
+        if effective_coverage_policies is not None:
+            effective_coverage_policies[case.task.id] = objective.effective_coverage_policy(
+                case.task.id
+            )
     return environments, frozen_cases
 
 
@@ -787,6 +820,7 @@ def _r2_configuration_hash(
     *,
     max_new_tasks: int | None = None,
     revision: str | None = None,
+    effective_coverage_policies: Mapping[str, str] | None = None,
 ) -> str:
     """Hash the immutable model roles, prompt, budget, and runtime boundary.
 
@@ -841,6 +875,30 @@ def _r2_configuration_hash(
             "workspace_line_ending_policy": getattr(
                 configuration.config, "workspace_line_ending_policy", None
             ),
+        }
+    if revision == "R7":
+        payload["revision"] = revision
+        payload["config_version"] = getattr(configuration.config, "config_version", None)
+        payload["revision_reason"] = getattr(configuration.config, "revision_reason", None)
+        payload["harness"] = {
+            "model_visible_tool_output_chars": getattr(
+                configuration.config, "model_visible_tool_output_chars", None
+            ),
+            "objective_coverage_policy": getattr(
+                configuration.config, "objective_coverage_policy", None
+            ),
+            "workspace_line_ending_policy": getattr(
+                configuration.config, "workspace_line_ending_policy", None
+            ),
+            "objective_coverage_policy_selection_version": getattr(
+                configuration.config,
+                "objective_coverage_policy_selection_version",
+                None,
+            ),
+            "effective_objective_coverage_policy": {
+                task_id: (effective_coverage_policies or {}).get(task_id)
+                for task_id in ACQUISITION_TASK_IDS
+            },
         }
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -1051,6 +1109,125 @@ def _validate_r6_manifest(
             )
 
 
+def _validate_r7_harness_configuration(configuration: Any) -> None:
+    resolved = configuration.config
+    expected = {
+        "model_visible_tool_output_chars": R7_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+        "objective_coverage_policy": R7_OBJECTIVE_COVERAGE_POLICY,
+        "workspace_line_ending_policy": R7_WORKSPACE_LINE_ENDING_POLICY,
+        "objective_coverage_policy_selection_version": R7_COVERAGE_POLICY_SELECTION_VERSION,
+    }
+    for field, expected_value in expected.items():
+        if getattr(resolved, field, None) != expected_value:
+            raise GateA1AcquisitionPreflightError(
+                f"R7 {field} must be {expected_value!r}"
+            )
+
+
+def _validate_r7_manifest(
+    manifest: Mapping[str, object],
+    *,
+    configuration_hash: str,
+    coding_model: str,
+    abstraction_model: str,
+    revision_reason: str = R7_REVISION_REASON,
+    model_visible_tool_output_chars: int = R7_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+    objective_coverage_policy: str = R7_OBJECTIVE_COVERAGE_POLICY,
+    workspace_line_ending_policy: str = R7_WORKSPACE_LINE_ENDING_POLICY,
+    coverage_policy_selection_version: str = R7_COVERAGE_POLICY_SELECTION_VERSION,
+    effective_coverage_policies: Mapping[str, str] | None = None,
+) -> None:
+    _validate_revision_manifest(
+        manifest,
+        configuration_hash=configuration_hash,
+        revision="R7",
+        namespace=ACQUISITION_R7_NAMESPACE,
+        coding_model=coding_model,
+        abstraction_model=abstraction_model,
+    )
+    expected = {
+        "revision_reason": revision_reason,
+        "model_visible_tool_output_chars": model_visible_tool_output_chars,
+        "objective_coverage_policy": objective_coverage_policy,
+        "workspace_line_ending_policy": workspace_line_ending_policy,
+        "objective_coverage_policy_selection_version": coverage_policy_selection_version,
+        "effective_objective_coverage_policy": dict(
+            effective_coverage_policies or {}
+        ),
+    }
+    for field, expected_value in expected.items():
+        if manifest.get(field) != expected_value:
+            raise GateA1AcquisitionPreflightError(
+                f"R7 resume {field} does not match the frozen harness configuration"
+            )
+
+
+def _validate_r8_harness_configuration(configuration: Any) -> None:
+    resolved = configuration.config
+    expected = {
+        "run_revision": "R8",
+        "revision_reason": R8_REVISION_REASON,
+        "model_visible_tool_output_chars": R8_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+        "objective_coverage_policy": R8_OBJECTIVE_COVERAGE_POLICY,
+        "objective_coverage_policy_selection_version": R7_COVERAGE_POLICY_SELECTION_VERSION,
+        "workspace_line_ending_policy": R8_WORKSPACE_LINE_ENDING_POLICY,
+        "persistence_session_policy": R8_PERSISTENCE_SESSION_POLICY,
+        "persistence_retry_policy": R8_PERSISTENCE_RETRY_POLICY,
+        "stopping_policy": R8_STOPPING_POLICY,
+        "objective_mutation_check_policy": "repository_state_fingerprint_v1",
+    }
+    for field, expected_value in expected.items():
+        if getattr(resolved, field, None) != expected_value:
+            raise GateA1AcquisitionPreflightError(f"R8 {field} must be {expected_value!r}")
+    if resolved.limits.max_actions is not None or resolved.limits.max_requests is not None:
+        raise GateA1AcquisitionPreflightError("R8 action/request ceilings must be null")
+    if resolved.limits.timeout_seconds != 600:
+        raise GateA1AcquisitionPreflightError("R8 timeout_seconds must be 600")
+
+
+def _r8_configuration_hash(  # pyright: ignore[reportUnusedFunction]
+    configuration: Any,
+    settings: Any,
+    environments: Mapping[str, IsolatedTaskEnvironment],
+) -> str:
+    """Hash every frozen R8 boundary, including disabled limits and policies."""
+    payload = {
+        "revision": configuration.config.run_revision,
+        "config_version": configuration.config.config_version,
+        "revision_reason": configuration.config.revision_reason,
+        "coding_model": settings.openrouter_coding_model,
+        "abstraction_model": settings.openrouter_abstraction_model,
+        "prompt_version": configuration.model.prompt_version,
+        "temperature": configuration.model.settings.get("temperature"),
+        "timeout_seconds": configuration.config.limits.timeout_seconds,
+        "max_actions": configuration.config.limits.max_actions,
+        "max_requests": configuration.config.limits.max_requests,
+        "stopping_policy": configuration.config.stopping_policy,
+        "objective_mutation_check_policy": configuration.config.objective_mutation_check_policy,
+        "model_visible_tool_output_chars": configuration.config.model_visible_tool_output_chars,
+        "objective_coverage_policy": configuration.config.objective_coverage_policy,
+        "objective_coverage_policy_selection_version": (
+            configuration.config.objective_coverage_policy_selection_version
+        ),
+        "workspace_line_ending_policy": configuration.config.workspace_line_ending_policy,
+        "persistence_session_policy": configuration.config.persistence_session_policy,
+        "persistence_retry_policy": configuration.config.persistence_retry_policy,
+        "task_ids": list(ACQUISITION_TASK_IDS),
+        "task_manifest": configuration.config.task_manifest,
+        "task_problems": configuration.config.task_problems,
+        "environments": {
+            task_id: {
+                "environment_fingerprint": environments[task_id].environment_fingerprint,
+                "container_image": environments[task_id].container_image,
+            }
+            for task_id in ACQUISITION_TASK_IDS
+        },
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def run_gate_a1_acquisition_r2(
     project_root: Path,
     *,
@@ -1065,7 +1242,7 @@ def run_gate_a1_acquisition_r2(
     The revision namespace and configuration hash prevent importing A1 state or
     resuming with a different model, prompt, budget, or environment.
     """
-    if _revision not in {"R2", "R3", "R4", "R5", "R6"}:
+    if _revision not in {"R2", "R3", "R4", "R5", "R6", "R7"}:
         raise ValueError(f"unsupported Gate A1 acquisition revision: {_revision}")
     if max_new_tasks is not None and max_new_tasks <= 0:
         raise GateA1AcquisitionPreflightError("max_new_tasks must be positive")
@@ -1100,12 +1277,20 @@ def run_gate_a1_acquisition_r2(
             expected_abstraction_model = R5_EXPECTED_ABSTRACTION_MODEL
             manifest_validator = _validate_r5_manifest
         else:
-            namespace = ACQUISITION_R6_NAMESPACE
-            condition = ACQUISITION_R6_CONDITION
-            configuration_path = ACQUISITION_R6_CONFIG
-            expected_coding_model = R6_EXPECTED_CODING_MODEL
-            expected_abstraction_model = R6_EXPECTED_ABSTRACTION_MODEL
-            manifest_validator = _validate_r6_manifest
+            if _revision == "R6":
+                namespace = ACQUISITION_R6_NAMESPACE
+                condition = ACQUISITION_R6_CONDITION
+                configuration_path = ACQUISITION_R6_CONFIG
+                expected_coding_model = R6_EXPECTED_CODING_MODEL
+                expected_abstraction_model = R6_EXPECTED_ABSTRACTION_MODEL
+                manifest_validator = _validate_r6_manifest
+            else:
+                namespace = ACQUISITION_R7_NAMESPACE
+                condition = ACQUISITION_R7_CONDITION
+                configuration_path = ACQUISITION_R7_CONFIG
+                expected_coding_model = R7_EXPECTED_CODING_MODEL
+                expected_abstraction_model = R7_EXPECTED_ABSTRACTION_MODEL
+                manifest_validator = _validate_r7_manifest
     run_prefix = f"acquisition-{_revision.lower()}"
     task_artifact_subdirectory = run_prefix
     ready_to_resume_status = f"READY_TO_RESUME_GATE_A1_ACQUISITION_{_revision}"
@@ -1146,8 +1331,18 @@ def run_gate_a1_acquisition_r2(
         manifest["model_visible_tool_output_chars"] = R6_MODEL_VISIBLE_TOOL_OUTPUT_CHARS
         manifest["objective_coverage_policy"] = R6_OBJECTIVE_COVERAGE_POLICY
         manifest["workspace_line_ending_policy"] = R6_WORKSPACE_LINE_ENDING_POLICY
+    if _revision == "R7":
+        manifest["revision_reason"] = R7_REVISION_REASON
+        manifest["model_visible_tool_output_chars"] = R7_MODEL_VISIBLE_TOOL_OUTPUT_CHARS
+        manifest["objective_coverage_policy"] = R7_OBJECTIVE_COVERAGE_POLICY
+        manifest["workspace_line_ending_policy"] = R7_WORKSPACE_LINE_ENDING_POLICY
+        manifest["objective_coverage_policy_selection_version"] = (
+            R7_COVERAGE_POLICY_SELECTION_VERSION
+        )
+        manifest["effective_objective_coverage_policy"] = {}
     repository: Neo4jRepository | None = None
     resume_validation_failed = False
+    effective_coverage_policies: dict[str, str] = {}
     try:
         baseline_root = project_root / "benchmark/workspaces"
         execution_root = project_root / "research/evidence/workspaces"
@@ -1161,8 +1356,10 @@ def run_gate_a1_acquisition_r2(
         )
         if _revision == "R6":
             _validate_r6_harness_configuration(configuration)
+        if _revision == "R7":
+            _validate_r7_harness_configuration(configuration)
         cases = _task_cases(configuration, ACQUISITION_TASK_IDS)
-        if _revision in {"R5", "R6"}:
+        if _revision in {"R5", "R6", "R7"}:
             settings = _settings_for_agent()
         else:
             settings = _settings_for_agent(
@@ -1181,12 +1378,18 @@ def run_gate_a1_acquisition_r2(
             execution_root=execution_root,
             configuration=configuration,
             cases=cases,
+            effective_coverage_policies=(
+                effective_coverage_policies if _revision == "R7" else None
+            ),
         )
         configuration_hash = _r2_configuration_hash(
             configuration,
             settings,
             environments,
-            revision=_revision if _revision == "R6" else None,
+            revision=_revision if _revision in {"R6", "R7"} else None,
+            effective_coverage_policies=(
+                effective_coverage_policies if _revision == "R7" else None
+            ),
         )
         manifest["configuration_hash"] = configuration_hash
         manifest["coding_model"] = settings.openrouter_coding_model
@@ -1201,6 +1404,21 @@ def run_gate_a1_acquisition_r2(
             manifest["objective_coverage_policy"] = configuration.config.objective_coverage_policy
             manifest["workspace_line_ending_policy"] = (
                 configuration.config.workspace_line_ending_policy
+            )
+        if _revision == "R7":
+            manifest["revision_reason"] = configuration.config.revision_reason
+            manifest["model_visible_tool_output_chars"] = (
+                configuration.config.model_visible_tool_output_chars
+            )
+            manifest["objective_coverage_policy"] = configuration.config.objective_coverage_policy
+            manifest["workspace_line_ending_policy"] = (
+                configuration.config.workspace_line_ending_policy
+            )
+            manifest["objective_coverage_policy_selection_version"] = (
+                configuration.config.objective_coverage_policy_selection_version
+            )
+            manifest["effective_objective_coverage_policy"] = dict(
+                effective_coverage_policies
             )
         if resume_root is not None:
             existing_raw: object = json.loads(
@@ -1224,6 +1442,23 @@ def run_gate_a1_acquisition_r2(
                     ),
                     objective_coverage_policy=configuration.config.objective_coverage_policy,
                     workspace_line_ending_policy=configuration.config.workspace_line_ending_policy,
+                )
+            elif _revision == "R7":
+                manifest_validator(
+                    existing,
+                    configuration_hash=configuration_hash,
+                    coding_model=settings.openrouter_coding_model,
+                    abstraction_model=settings.openrouter_abstraction_model,
+                    revision_reason=configuration.config.revision_reason,
+                    model_visible_tool_output_chars=(
+                        configuration.config.model_visible_tool_output_chars
+                    ),
+                    objective_coverage_policy=configuration.config.objective_coverage_policy,
+                    workspace_line_ending_policy=configuration.config.workspace_line_ending_policy,
+                    coverage_policy_selection_version=(
+                        configuration.config.objective_coverage_policy_selection_version
+                    ),
+                    effective_coverage_policies=effective_coverage_policies,
                 )
             elif _revision == "R5":
                 manifest_validator(
@@ -1254,6 +1489,18 @@ def run_gate_a1_acquisition_r2(
                 configuration.config,
                 "objective_coverage_policy",
                 None,
+            ),
+            coverage_policy_selection_version=(
+                getattr(
+                    configuration.config,
+                    "objective_coverage_policy_selection_version",
+                    None,
+                )
+                if _revision == "R7"
+                else None
+            ),
+            effective_coverage_policies=(
+                effective_coverage_policies if _revision == "R7" else None
             ),
         )
         pacing = ProviderRequestPacing()
@@ -1432,6 +1679,45 @@ def run_gate_a1_acquisition_r6(
     )
 
 
+def run_gate_a1_acquisition_r7(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run or explicitly resume the coverage-compatible Gate A1 Acquisition R7."""
+    return run_gate_a1_acquisition_r2(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+        _revision="R7",
+    )
+
+
+def run_gate_a1_acquisition_r8(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run the fresh R8 objective-completion acquisition harness."""
+    _validate_r8_harness_configuration(
+        load_experiment_configuration(
+            project_root / R8_CONFIG,
+            project_root=project_root,
+        )
+    )
+    from graph_swarm.research.gate_a1_r8 import (
+        run_gate_a1_acquisition_r8 as _run_gate_a1_acquisition_r8,
+    )
+
+    return _run_gate_a1_acquisition_r8(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+    )
+
+
 def run_gate_a1_acquisition(project_root: Path) -> tuple[str, Path]:
     """Run exactly T001-T005 acquisition and return final status plus artifact root."""
     project_root = project_root.expanduser().resolve()
@@ -1538,4 +1824,6 @@ __all__ = [
     "run_gate_a1_acquisition_r4",
     "run_gate_a1_acquisition_r5",
     "run_gate_a1_acquisition_r6",
+    "run_gate_a1_acquisition_r7",
+    "run_gate_a1_acquisition_r8",
 ]

@@ -59,6 +59,7 @@ from graph_swarm.research.runner import (
 )
 
 TRANSFER_TASKS = tuple(f"GS-T{i:03d}" for i in range(6, 16))
+OBJECTIVE_COVERAGE_POLICY_SELECTION_VERSION = "pytest_help_option_discovery_v1"
 
 
 @dataclass(frozen=True)
@@ -188,12 +189,27 @@ class FrozenSWEsmithObjective:
         environments: Mapping[str, IsolatedTaskEnvironment],
         *,
         objective_coverage_policy: str | None = None,
+        coverage_policy_selection_version: str | None = None,
+        effective_coverage_policies: Mapping[str, str] | None = None,
     ) -> None:
         self.cases = cases
         self.environments = environments
         self._validate_coverage = objective_coverage_policy is not None
         self.objective_coverage_policy = objective_coverage_policy or "no_cov"
-        self._coverage_policy_by_task: dict[str, str] = {}
+        self.coverage_policy_selection_version = coverage_policy_selection_version
+        self._coverage_policy_by_task: dict[str, str] = dict(
+            effective_coverage_policies or {}
+        )
+        invalid_policies = {
+            policy
+            for policy in self._coverage_policy_by_task.values()
+            if policy not in {"no_cov", "plain_pytest", "no_cov_addopts"}
+        }
+        if invalid_policies:
+            raise BenchmarkPreflightError(
+                "unsupported effective objective coverage policy: "
+                + ", ".join(sorted(invalid_policies))
+            )
         self.observations: list[ObjectiveObservation] = []
 
     def __call__(self, task: Any, workspace: Path) -> bool:
@@ -203,7 +219,7 @@ class FrozenSWEsmithObjective:
                 f"no isolated SWE-smith executable was selected for {task.id}"
             )
         if self._validate_coverage and task.id not in self._coverage_policy_by_task:
-            self._validate_coverage_policy(task.id, workspace)
+            self._select_coverage_policy(task.id, workspace)
         command = self._objective_command(task.id, workspace, environment)
         condition = _condition_from_workspace(workspace)
         started = datetime.now(UTC)
@@ -261,8 +277,8 @@ class FrozenSWEsmithObjective:
         workspace: Path,
     ) -> ObjectiveObservation:
         """Verify the mutated task can collect and execute before model calls."""
-        if self._validate_coverage and self.objective_coverage_policy == "no_cov":
-            self._validate_coverage_policy(task.id, workspace)
+        if self._validate_coverage and task.id not in self._coverage_policy_by_task:
+            self._select_coverage_policy(task.id, workspace)
         before = len(self.observations)
         self(task, workspace)
         observation = self.observations[-1]
@@ -298,6 +314,8 @@ class FrozenSWEsmithObjective:
         )
         if coverage_policy == "no_cov":
             coverage_arguments = ("--no-cov",)
+        elif coverage_policy == "plain_pytest":
+            coverage_arguments = ()
         elif coverage_policy == "no_cov_addopts":
             coverage_arguments = ("-o", "addopts=")
         else:
@@ -345,7 +363,18 @@ class FrozenSWEsmithObjective:
             )
         return (str(environment.python_executable), *arguments)
 
+    def effective_coverage_policy(self, task_id: str) -> str:
+        """Return the resolved policy after the task environment was probed."""
+        return self._coverage_policy_by_task.get(task_id, self.objective_coverage_policy)
+
+    def _select_coverage_policy(self, task_id: str, workspace: Path) -> None:
+        if self.coverage_policy_selection_version is not None:
+            self._resolve_r7_coverage_policy(task_id, workspace)
+            return
+        self._validate_coverage_policy(task_id, workspace)
+
     def _validate_coverage_policy(self, task_id: str, workspace: Path) -> None:
+        """Preserve the historical R6 probe behavior."""
         environment = self.environments[task_id]
         probe_arguments = ("-m", "pytest", "--no-cov", "--help")
         command = self._objective_command(
@@ -374,6 +403,47 @@ class FrozenSWEsmithObjective:
             self._coverage_policy_by_task[task_id] = "no_cov"
             return
         self._coverage_policy_by_task[task_id] = "no_cov_addopts"
+
+    def _resolve_r7_coverage_policy(self, task_id: str, workspace: Path) -> None:
+        """Select coverage-neutral invocation from ordinary pytest help output."""
+        environment = self.environments[task_id]
+        command = self._objective_command(
+            task_id,
+            workspace,
+            environment,
+            pytest_arguments=("-m", "pytest", "--help"),
+        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=workspace,
+                env=workspace_process_environment(workspace),
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise BenchmarkPreflightError(
+                f"R7 objective coverage policy discovery failed for {task_id}: {error}"
+            ) from error
+        help_output = f"{completed.stdout}\n{completed.stderr}"
+        if _pytest_help_supports_no_cov(help_output):
+            self._coverage_policy_by_task[task_id] = "no_cov"
+            return
+        if completed.returncode != 0 and not _is_no_cov_argument_error(help_output):
+            raise BenchmarkPreflightError(
+                f"R7 pytest help discovery failed for {task_id}: "
+                f"return_code={completed.returncode}\n{help_output[-4000:]}"
+            )
+        if _repository_coverage_enforcement(workspace):
+            raise BenchmarkPreflightError(
+                f"R7 cannot neutralize active coverage enforcement for {task_id} "
+                "without changing unrelated pytest semantics"
+            )
+        self._coverage_policy_by_task[task_id] = "plain_pytest"
 
 
 def load_frozen_swesmith_cases(
@@ -526,6 +596,57 @@ def _looks_like_collection_failure(output: str) -> bool:
         "No module named",
     )
     return any(marker in output for marker in markers)
+
+
+def _is_no_cov_argument_error(output: str) -> bool:
+    lowered = output.lower()
+    return (
+        "unrecognized arguments: --no-cov" in lowered
+        or "no such option: --no-cov" in lowered
+    )
+
+
+def _pytest_help_supports_no_cov(output: str) -> bool:
+    """Detect the real pytest-cov option, rather than trusting probe status."""
+    if _is_no_cov_argument_error(output):
+        return False
+    return any(
+        re.search(r"(?<![\w-])--no-cov(?:\s|,|=|$)", line) is not None
+        for line in output.splitlines()
+    )
+
+
+def _repository_coverage_enforcement(workspace: Path) -> bool:
+    """Detect configured coverage enforcement without discarding pytest options."""
+    option_pattern = re.compile(r"(?:^|\s)--cov(?:[-=\s]|$)")
+    configured_addopts: list[str] = []
+    pyproject = workspace / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            raw: Any = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+            addopts = raw.get("tool", {}).get("pytest", {}).get("ini_options", {}).get(
+                "addopts"
+            )
+            if isinstance(addopts, str):
+                configured_addopts.append(addopts)
+            elif isinstance(addopts, list):
+                configured_addopts.extend(
+                    value for value in addopts if isinstance(value, str)
+                )
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+            pass
+
+    for filename in ("pytest.ini", "tox.ini", "setup.cfg"):
+        path = workspace / filename
+        try:
+            parser = configparser.ConfigParser(interpolation=None)
+            parser.read(path, encoding="utf-8")
+        except (OSError, configparser.Error):
+            continue
+        for section in ("pytest", "tool:pytest"):
+            if parser.has_option(section, "addopts"):
+                configured_addopts.append(parser.get(section, "addopts"))
+    return any(option_pattern.search(value) for value in configured_addopts)
 
 
 def _pytest_target(test_id: str) -> str:
@@ -1570,6 +1691,7 @@ def _materialize_workspace(
     frozen_cases: Mapping[str, FrozenSWEsmithCase],
     condition: str,
     task: Any,
+    workspace_line_ending_policy: str = "git_aware_line_endings_v1",
 ) -> Path:
     source = (source_root / task.repository).resolve()
     frozen = frozen_cases[task.id]
@@ -1597,6 +1719,8 @@ def _materialize_workspace(
         raise RuntimeError(
             f"could not materialize frozen SWE-smith task {task.id}: {applied.stderr.strip()}"
         )
+    if workspace_line_ending_policy == "git_index_consistent_line_endings_v2":
+        _remove_eol_only_worktree_noise(destination)
     return destination
 
 
@@ -1666,6 +1790,96 @@ def _apply_explicit_git_eol_attributes(workspace: Path) -> None:
             path.write_bytes(normalized)
             os.chmod(path, metadata.st_mode)
             os.utime(path, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+
+
+def _remove_eol_only_worktree_noise(workspace: Path) -> None:
+    """Restore only unstaged changes that are byte-level EOL noise.
+
+    The index is authoritative for this correction.  A path is restored only
+    when Git's ignore-space-at-EOL comparison says the worktree has no
+    substantive change, so benchmark mutations and intentional edits remain
+    untouched.  The correction writes only the worktree bytes and uses
+    ``update-index --refresh`` solely to refresh Git's worktree comparison;
+    it never writes a new index blob.
+    """
+    subprocess.run(
+        ["git", "-C", str(workspace), "update-index", "--really-refresh"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    changed = subprocess.run(
+        ["git", "-C", str(workspace), "status", "--porcelain=v1", "-z"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if changed.returncode != 0:
+        raise RuntimeError(
+            "could not inspect materialized worktree diff: "
+            f"{changed.stderr.strip()}"
+        )
+    status_records = [record for record in changed.stdout.split("\0") if record]
+    for record in status_records:
+        if len(record) < 4 or record[1] != "M":
+            continue
+        relative_path = record[3:]
+        index_content = subprocess.run(
+            ["git", "-C", str(workspace), "show", f":{relative_path}"],
+            check=False,
+            capture_output=True,
+        )
+        if index_content.returncode != 0:
+            raise RuntimeError(
+                f"could not read index content for {relative_path}: "
+                f"{index_content.stderr!r}"
+            )
+        target = workspace / Path(relative_path)
+        worktree_bytes = target.read_bytes()
+        index_bytes = index_content.stdout
+        if b"\0" in worktree_bytes or b"\0" in index_bytes:
+            continue
+        diff_summary = subprocess.run(
+            ["git", "-C", str(workspace), "diff", "--numstat", "--", relative_path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if diff_summary.returncode != 0 or diff_summary.stdout.startswith("-\t-\t"):
+            continue
+        if worktree_bytes.replace(b"\r\n", b"\n") != index_bytes.replace(b"\r\n", b"\n"):
+            continue
+        attributes = subprocess.run(
+            ["git", "-C", str(workspace), "check-attr", "-z", "eol", "--", relative_path],
+            check=False,
+            capture_output=True,
+        )
+        if attributes.returncode != 0:
+            raise RuntimeError(
+                f"could not inspect EOL attributes for {relative_path}: "
+                f"{attributes.stderr!r}"
+            )
+        fields = attributes.stdout.split(b"\0")
+        eol = fields[2].decode("utf-8") if len(fields) >= 3 else "unspecified"
+        restored_bytes = index_bytes
+        if eol == "crlf":
+            restored_bytes = index_bytes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        elif eol == "lf":
+            restored_bytes = index_bytes.replace(b"\r\n", b"\n")
+        metadata = target.stat()
+        target.write_bytes(restored_bytes)
+        os.chmod(target, metadata.st_mode)
+        refreshed = subprocess.run(
+            ["git", "-C", str(workspace), "update-index", "--refresh", "--", relative_path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if refreshed.returncode not in (0, 1):
+            raise RuntimeError(
+                f"could not refresh restored worktree path {relative_path}: "
+                f"{refreshed.stderr.strip()}"
+            )
 
 
 def _make_workspace_resolver(

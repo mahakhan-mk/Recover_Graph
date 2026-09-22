@@ -1,0 +1,765 @@
+"""Narrow Gate A1 R8 harness primitives.
+
+This module is deliberately provider-agnostic at its public boundaries.  The
+acquisition runner wires these primitives to the frozen SWE-smith objective;
+unit tests can exercise the lifecycle without credentials, Docker, or Neo4j.
+"""
+# pyright: reportPrivateUsage=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportAttributeAccessIssue=false
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from typing import Any, Protocol, cast
+
+from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
+
+from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.detection.failure_detector import detect_failure
+from graph_swarm.domain.actions import PlannedAction
+from graph_swarm.domain.events import AgentEvent
+from graph_swarm.graph.neo4j_repository import Neo4jRepository
+from graph_swarm.integration.event_persistence import persist_agent_event
+from graph_swarm.memory.recovery_evidence import has_concrete_change
+
+R8_LINE_ENDING_POLICY = "git_index_consistent_line_endings_v2"
+R8_STOPPING_POLICY = "objective_success_or_timeout_v1"
+R8_PERSISTENCE_SESSION_POLICY = "short_lived_session_v1"
+R8_PERSISTENCE_RETRY_POLICY = "retryable_transient_max_2_v1"
+R8_MAX_PERSISTENCE_ATTEMPTS = 2
+R8_MUTATING_TOOLS = frozenset({"write_file", "run_command", "run_tests"})
+
+
+def classify_r8_acquisition(
+    *,
+    task_success: bool,
+    complete_trusted_lineage: bool,
+    pattern_created: bool,
+    pattern_persisted: bool,
+    pattern_embedded: bool,
+    qualifying_failure_observed: bool,
+) -> tuple[bool, str]:
+    """Separate objective task success from complete acquisition evidence."""
+    acquisition_success = bool(
+        complete_trusted_lineage
+        and pattern_created
+        and pattern_persisted
+        and pattern_embedded
+    )
+    if acquisition_success:
+        return True, "complete_trusted_recovery_lineage_and_pattern"
+    if task_success and not complete_trusted_lineage:
+        return (
+            False,
+            "objective_success_without_complete_recovery_lineage"
+            if qualifying_failure_observed
+            else "no_qualifying_failure_observed",
+        )
+    if not complete_trusted_lineage:
+        return False, "no_complete_trusted_recovery_lineage"
+    if not pattern_created:
+        return False, "recovery_pattern_not_created"
+    if not pattern_persisted:
+        return False, "recovery_pattern_not_persisted"
+    return False, "recovery_pattern_not_embedded"
+
+
+def r8_acquisition_readiness(
+    task_records: Sequence[Mapping[str, object]],
+    completed_task_ids: tuple[str, ...],
+    task_ids: tuple[str, ...],
+) -> tuple[str, bool, int]:
+    """Return readiness using completed markers and eligible corpus state."""
+    eligible_tasks = sum(bool(record.get("acquisition_success")) for record in task_records)
+    all_completed = completed_task_ids == task_ids
+    if all_completed and eligible_tasks > 0:
+        return "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION", True, eligible_tasks
+    if all_completed:
+        return "BLOCKED_GATE_A1_ACQUISITION_R8_NON_EVALUABLE", False, eligible_tasks
+    return "READY_TO_RESUME_GATE_A1_ACQUISITION_R8", False, eligible_tasks
+
+
+class ObjectiveSatisfied(Exception):
+    """Internal controlled completion signal, never shown to the model."""
+
+
+class ObjectiveEvaluator(Protocol):
+    def __call__(self, task: Any, workspace: Path) -> bool:
+        ...
+
+
+def repository_state_fingerprint(workspace: Path) -> str:
+    """Hash repository bytes, modes, and Git metadata without changing state."""
+    root = workspace.resolve()
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            digest.update(f"L:{relative}:{os.readlink(path)}\n".encode())
+            continue
+        if not path.is_file():
+            continue
+        try:
+            metadata = path.stat()
+            content = path.read_bytes()
+        except OSError:
+            continue
+        digest.update(f"F:{relative}:{metadata.st_mode & 0o7777}:{len(content)}\n".encode())
+        digest.update(hashlib.sha256(content).digest())
+    return digest.hexdigest()
+
+
+def _is_retryable_neo4j(error: BaseException) -> bool:
+    return isinstance(error, (SessionExpired, ServiceUnavailable, TransientError))
+
+
+def _sanitized_message(error: BaseException) -> str:
+    message = re.sub(
+        r"(?i)(password|token|secret|api[_-]?key)\\s*[=:]\\s*[^,;\\s]+",
+        r"\1=<redacted>",
+        str(error),
+    )
+    return message[:500]
+
+
+class InLoopPersistenceError(RuntimeError):
+    """A trusted action could not be persisted during objective processing."""
+
+
+class ShortLivedNeo4jRepository:
+    """Proxy each repository operation through a fresh bounded owner.
+
+    The proxy intentionally delegates schema and Cypher ownership to
+    ``Neo4jRepository``.  A repository instance is never retained between
+    calls, and retry attempts always construct a new instance.
+    """
+
+
+    def __init__(self, repository_factory: Callable[[], Neo4jRepository]) -> None:
+        self._repository_factory = repository_factory
+        self.telemetry: list[dict[str, object]] = []
+
+    def _call(self, stage: str, method: str, *args: object, **kwargs: object) -> object:
+        last_error: BaseException | None = None
+        for attempt in range(1, R8_MAX_PERSISTENCE_ATTEMPTS + 1):
+            repository: Neo4jRepository | None = None
+            try:
+                repository = self._repository_factory()
+                operation = getattr(repository, method)
+                return operation(*args, **kwargs)
+            except Exception as error:
+                retryable = _is_retryable_neo4j(error)
+                retry_performed = retryable and attempt < R8_MAX_PERSISTENCE_ATTEMPTS
+                self.telemetry.append(
+                    {
+                        "persistence_stage": stage,
+                        "exception_type": type(error).__name__,
+                        "sanitized_message": _sanitized_message(error),
+                        "attempt_number": attempt,
+                        "retryable": retryable,
+                        "retry_performed": retry_performed,
+                    }
+                )
+                last_error = error
+                if not retry_performed:
+                    raise
+            finally:
+                if repository is not None:
+                    repository.close()
+        assert last_error is not None
+        raise last_error
+
+    def __getattr__(self, name: str) -> Any:
+        def operation(*args: object, **kwargs: object) -> object:
+            return self._call(f"persist_{name.removeprefix('save_')}", name, *args, **kwargs)
+
+        return operation
+
+
+class R8ObjectiveController:
+    """Mutation-aware out-of-band objective lifecycle for one agent run."""
+
+    def __init__(
+        self,
+        *,
+        task: Any,
+        workspace: Path,
+        objective: ObjectiveEvaluator,
+        dependencies: AgentDependencies,
+        repository: ShortLivedNeo4jRepository | None = None,
+        run: Any | None = None,
+        environment: Any | None = None,
+    ) -> None:
+        self.task = task
+        self.workspace = workspace
+        self.objective = objective
+        self.dependencies = dependencies
+        self.repository = repository
+        self.run = run
+        self.environment = environment
+        self._before: dict[str, str] = {}
+        self.objective_checks = 0
+        self.objective_result = False
+        self.objective_error: Exception | None = None
+        self.objective_success = False
+        self.objective_success_pending_evidence = False
+        self.termination_reason: str | None = None
+        self.last_action_persisted = False
+        self.persistence_error: Exception | None = None
+        self._persisted_action_ids: set[str] = set()
+
+    def before_action(self, action: PlannedAction) -> None:
+        if action.tool in R8_MUTATING_TOOLS:
+            self._before[action.id] = repository_state_fingerprint(self.workspace)
+
+    def after_event(self, event: AgentEvent) -> None:
+        before = self._before.pop(event.action_id, None)
+        mutated = (
+            event.result.tool_name in R8_MUTATING_TOOLS
+            and before is not None
+            and before != repository_state_fingerprint(self.workspace)
+        )
+        if mutated:
+            self._persist_event(event)
+            self.check_objective(event)
+        if self.objective_success_pending_evidence and self._trusted_recovery_complete():
+            self._persist_event(event)
+            self.termination_reason = "objective_satisfied_with_trusted_recovery_evidence"
+            raise ObjectiveSatisfied("trusted recovery evidence completed")
+
+    def _persist_event(self, event: AgentEvent) -> None:
+        if event.action_id in self._persisted_action_ids:
+            return
+        if self.repository is None or self.run is None or self.environment is None:
+            self._persisted_action_ids.add(event.action_id)
+            return
+        planned = self.dependencies.planned_action_for(event.action_id)
+        if planned is None:
+            error = RuntimeError(f"missing trusted PlannedAction for {event.action_id}")
+            self.persistence_error = error
+            raise InLoopPersistenceError(str(error)) from error
+        try:
+            persist_agent_event(
+                cast(Any, self.repository),
+                event,
+                self.task,
+                self.run,
+                self.environment,
+                planned_action=planned,
+            )
+        except Exception as error:
+            self.persistence_error = error
+            raise InLoopPersistenceError(str(error)) from error
+        self._persisted_action_ids.add(event.action_id)
+        self.last_action_persisted = True
+
+    def _trusted_recovery_complete(self) -> bool:
+        events = self.dependencies.events
+        failure_index: int | None = None
+        change_index: int | None = None
+        for index, event in enumerate(events):
+            if detect_failure(event) is not None and failure_index is None:
+                failure_index = index
+            if failure_index is None or index <= failure_index:
+                continue
+            action = self.dependencies.planned_action_for(event.action_id)
+            if (
+                change_index is None
+                and event.result.success
+                and action is not None
+                and has_concrete_change(action)
+            ):
+                change_index = index
+                continue
+            if (
+                change_index is not None
+                and index > change_index
+                and event.result.tool_name == "run_tests"
+                and event.result.success
+                and event.result.exit_code == 0
+            ):
+                return True
+        return False
+
+    def check_objective(self, _event: AgentEvent | None = None) -> bool:
+        self.objective_checks += 1
+        try:
+            passed = bool(self.objective(self.task, self.workspace))
+        except Exception as error:
+            self.objective_error = error
+            return False
+        self.objective_result = passed
+        if passed:
+            self.objective_success = True
+            self.objective_success_pending_evidence = True
+            self.termination_reason = "objective_satisfied_pending_recovery_evidence"
+        return False
+
+    def final_check(self) -> bool:
+        if self.objective_success:
+            return False
+        try:
+            return self.check_objective()
+        except ObjectiveSatisfied:
+            self.termination_reason = "objective_satisfied_at_final_check"
+            return True
+
+
+def attach_r8_objective_controller(
+    dependencies: AgentDependencies,
+    controller: R8ObjectiveController,
+) -> None:
+    """Attach lifecycle hooks without exposing objective data to model history."""
+    dependencies.before_tool_action = controller.before_action
+    dependencies.after_tool_event = controller.after_event
+
+
+def run_gate_a1_acquisition_r8(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Execute the R8 acquisition lifecycle when explicitly invoked."""
+    import json
+    import uuid
+    from datetime import UTC, datetime
+
+    from experiments.sprint3 import FrozenSWEsmithObjective, _configured_runtime
+    from graph_swarm.agent.pacing import ProviderRequestPacing
+    from graph_swarm.research.gate_a1_acquisition import (
+        ACQUISITION_TASK_IDS,
+        _preflight,
+        _r2_task_marker,
+        _settings_for_agent,
+        _task_cases,
+        _validate_preflight_configuration,
+        _write_json,
+    )
+    from graph_swarm.research.runner import load_experiment_configuration
+
+    project_root = project_root.expanduser().resolve()
+    if max_new_tasks is not None and max_new_tasks <= 0:
+        raise ValueError("max_new_tasks must be positive")
+    run_prefix = "acquisition-r8"
+    if resume_root is None:
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        artifact_root = (
+            project_root
+            / "research/evidence/results/GS-E003/gate_a1"
+            / f"{run_prefix}-{stamp}"
+        )
+        artifact_root.mkdir(parents=True, exist_ok=False)
+    else:
+        artifact_root = resume_root.expanduser().resolve()
+        if not artifact_root.name.startswith(f"{run_prefix}-"):
+            raise ValueError("R8 resume path must use an acquisition-r8-* namespace")
+        early_manifest = artifact_root / "manifest.json"
+        if not early_manifest.is_file():
+            raise ValueError("R8 resume root is missing manifest.json")
+        early_record = json.loads(early_manifest.read_text(encoding="utf-8"))
+        if not isinstance(early_record, dict) or early_record.get("run_revision") != "R8":
+            raise ValueError("R8 rejects resume roots from R2-R7 or other revisions")
+
+    configuration = _configured_runtime(
+        load_experiment_configuration(
+            project_root / "configs/experiments/gate_a1_acquisition_r8.yaml",
+            project_root=project_root,
+        ),
+        project_root / "benchmark/workspaces",
+        project_root / "research/evidence/workspaces",
+    )
+    if configuration.config.run_revision != "R8":
+        raise ValueError("R8 configuration must declare run_revision=R8")
+    if (
+        configuration.config.limits.max_actions is not None
+        or configuration.config.limits.max_requests is not None
+    ):
+        raise ValueError("R8 action and request limits must be explicitly disabled")
+    if configuration.config.limits.timeout_seconds != 600:
+        raise ValueError("R8 wall-clock timeout must remain 600 seconds")
+    cases = _task_cases(configuration, ACQUISITION_TASK_IDS)
+    settings = _settings_for_agent()
+    _validate_preflight_configuration(
+        configuration,
+        settings,
+        expected_coding_model="nex-agi/nex-n2.5-pro:free",
+        expected_abstraction_model="cohere/north-mini-code:free",
+    )
+    environments, frozen_cases = _preflight(
+        project_root=project_root,
+        baseline_root=project_root / "benchmark/workspaces",
+        execution_root=project_root / "research/evidence/workspaces",
+        configuration=configuration,
+        cases=cases,
+    )
+    objective = FrozenSWEsmithObjective(
+        frozen_cases,
+        environments,
+        objective_coverage_policy=configuration.config.objective_coverage_policy,
+        coverage_policy_selection_version=configuration.config.objective_coverage_policy_selection_version,
+    )
+    from graph_swarm.research.gate_a1_acquisition import _r8_configuration_hash
+
+    configuration_hash = _r8_configuration_hash(configuration, settings, environments)
+    manifest: dict[str, object] = {
+        "gate": "GS-E003 / Gate A1",
+        "phase": "acquisition",
+        "run_revision": "R8",
+        "namespace": "GS-E003/Gate-A1/acquisition-r8",
+        "task_ids": list(ACQUISITION_TASK_IDS),
+        "status": "BLOCKED_GATE_A1_ACQUISITION_R8",
+        "configuration_hash": configuration_hash,
+        "coding_model": settings.openrouter_coding_model,
+        "abstraction_model": settings.openrouter_abstraction_model,
+        "prompt_version": configuration.model.prompt_version,
+        "limits": configuration.config.limits.model_dump(mode="json"),
+        "stopping_policy": R8_STOPPING_POLICY,
+        "objective_mutation_check_policy": "repository_state_fingerprint_v1",
+        "workspace_line_ending_policy": R8_LINE_ENDING_POLICY,
+        "persistence_session_policy": R8_PERSISTENCE_SESSION_POLICY,
+        "persistence_retry_policy": R8_PERSISTENCE_RETRY_POLICY,
+        "revision_reason": configuration.config.revision_reason,
+        "model_visible_tool_output_chars": configuration.config.model_visible_tool_output_chars,
+        "objective_coverage_policy": configuration.config.objective_coverage_policy,
+        "objective_coverage_policy_selection_version": (
+            configuration.config.objective_coverage_policy_selection_version
+        ),
+        "tasks": [],
+        "errors": [],
+    }
+    manifest_path = artifact_root / "manifest.json"
+    if resume_root is not None:
+        existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(existing, dict) or existing.get("run_revision") != "R8":
+            raise ValueError("R8 rejects resume roots from R2-R7 or other revisions")
+        if existing.get("configuration_hash") != configuration_hash:
+            raise ValueError("R8 resume configuration hash differs")
+        manifest = cast(dict[str, object], existing)
+    else:
+        _write_json(manifest_path, manifest)
+
+    def repository_factory() -> Neo4jRepository:
+        return Neo4jRepository(
+            uri=settings.neo4j_uri,
+            username=settings.neo4j_username,
+            password=settings.neo4j_password,
+            database=settings.neo4j_database,
+        )
+
+    memory = ShortLivedNeo4jRepository(repository_factory)
+    memory.verify_connectivity()
+    memory.ensure_recovery_pattern_vector_index()
+    task_records: list[dict[str, object]] = []
+    embedder: Any = None
+    started_new = 0
+    for case in cases:
+        task_id = case.task.id
+        completed_marker = _r2_task_marker(artifact_root, task_id, "completed.json")
+        started_marker = _r2_task_marker(artifact_root, task_id, "started.json")
+        if completed_marker.is_file():
+            task_records.append(json.loads(completed_marker.read_text(encoding="utf-8")))
+            continue
+        if started_marker.is_file():
+            task_records.append({"task_id": task_id, "resume_action": "skipped_started_no_rerun"})
+            continue
+        if max_new_tasks is not None and started_new >= max_new_tasks:
+            break
+        run_id = f"GS-E003-A1-R8-{task_id}-{uuid.uuid4().hex}"
+        started_marker.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(
+            started_marker,
+            {
+                "task_id": task_id,
+                "run_id": run_id,
+                "configuration_hash": configuration_hash,
+            },
+        )
+        task_artifact, embedder = _run_r8_task(
+            project_root=project_root,
+            artifact_root=artifact_root,
+            configuration=configuration,
+            case=case,
+            environment=environments[task_id],
+            objective=objective,
+            settings=settings,
+            pacing=ProviderRequestPacing(),
+            embedder=embedder,
+            run_id=run_id,
+            memory=memory,
+        )
+        task_records.append(task_artifact)
+        _write_json(completed_marker, task_artifact)
+        started_new += 1
+        manifest["tasks"] = task_records
+        _write_json(manifest_path, manifest)
+    manifest["tasks"] = task_records
+    completed_task_ids = tuple(
+        task_id
+        for task_id in ACQUISITION_TASK_IDS
+        if _r2_task_marker(artifact_root, task_id, "completed.json").is_file()
+    )
+    status, corpus_ready, eligible_acquisition_tasks = r8_acquisition_readiness(
+        task_records,
+        completed_task_ids,
+        ACQUISITION_TASK_IDS,
+    )
+    manifest["completed_tasks"] = len(completed_task_ids)
+    manifest["completed_task_ids"] = list(completed_task_ids)
+    manifest["eligible_acquisition_tasks"] = eligible_acquisition_tasks
+    manifest["acquisition_corpus_ready"] = corpus_ready
+    manifest["status"] = status
+    if status == "BLOCKED_GATE_A1_ACQUISITION_R8_NON_EVALUABLE":
+        manifest["acquisition_reason"] = "zero_eligible_recovery_patterns"
+    _write_json(manifest_path, manifest)
+    return str(manifest["status"]), artifact_root
+
+
+def _run_r8_task(
+    *,
+    project_root: Path,
+    artifact_root: Path,
+    configuration: Any,
+    case: Any,
+    environment: Any,
+    objective: Any,
+    settings: Any,
+    pacing: Any,
+    embedder: Any,
+    run_id: str,
+    memory: ShortLivedNeo4jRepository,
+) -> tuple[dict[str, object], Any]:
+    import time
+    from datetime import UTC, datetime
+
+    from pydantic_ai import ModelSettings
+    from pydantic_ai_harness.step_persistence import SqliteStepStore, StepPersistence
+
+    from experiments.sprint3 import _materialize_workspace
+    from graph_swarm.agent.coding_agent import create_coding_agent, run_coding_agent
+    from graph_swarm.agent.dependencies import AgentDependencies
+    from graph_swarm.domain.environment import EnvironmentContext
+    from graph_swarm.domain.runs import Run
+    from graph_swarm.integration.event_persistence import persist_agent_event_stream
+    from graph_swarm.memory.recovery_abstraction import abstract_and_persist_recovery_pattern
+    from graph_swarm.memory.recovery_embeddings import (
+        RecoveryPatternEmbedder,
+        embed_and_persist_recovery_pattern,
+    )
+    from graph_swarm.research.gate_a1_acquisition import _write_json
+
+    task = case.task
+    workspace = _materialize_workspace(
+        source_root=project_root / "benchmark/workspaces",
+        execution_root=project_root / "research/evidence/workspaces",
+        frozen_cases=objective.cases,
+        condition="acquisition-r8",
+        task=task,
+        workspace_line_ending_policy=R8_LINE_ENDING_POLICY,
+    )
+    run = Run(id=run_id, task_id=task.id, started_at=datetime.now(UTC))
+    environment_context = EnvironmentContext(
+        id=f"{run_id}-environment",
+        repository=task.repository,
+        runtime="docker",
+        versions={"python": environment.python_version or "unknown"},
+        markers={"memory_write_only": "true", "retrieval_performed": "false"},
+    )
+    memory.save_task(task)
+    memory.save_run(run)
+    memory.save_environment(environment_context)
+    run_dir = artifact_root / "GS-E003/gate_a1/acquisition-r8" / task.id / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+    dependencies = AgentDependencies(
+        workspace_root=workspace,
+        run_id=run_id,
+        task_id=task.id,
+        execution_runtime=environment.agent_execution_runtime(),
+    )
+    controller = R8ObjectiveController(
+        task=task,
+        workspace=workspace,
+        objective=objective,
+        dependencies=dependencies,
+        repository=memory,
+        run=run,
+        environment=environment_context,
+    )
+    attach_r8_objective_controller(dependencies, controller)
+    result: Any = None
+    runtime_error: Exception | None = None
+    persistence_error: Exception | None = None
+    started = time.perf_counter()
+    try:
+        step_persistence = StepPersistence(
+            store=SqliteStepStore(database=run_dir / "steps.sqlite"),
+            agent_name="graph_swarm_coding_agent",
+            run_id=run_id,
+            metadata={"gate": "GS-E003 / Gate A1", "revision": "R8", "task_id": task.id},
+        )
+        agent = create_coding_agent(settings, capabilities=[step_persistence])
+        result = run_coding_agent(
+            agent,
+            settings,
+            dependencies,
+            __import__(
+                "graph_swarm.research.runner", fromlist=["build_task_prompt"]
+            ).build_task_prompt(task),
+            max_actions=None,
+            max_requests=None,
+            timeout_seconds=configuration.config.limits.timeout_seconds,
+            model_settings=cast(ModelSettings, configuration.model.settings),
+            request_pacing=pacing,
+            disable_request_limit=True,
+        )
+    except ObjectiveSatisfied:
+        pass
+    except InLoopPersistenceError as error:
+        persistence_error = error
+    except Exception as error:
+        runtime_error = error
+    if not controller.objective_success:
+        controller.final_check()
+    persistence_error: Exception | None = persistence_error or controller.persistence_error
+    recovery: dict[str, object] | None = None
+    recovery_pattern_created = False
+    recovery_pattern_persisted = False
+    recovery_pattern_embedded = False
+    patterns: list[dict[str, object]] = []
+    try:
+        persisted = persist_agent_event_stream(
+            cast(Any, memory),
+            dependencies.events,
+            task,
+            run,
+            environment_context,
+            planned_actions=dependencies.planned_actions,
+            require_trusted_planned_actions=True,
+        )
+        if persisted is not None:
+            failure, resolution, outcome = persisted
+            recovery = {
+                "failure_id": failure.id,
+                "resolution_id": resolution.id,
+                "outcome_id": outcome.id,
+            }
+            lineage = memory.get_recovery_evidence(failure.id)
+            pattern = abstract_and_persist_recovery_pattern(
+                lineage,
+                cast(Any, memory),
+                settings,
+            )
+            recovery_pattern_created = True
+            recovery_pattern_persisted = True
+            if embedder is None:
+                embedder = RecoveryPatternEmbedder()
+            embedded = embed_and_persist_recovery_pattern(
+                pattern,
+                cast(Any, memory),
+                embedder,
+            )
+            recovery_pattern_embedded = embedded.embedding is not None
+            patterns.append(
+                {
+                    "pattern_id": embedded.id,
+                    "verification_status": embedded.verification_status.value,
+                }
+            )
+    except Exception as error:
+        persistence_error = persistence_error or error
+    task_success = controller.objective_success
+    acquisition_success = bool(
+        recovery is not None
+        and recovery_pattern_created
+        and recovery_pattern_persisted
+        and recovery_pattern_embedded
+    )
+    acquisition_success, acquisition_reason = classify_r8_acquisition(
+        task_success=task_success,
+        complete_trusted_lineage=recovery is not None,
+        pattern_created=recovery_pattern_created,
+        pattern_persisted=recovery_pattern_persisted,
+        pattern_embedded=recovery_pattern_embedded,
+        qualifying_failure_observed=any(
+            detect_failure(event) is not None for event in dependencies.events
+        ),
+    )
+    artifact: dict[str, object] = {
+        "task_id": task.id,
+        "run_id": run_id,
+        "status": (
+            "acquired"
+            if acquisition_success
+            else "task_succeeded_acquisition_not_evaluable"
+            if task_success
+            else "blocked_runtime_or_persistence_error"
+            if persistence_error or runtime_error
+            else "objective_not_satisfied"
+        ),
+        "duration_seconds": time.perf_counter() - started,
+        "task_success": task_success,
+        "acquisition_success": acquisition_success,
+        "acquisition_reason": acquisition_reason,
+        "termination_reason": controller.termination_reason
+        or (
+            "wall_clock_timeout"
+            if runtime_error is not None
+            and getattr(runtime_error, "timeout_layer", None) == "agent_wall_clock"
+            else "agent_returned" if runtime_error is None else "runtime_error"
+        ),
+        "timeout_seconds": configuration.config.limits.timeout_seconds,
+        "agent_error": (
+            None
+            if task_success
+            else None if runtime_error is None else type(runtime_error).__name__
+        ),
+        "agent_runtime_error": None if runtime_error is None else type(runtime_error).__name__,
+        "objective_checks": controller.objective_checks,
+        "objective_error": (
+            None
+            if controller.objective_error is None
+            else type(controller.objective_error).__name__
+        ),
+        "persistence_error": (
+            None if persistence_error is None else type(persistence_error).__name__
+        ),
+        "persistence_telemetry": memory.telemetry,
+        "counts": {
+            "events": len(dependencies.events),
+            "recoveries": 0 if recovery is None else 1,
+            "patterns": len(patterns),
+        },
+        "recovery_evidence": {
+            "complete_trusted_lineage": recovery is not None,
+            "pattern_created": recovery_pattern_created,
+            "pattern_persisted": recovery_pattern_persisted,
+            "pattern_embedded": recovery_pattern_embedded,
+        },
+        "recovery_lineage": recovery,
+        "patterns": patterns,
+        "events": [event.model_dump(mode="json") for event in dependencies.events],
+        "agent_output": None if result is None else result.output,
+    }
+    _write_json(run_dir / "acquisition.json", artifact)
+    return artifact, embedder
+
+
+__all__ = [
+    "ObjectiveSatisfied",
+    "InLoopPersistenceError",
+    "classify_r8_acquisition",
+    "R8ObjectiveController",
+    "R8_LINE_ENDING_POLICY",
+    "R8_MAX_PERSISTENCE_ATTEMPTS",
+    "R8_MUTATING_TOOLS",
+    "R8_PERSISTENCE_RETRY_POLICY",
+    "R8_PERSISTENCE_SESSION_POLICY",
+    "R8_STOPPING_POLICY",
+    "ShortLivedNeo4jRepository",
+    "attach_r8_objective_controller",
+    "repository_state_fingerprint",
+    "r8_acquisition_readiness",
+]

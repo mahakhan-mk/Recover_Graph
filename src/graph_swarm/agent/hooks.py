@@ -13,7 +13,7 @@ from graph_swarm.domain.events import AdviceEvent, AgentEvent, AgentEventType
 def emit_action_event(
     dependencies: AgentDependencies,
     result: ActionResult,
-) -> AgentEvent:
+    ) -> AgentEvent:
     """Record and return one completed-action event for a canonical result."""
     event = AgentEvent(
         event_id=str(uuid4()),
@@ -25,6 +25,8 @@ def emit_action_event(
         occurred_at=datetime.now(UTC),
     )
     dependencies.events.append(event)
+    if dependencies.after_tool_event is not None:
+        dependencies.after_tool_event(event)
     return event
 
 

@@ -844,6 +844,201 @@ def test_r6_model_mismatch_blocks_before_provider_or_repository_setup(
     assert "coding model" in manifest["errors"][0]["message"]
 
 
+def test_r7_freezes_coverage_compatibility_without_changing_r6_controls(
+    project_root: Path,
+) -> None:
+    r6 = load_experiment_configuration(
+        project_root / acquisition.ACQUISITION_R6_CONFIG,
+        project_root=project_root,
+    )
+    r7 = load_experiment_configuration(
+        project_root / acquisition.ACQUISITION_R7_CONFIG,
+        project_root=project_root,
+    )
+
+    assert r7.config.limits == r6.config.limits
+    assert r7.config.limits.model_dump() == {
+        "max_actions": 40,
+        "max_requests": 48,
+        "timeout_seconds": 600,
+    }
+    assert r7.model.model == r6.model.model
+    assert r7.model.prompt_version == "v1"
+    assert r7.model.settings == {"temperature": 0}
+    assert acquisition.R7_EXPECTED_CODING_MODEL == "nex-agi/nex-n2.5-pro:free"
+    assert acquisition.R7_EXPECTED_ABSTRACTION_MODEL == "cohere/north-mini-code:free"
+    assert r7.config.model_visible_tool_output_chars == 16000
+    assert r7.config.objective_coverage_policy == "no_cov"
+    assert r7.config.objective_coverage_policy_selection_version == (
+        acquisition.R7_COVERAGE_POLICY_SELECTION_VERSION
+    )
+    assert r7.config.workspace_line_ending_policy == "git_aware_line_endings_v1"
+    assert r7.config.revision_reason == (
+        "objective_coverage_compatibility_after_r6_preflight"
+    )
+    assert acquisition.ACQUISITION_R7_NAMESPACE == "GS-E003/Gate-A1/acquisition-r7"
+
+
+def test_r7_configuration_hash_includes_effective_policy_per_task() -> None:
+    configuration = SimpleNamespace(
+        model=SimpleNamespace(settings={"temperature": 0}, prompt_version="v1"),
+        config=SimpleNamespace(
+            limits=SimpleNamespace(max_actions=40, max_requests=48, timeout_seconds=600),
+            config_version="gate-a1-r7-v1",
+            revision_reason=acquisition.R7_REVISION_REASON,
+            model_visible_tool_output_chars=16000,
+            objective_coverage_policy="no_cov",
+            objective_coverage_policy_selection_version=(
+                acquisition.R7_COVERAGE_POLICY_SELECTION_VERSION
+            ),
+            workspace_line_ending_policy="git_aware_line_endings_v1",
+        ),
+    )
+    environments = {
+        task_id: IsolatedTaskEnvironment(
+            task_id=task_id,
+            python_executable=Path("docker"),
+            runtime_type="docker",
+            container_image=f"image:{task_id.lower()}",
+            container_python_executable="python",
+            environment_fingerprint=f"fingerprint-{task_id.lower()}",
+        )
+        for task_id in acquisition.ACQUISITION_TASK_IDS
+    }
+    settings = SimpleNamespace(
+        openrouter_coding_model=acquisition.R7_EXPECTED_CODING_MODEL,
+        openrouter_abstraction_model=acquisition.R7_EXPECTED_ABSTRACTION_MODEL,
+    )
+    policies = {task_id: "plain_pytest" for task_id in acquisition.ACQUISITION_TASK_IDS}
+
+    r7_hash = acquisition._r2_configuration_hash(
+        configuration,
+        settings,
+        environments,
+        revision="R7",
+        effective_coverage_policies=policies,
+    )
+    changed = dict(policies)
+    changed["GS-T002"] = "no_cov"
+    assert r7_hash != acquisition._r2_configuration_hash(
+        configuration,
+        settings,
+        environments,
+        revision="R7",
+        effective_coverage_policies=changed,
+    )
+
+
+def test_r7_manifest_freezes_effective_policy_and_rejects_changes() -> None:
+    policies = {task_id: "plain_pytest" for task_id in acquisition.ACQUISITION_TASK_IDS}
+    manifest = {
+        "run_revision": "R7",
+        "namespace": acquisition.ACQUISITION_R7_NAMESPACE,
+        "task_ids": list(acquisition.ACQUISITION_TASK_IDS),
+        "coding_model": acquisition.R7_EXPECTED_CODING_MODEL,
+        "abstraction_model": acquisition.R7_EXPECTED_ABSTRACTION_MODEL,
+        "configuration_hash": "hash",
+        "revision_reason": acquisition.R7_REVISION_REASON,
+        "model_visible_tool_output_chars": 16000,
+        "objective_coverage_policy": "no_cov",
+        "objective_coverage_policy_selection_version": (
+            acquisition.R7_COVERAGE_POLICY_SELECTION_VERSION
+        ),
+        "workspace_line_ending_policy": "git_aware_line_endings_v1",
+        "effective_objective_coverage_policy": policies,
+    }
+
+    acquisition._validate_r7_manifest(
+        manifest,
+        configuration_hash="hash",
+        coding_model=acquisition.R7_EXPECTED_CODING_MODEL,
+        abstraction_model=acquisition.R7_EXPECTED_ABSTRACTION_MODEL,
+        effective_coverage_policies=policies,
+    )
+    changed = dict(manifest)
+    changed_policies = dict(policies)
+    changed_policies["GS-T002"] = "no_cov"
+    changed["effective_objective_coverage_policy"] = changed_policies
+    with pytest.raises(
+        acquisition.GateA1AcquisitionPreflightError,
+        match="effective_objective_coverage_policy",
+    ):
+        acquisition._validate_r7_manifest(
+            changed,
+            configuration_hash="hash",
+            coding_model=acquisition.R7_EXPECTED_CODING_MODEL,
+            abstraction_model=acquisition.R7_EXPECTED_ABSTRACTION_MODEL,
+            effective_coverage_policies=policies,
+        )
+
+
+def test_r7_resume_rejects_r6_and_other_historical_roots(
+    tmp_path: Path,
+    project_root: Path,
+) -> None:
+    for revision in ("r2", "r3", "r4", "r5", "r6"):
+        prior_root = tmp_path / f"acquisition-{revision}-20260921T000000Z"
+        prior_root.mkdir()
+        with pytest.raises(acquisition.GateA1AcquisitionPreflightError):
+            acquisition.run_gate_a1_acquisition_r7(
+                project_root,
+                resume_root=prior_root,
+                max_new_tasks=1,
+            )
+
+
+def test_r7_model_mismatch_blocks_before_provider_or_repository_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_calls = 0
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> object:
+        nonlocal provider_calls
+        provider_calls += 1
+        raise AssertionError("provider/repository execution boundary was reached")
+
+    monkeypatch.setattr(
+        acquisition,
+        "_settings_for_agent",
+        lambda: SimpleNamespace(
+            model_provider="openrouter",
+            openrouter_api_key="offline-key",
+            openrouter_coding_model="wrong/coding-model",
+            openrouter_abstraction_model=acquisition.R7_EXPECTED_ABSTRACTION_MODEL,
+        ),
+    )
+    monkeypatch.setattr(
+        acquisition,
+        "load_experiment_configuration",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            model=SimpleNamespace(provider="openrouter"),
+            config=SimpleNamespace(
+                limits=SimpleNamespace(max_actions=40, max_requests=48, timeout_seconds=600),
+                revision_reason=acquisition.R7_REVISION_REASON,
+                model_visible_tool_output_chars=16000,
+                objective_coverage_policy="no_cov",
+                objective_coverage_policy_selection_version=(
+                    acquisition.R7_COVERAGE_POLICY_SELECTION_VERSION
+                ),
+                workspace_line_ending_policy="git_aware_line_endings_v1",
+            ),
+        ),
+    )
+    monkeypatch.setattr(acquisition, "_configured_runtime", lambda configuration, *_: configuration)
+    monkeypatch.setattr(acquisition, "_task_cases", lambda *_args: ())
+    monkeypatch.setattr(acquisition, "_preflight", fail_if_called)
+    monkeypatch.setattr(acquisition, "Neo4jRepository", fail_if_called)
+
+    status, artifact_root = acquisition.run_gate_a1_acquisition_r7(tmp_path, max_new_tasks=1)
+
+    assert status == "BLOCKED_GATE_A1_ACQUISITION_R7"
+    assert provider_calls == 0
+    manifest = json.loads((artifact_root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["new_tasks_started"] == 0
+    assert "coding model" in manifest["errors"][0]["message"]
+
+
 def test_r5_manifest_records_resolved_roles_without_api_key(
     tmp_path: Path,
     project_root: Path,

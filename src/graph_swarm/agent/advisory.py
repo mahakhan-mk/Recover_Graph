@@ -38,6 +38,8 @@ def prepare_tool_action(
     # This is the trust boundary: retain the exact object before advisory
     # evaluation can retry, fail open, or otherwise alter control flow.
     dependencies.record_planned_action(action)
+    if dependencies.before_tool_action is not None:
+        dependencies.before_tool_action(action)
 
     service = dependencies.advisory_service
     task = dependencies.task

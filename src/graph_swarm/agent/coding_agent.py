@@ -213,6 +213,7 @@ def run_coding_agent(
     timeout_seconds: float | None = None,
     model_settings: ModelSettings | None = None,
     request_pacing: ProviderRequestPacing | None = None,
+    disable_request_limit: bool = False,
 ) -> AgentRunResult[str]:
     """Run a constructed agent with isolated identity and optional bounds."""
     if timeout_seconds is not None:
@@ -227,6 +228,7 @@ def run_coding_agent(
                 timeout_seconds=timeout_seconds,
                 model_settings=model_settings,
                 request_pacing=request_pacing,
+                disable_request_limit=disable_request_limit,
             )
         )
     if request_pacing is not None:
@@ -239,7 +241,12 @@ def run_coding_agent(
             conversation_id=dependencies.run_id,
             run_id=dependencies.run_id,
             model_settings=_effective_model_settings(model_settings),
-            usage_limits=_usage_limits(settings, max_actions, max_requests),
+            usage_limits=_usage_limits(
+                settings,
+                max_actions,
+                max_requests,
+                disable_request_limit=disable_request_limit,
+            ),
         )
     finally:
         finalize_pending_advice(dependencies)
@@ -256,6 +263,7 @@ async def run_coding_agent_async(
     timeout_seconds: float | None = None,
     model_settings: ModelSettings | None = None,
     request_pacing: ProviderRequestPacing | None = None,
+    disable_request_limit: bool = False,
 ) -> AgentRunResult[str]:
     """Async bounded variant used by the sequential Track B runner."""
     if request_pacing is not None:
@@ -268,7 +276,12 @@ async def run_coding_agent_async(
             conversation_id=dependencies.run_id,
             run_id=dependencies.run_id,
             model_settings=_effective_model_settings(model_settings),
-            usage_limits=_usage_limits(settings, max_actions, max_requests),
+            usage_limits=_usage_limits(
+                settings,
+                max_actions,
+                max_requests,
+                disable_request_limit=disable_request_limit,
+            ),
         )
         if timeout_seconds is None:
             return await run
@@ -288,13 +301,13 @@ def _usage_limits(
     settings: Settings,
     max_actions: int | None,
     max_requests: int | None = None,
+    *,
+    disable_request_limit: bool = False,
 ) -> UsageLimits:
     return UsageLimits(
-        request_limit=(
-            max_requests
-            if max_requests is not None
-            else settings.agent_request_limit
-        ),
+        request_limit=(None if disable_request_limit else (
+            max_requests if max_requests is not None else settings.agent_request_limit
+        )),
         tool_calls_limit=max_actions,
     )
 

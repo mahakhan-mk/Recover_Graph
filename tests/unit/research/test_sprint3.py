@@ -726,6 +726,107 @@ def test_objective_preflight_falls_back_when_no_cov_is_unavailable(
     assert "addopts=" in commands[1]
 
 
+def test_r7_help_option_discovery_selects_no_cov_without_using_probe_status() -> None:
+    assert sprint3._pytest_help_supports_no_cov(  # pyright: ignore[reportPrivateUsage]
+        "pytest options:\n  --no-cov  disable coverage"
+    )
+    assert not sprint3._pytest_help_supports_no_cov(  # pyright: ignore[reportPrivateUsage]
+        "pytest: error: unrecognized arguments: --no-cov"
+    )
+
+
+def test_r7_plain_pytest_preserves_unrelated_options_and_objective_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_case = _case(2)
+    objective = FrozenSWEsmithObjective(
+        {"GS-T006": FrozenSWEsmithCase("example", ("test_target.py",), "")},
+        {"GS-T006": IsolatedTaskEnvironment("GS-T006", Path("venv-python"))},
+        objective_coverage_policy="no_cov",
+        coverage_policy_selection_version=sprint3.OBJECTIVE_COVERAGE_POLICY_SELECTION_VERSION,
+    )
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
+        commands.append(command)
+        if len(commands) == 1:
+            return type("Completed", (), {"returncode": 0, "stdout": "-q", "stderr": ""})()
+        return type(
+            "Completed",
+            (),
+            {"returncode": 1, "stdout": "FAILED test_target.py", "stderr": ""},
+        )()
+
+    monkeypatch.setattr(sprint3.subprocess, "run", fake_run)
+
+    observation = objective.preflight(task_case.task, tmp_path)
+
+    assert observation.status == "test_failure"
+    assert objective.effective_coverage_policy("GS-T006") == "plain_pytest"
+    assert commands == [
+        ("venv-python", "-m", "pytest", "--help"),
+        ("venv-python", "-m", "pytest", "test_target.py", "-q"),
+    ]
+
+
+def test_r7_pytest_cov_help_selects_no_cov_for_the_objective(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_case = _case(2)
+    objective = FrozenSWEsmithObjective(
+        {"GS-T006": FrozenSWEsmithCase("example", ("test_target.py",), "")},
+        {"GS-T006": IsolatedTaskEnvironment("GS-T006", Path("venv-python"))},
+        objective_coverage_policy="no_cov",
+        coverage_policy_selection_version=sprint3.OBJECTIVE_COVERAGE_POLICY_SELECTION_VERSION,
+    )
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
+        commands.append(command)
+        if len(commands) == 1:
+            return type(
+                "Completed",
+                (),
+                {"returncode": 0, "stdout": "--no-cov  disable coverage", "stderr": ""},
+            )()
+        return type("Completed", (), {"returncode": 0, "stdout": "1 passed", "stderr": ""})()
+
+    monkeypatch.setattr(sprint3.subprocess, "run", fake_run)
+
+    assert objective(task_case.task, tmp_path) is True
+    assert objective.effective_coverage_policy("GS-T006") == "no_cov"
+    assert commands == [
+        ("venv-python", "-m", "pytest", "--help"),
+        ("venv-python", "-m", "pytest", "--no-cov", "test_target.py", "-q"),
+    ]
+
+
+def test_r7_coverage_enforcement_without_no_cov_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "pytest.ini").write_text(
+        "[pytest]\naddopts = --cov --cov-fail-under=80\n",
+        encoding="utf-8",
+    )
+    objective = FrozenSWEsmithObjective(
+        {"GS-T006": FrozenSWEsmithCase("example", ("test_target.py",), "")},
+        {"GS-T006": IsolatedTaskEnvironment("GS-T006", Path("venv-python"))},
+        objective_coverage_policy="no_cov",
+        coverage_policy_selection_version=sprint3.OBJECTIVE_COVERAGE_POLICY_SELECTION_VERSION,
+    )
+
+    def fake_run(*_args: object, **_kwargs: object) -> object:
+        return type("Completed", (), {"returncode": 0, "stdout": "-q", "stderr": ""})()
+
+    monkeypatch.setattr(sprint3.subprocess, "run", fake_run)
+
+    with pytest.raises(BenchmarkPreflightError, match="active coverage enforcement"):
+        objective.preflight(_case(2).task, tmp_path)
+
+
 def test_git_worktree_materialization_preserves_attributes_mutation_binary_and_modes(
     tmp_path: Path,
 ) -> None:
