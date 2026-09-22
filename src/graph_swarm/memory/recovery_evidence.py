@@ -3,15 +3,60 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from pathlib import Path
 from typing import cast
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from graph_swarm.domain._validation import require_non_empty
 from graph_swarm.domain.actions import PlannedAction
+
+
+class RepositoryMutationEvidence(BaseModel):
+    """Runtime-observed repository state change for one trusted action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action_id: str
+    before_fingerprint: str
+    after_fingerprint: str
+
+    @field_validator("action_id", "before_fingerprint", "after_fingerprint")
+    @classmethod
+    def require_non_empty_text(cls, value: str) -> str:
+        return require_non_empty(value)
+
+    @model_validator(mode="after")
+    def require_changed_repository(self) -> RepositoryMutationEvidence:
+        if self.before_fingerprint == self.after_fingerprint:
+            raise ValueError("repository mutation evidence requires a changed fingerprint")
+        return self
+
+
+def is_test_execution(action: PlannedAction) -> bool:
+    """Identify pytest execution from trusted PlannedAction semantics."""
+    if action.tool == "run_tests":
+        return True
+    if action.tool != "run_command":
+        return False
+    command = action.arguments.get("command")
+    if not isinstance(command, Sequence) or isinstance(command, (str, bytes)):
+        return False
+    command_values = tuple(cast(Sequence[object], command))
+    argv = tuple(item for item in command_values if isinstance(item, str))
+    if len(argv) != len(command_values) or not argv:
+        return False
+    executable = argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if executable in {"pytest", "pytest.exe", "py.test", "py.test.exe"}:
+        return True
+    if len(argv) >= 3 and argv[1] == "-m":
+        module = argv[2].lower()
+        if module not in {"pytest", "py.test"}:
+            return False
+        return executable.startswith("python") or executable in {"py", "py.exe"}
+    return False
 
 
 def _normalize_value(value: object) -> object:
@@ -77,16 +122,21 @@ def normalize_planned_action(action: PlannedAction) -> PlannedAction:
     return action.model_copy(update={"arguments": arguments})
 
 
-def has_concrete_change(action: PlannedAction) -> bool:
+def has_concrete_change(
+    action: PlannedAction,
+    *,
+    mutation_evidence: RepositoryMutationEvidence | None = None,
+) -> bool:
     """Recognize only action shapes that identify an observable change.
 
-    A successful result is not itself a change. The explicit shapes here keep
-    recovery creation deterministic and prevent result prose from becoming a
-    fabricated recovery description. Sprint 1 supports only ``write_file``:
-    its path must be non-empty and its content must be present as a string.
-    Read operations, test execution, and generic commands are not classified
-    as mutations by this module.
+    A successful result is not itself a change. The explicit shapes and
+    runtime evidence keep recovery creation deterministic and prevent result
+    prose from becoming a fabricated recovery description. ``write_file``
+    retains its deterministic argument rule; other actions require valid
+    before/after repository evidence.
     """
+    if mutation_evidence is not None and mutation_evidence.action_id == action.id:
+        return True
     arguments = action.arguments
     if action.tool == "write_file":
         path = arguments.get("path")
@@ -109,6 +159,7 @@ class ConcreteRecoveryEvidence(BaseModel):
     task_id: str
     source_chronological_index: int
     environment_id: str
+    repository_mutation_evidence: RepositoryMutationEvidence | None = None
 
     @field_validator(
         "source_failure_id",
@@ -130,8 +181,16 @@ class ConcreteRecoveryEvidence(BaseModel):
                 raise ValueError(f"recovery_action.{field_name} must be non-empty")
         if action.planned_at.tzinfo is None or action.planned_at.utcoffset() is None:
             raise ValueError("recovery_action.planned_at must be timezone-aware")
-        if not has_concrete_change(action):
+        if not has_concrete_change(
+            action,
+            mutation_evidence=self.repository_mutation_evidence,
+        ):
             raise ValueError("recovery_action must identify a supported concrete change")
+        if (
+            self.repository_mutation_evidence is not None
+            and self.repository_mutation_evidence.action_id != action.id
+        ):
+            raise ValueError("repository mutation evidence action_id must match recovery_action")
         if self.recovery_action.task_id != self.task_id:
             raise ValueError("recovery action task_id must match evidence task_id")
         return self
@@ -150,8 +209,10 @@ def arguments_json(action: PlannedAction) -> str:
 
 __all__ = [
     "ConcreteRecoveryEvidence",
+    "RepositoryMutationEvidence",
     "arguments_json",
     "has_concrete_change",
+    "is_test_execution",
     "normalize_arguments",
     "normalize_planned_action",
 ]

@@ -11,6 +11,9 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import stat
+import subprocess
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -22,8 +25,11 @@ from graph_swarm.detection.failure_detector import detect_failure
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.events import AgentEvent
 from graph_swarm.graph.neo4j_repository import Neo4jRepository
-from graph_swarm.integration.event_persistence import persist_agent_event
-from graph_swarm.memory.recovery_evidence import has_concrete_change
+from graph_swarm.integration.event_persistence import (
+    persist_agent_event,
+    select_recovery_event_chain,
+)
+from graph_swarm.memory.recovery_evidence import RepositoryMutationEvidence
 
 R8_LINE_ENDING_POLICY = "git_index_consistent_line_endings_v2"
 R8_STOPPING_POLICY = "objective_success_or_timeout_v1"
@@ -31,6 +37,18 @@ R8_PERSISTENCE_SESSION_POLICY = "short_lived_session_v1"
 R8_PERSISTENCE_RETRY_POLICY = "retryable_transient_max_2_v1"
 R8_MAX_PERSISTENCE_ATTEMPTS = 2
 R8_MUTATING_TOOLS = frozenset({"write_file", "run_command", "run_tests"})
+
+
+def agent_timeout_seconds_for_configuration(configuration: Any) -> float:
+    """Resolve only the coding-agent budget for a validated configuration."""
+    timeout = getattr(
+        configuration.config,
+        "agent_timeout_seconds",
+        configuration.config.limits.timeout_seconds,
+    )
+    if not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise ValueError("agent timeout must be positive")
+    return float(timeout)
 
 
 def classify_r8_acquisition(
@@ -112,6 +130,61 @@ def repository_state_fingerprint(workspace: Path) -> str:
     return digest.hexdigest()
 
 
+def git_worktree_content_fingerprint(workspace: Path) -> str:
+    """Hash substantive Git-visible worktree content, excluding runtime metadata.
+
+    Git supplies the tracked and non-ignored untracked path set.  The index is
+    never hashed, and file bytes are read from the worktree, so stat refreshes
+    and other Git metadata changes do not look like repository mutations.
+    """
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"could not enumerate Git worktree content: {result.stderr!r}"
+        )
+    paths = sorted(path for path in result.stdout.split(b"\0") if path)
+    digest = hashlib.sha256()
+    for relative_bytes in paths:
+        relative = os.fsdecode(relative_bytes)
+        if relative == ".git" or relative.startswith(".git/"):
+            continue
+        path = workspace / Path(relative)
+        digest.update(b"P\0" + relative_bytes + b"\0")
+        try:
+            metadata = os.lstat(path)
+        except OSError:
+            digest.update(b"MISSING\0")
+            continue
+        digest.update(f"{metadata.st_mode & 0o7777}\0".encode("ascii"))
+        if stat.S_ISLNK(metadata.st_mode):
+            digest.update(b"L\0" + os.fsencode(os.readlink(path)) + b"\0")
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            digest.update(b"O\0")
+            continue
+        try:
+            content = path.read_bytes()
+        except OSError:
+            digest.update(b"MISSING\0")
+            continue
+        digest.update(b"F\0" + len(content).to_bytes(8, "big") + b"\0")
+        digest.update(content)
+    return digest.hexdigest()
+
+
 def _is_retryable_neo4j(error: BaseException) -> bool:
     return isinstance(error, (SessionExpired, ServiceUnavailable, TransientError))
 
@@ -182,6 +255,8 @@ class ShortLivedNeo4jRepository:
 class R8ObjectiveController:
     """Mutation-aware out-of-band objective lifecycle for one agent run."""
 
+    mutation_fingerprint = staticmethod(repository_state_fingerprint)
+
     def __init__(
         self,
         *,
@@ -204,6 +279,7 @@ class R8ObjectiveController:
         self.objective_checks = 0
         self.objective_result = False
         self.objective_error: Exception | None = None
+        self.objective_evaluation_duration_seconds = 0.0
         self.objective_success = False
         self.objective_success_pending_evidence = False
         self.termination_reason: str | None = None
@@ -213,16 +289,29 @@ class R8ObjectiveController:
 
     def before_action(self, action: PlannedAction) -> None:
         if action.tool in R8_MUTATING_TOOLS:
-            self._before[action.id] = repository_state_fingerprint(self.workspace)
+            self._before[action.id] = self.mutation_fingerprint(self.workspace)
 
     def after_event(self, event: AgentEvent) -> None:
         before = self._before.pop(event.action_id, None)
+        after = (
+            self.mutation_fingerprint(self.workspace) if before is not None else None
+        )
         mutated = (
             event.result.tool_name in R8_MUTATING_TOOLS
             and before is not None
-            and before != repository_state_fingerprint(self.workspace)
+            and after is not None
+            and before != after
         )
         if mutated:
+            action = self.dependencies.planned_action_for(event.action_id)
+            if action is not None:
+                self.dependencies.record_repository_mutation_evidence(
+                    RepositoryMutationEvidence(
+                        action_id=action.id,
+                        before_fingerprint=cast(str, before),
+                        after_fingerprint=cast(str, after),
+                    )
+                )
             self._persist_event(event)
             self.check_objective(event)
         if self.objective_success_pending_evidence and self._trusted_recovery_complete():
@@ -257,40 +346,25 @@ class R8ObjectiveController:
         self.last_action_persisted = True
 
     def _trusted_recovery_complete(self) -> bool:
-        events = self.dependencies.events
-        failure_index: int | None = None
-        change_index: int | None = None
-        for index, event in enumerate(events):
-            if detect_failure(event) is not None and failure_index is None:
-                failure_index = index
-            if failure_index is None or index <= failure_index:
-                continue
-            action = self.dependencies.planned_action_for(event.action_id)
-            if (
-                change_index is None
-                and event.result.success
-                and action is not None
-                and has_concrete_change(action)
-            ):
-                change_index = index
-                continue
-            if (
-                change_index is not None
-                and index > change_index
-                and event.result.tool_name == "run_tests"
-                and event.result.success
-                and event.result.exit_code == 0
-            ):
-                return True
-        return False
+        return (
+            select_recovery_event_chain(
+                self.dependencies.events,
+                self.dependencies.planned_actions,
+                self.dependencies.repository_mutation_evidence,
+            )
+            is not None
+        )
 
     def check_objective(self, _event: AgentEvent | None = None) -> bool:
         self.objective_checks += 1
+        started = time.perf_counter()
         try:
             passed = bool(self.objective(self.task, self.workspace))
         except Exception as error:
             self.objective_error = error
             return False
+        finally:
+            self.objective_evaluation_duration_seconds += time.perf_counter() - started
         self.objective_result = passed
         if passed:
             self.objective_success = True
@@ -531,6 +605,9 @@ def _run_r8_task(
     embedder: Any,
     run_id: str,
     memory: ShortLivedNeo4jRepository,
+    revision: str = "R8",
+    condition: str = "acquisition-r8",
+    controller_type: type[R8ObjectiveController] = R8ObjectiveController,
 ) -> tuple[dict[str, object], Any]:
     import time
     from datetime import UTC, datetime
@@ -556,7 +633,7 @@ def _run_r8_task(
         source_root=project_root / "benchmark/workspaces",
         execution_root=project_root / "research/evidence/workspaces",
         frozen_cases=objective.cases,
-        condition="acquisition-r8",
+        condition=condition,
         task=task,
         workspace_line_ending_policy=R8_LINE_ENDING_POLICY,
     )
@@ -571,7 +648,7 @@ def _run_r8_task(
     memory.save_task(task)
     memory.save_run(run)
     memory.save_environment(environment_context)
-    run_dir = artifact_root / "GS-E003/gate_a1/acquisition-r8" / task.id / run_id
+    run_dir = artifact_root / f"GS-E003/gate_a1/{condition}" / task.id / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     dependencies = AgentDependencies(
         workspace_root=workspace,
@@ -579,7 +656,7 @@ def _run_r8_task(
         task_id=task.id,
         execution_runtime=environment.agent_execution_runtime(),
     )
-    controller = R8ObjectiveController(
+    controller = controller_type(
         task=task,
         workspace=workspace,
         objective=objective,
@@ -593,14 +670,22 @@ def _run_r8_task(
     runtime_error: Exception | None = None
     persistence_error: Exception | None = None
     started = time.perf_counter()
+    agent_started: float | None = None
+    agent_duration_seconds = 0.0
+    agent_timeout_seconds = agent_timeout_seconds_for_configuration(configuration)
     try:
         step_persistence = StepPersistence(
             store=SqliteStepStore(database=run_dir / "steps.sqlite"),
             agent_name="graph_swarm_coding_agent",
             run_id=run_id,
-            metadata={"gate": "GS-E003 / Gate A1", "revision": "R8", "task_id": task.id},
+            metadata={
+                "gate": "GS-E003 / Gate A1",
+                "revision": revision,
+                "task_id": task.id,
+            },
         )
         agent = create_coding_agent(settings, capabilities=[step_persistence])
+        agent_started = time.perf_counter()
         result = run_coding_agent(
             agent,
             settings,
@@ -610,7 +695,7 @@ def _run_r8_task(
             ).build_task_prompt(task),
             max_actions=None,
             max_requests=None,
-            timeout_seconds=configuration.config.limits.timeout_seconds,
+            timeout_seconds=agent_timeout_seconds,
             model_settings=cast(ModelSettings, configuration.model.settings),
             request_pacing=pacing,
             disable_request_limit=True,
@@ -621,6 +706,9 @@ def _run_r8_task(
         persistence_error = error
     except Exception as error:
         runtime_error = error
+    finally:
+        if agent_started is not None:
+            agent_duration_seconds = time.perf_counter() - agent_started
     if not controller.objective_success:
         controller.final_check()
     persistence_error: Exception | None = persistence_error or controller.persistence_error
@@ -638,6 +726,7 @@ def _run_r8_task(
             environment_context,
             planned_actions=dependencies.planned_actions,
             require_trusted_planned_actions=True,
+            mutation_evidence=dependencies.repository_mutation_evidence,
         )
         if persisted is not None:
             failure, resolution, outcome = persisted
@@ -684,9 +773,15 @@ def _run_r8_task(
         pattern_persisted=recovery_pattern_persisted,
         pattern_embedded=recovery_pattern_embedded,
         qualifying_failure_observed=any(
-            detect_failure(event) is not None for event in dependencies.events
+            detect_failure(
+                event,
+                dependencies.planned_action_for(event.action_id),
+            )
+            is not None
+            for event in dependencies.events
         ),
     )
+    total_task_duration_seconds = time.perf_counter() - started
     artifact: dict[str, object] = {
         "task_id": task.id,
         "run_id": run_id,
@@ -699,7 +794,7 @@ def _run_r8_task(
             if persistence_error or runtime_error
             else "objective_not_satisfied"
         ),
-        "duration_seconds": time.perf_counter() - started,
+        "duration_seconds": total_task_duration_seconds,
         "task_success": task_success,
         "acquisition_success": acquisition_success,
         "acquisition_reason": acquisition_reason,
@@ -743,6 +838,20 @@ def _run_r8_task(
         "events": [event.model_dump(mode="json") for event in dependencies.events],
         "agent_output": None if result is None else result.output,
     }
+    if revision == "R9":
+        artifact.update(
+            {
+                "agent_timeout_seconds": agent_timeout_seconds,
+                "objective_timeout_seconds": getattr(
+                    configuration.config, "objective_timeout_seconds", None
+                ),
+                "agent_duration_seconds": agent_duration_seconds,
+                "objective_evaluation_duration_seconds": (
+                    controller.objective_evaluation_duration_seconds
+                ),
+                "total_task_duration_seconds": total_task_duration_seconds,
+            }
+        )
     _write_json(run_dir / "acquisition.json", artifact)
     return artifact, embedder
 
@@ -760,6 +869,7 @@ __all__ = [
     "R8_STOPPING_POLICY",
     "ShortLivedNeo4jRepository",
     "attach_r8_objective_controller",
+    "git_worktree_content_fingerprint",
     "repository_state_fingerprint",
     "r8_acquisition_readiness",
 ]

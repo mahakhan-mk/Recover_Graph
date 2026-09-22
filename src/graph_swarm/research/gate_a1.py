@@ -977,6 +977,17 @@ def main() -> int:
         metavar="RUN_ROOT",
         help="resume Gate A1 Acquisition R8 without rerunning started tasks",
     )
+    modes.add_argument(
+        "--acquire-r9",
+        action="store_true",
+        help="execute the explicitly versioned Gate A1 Acquisition R9",
+    )
+    modes.add_argument(
+        "--resume-acquisition-r9",
+        type=Path,
+        metavar="RUN_ROOT",
+        help="resume Gate A1 Acquisition R9 without rerunning started tasks",
+    )
     parser.add_argument(
         "--max-new-tasks",
         type=int,
@@ -1000,9 +1011,11 @@ def main() -> int:
         or args.resume_acquisition_r7 is not None
         or args.acquire_r8
         or args.resume_acquisition_r8 is not None
+        or args.acquire_r9
+        or args.resume_acquisition_r9 is not None
     ):
         parser.error(
-            "--max-new-tasks requires an R2, R3, R4, R5, R6, R7, or R8 "
+            "--max-new-tasks requires an R2, R3, R4, R5, R6, R7, R8, or R9 "
             "acquisition/resume mode"
         )
     if args.prepare_environments:
@@ -1105,6 +1118,21 @@ def main() -> int:
         return 0 if status in {
             "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
             "READY_TO_RESUME_GATE_A1_ACQUISITION_R8",
+        } else 2
+    if args.acquire_r9 or args.resume_acquisition_r9 is not None:
+        from graph_swarm.research.gate_a1_acquisition import (
+            run_gate_a1_acquisition_r9,
+        )
+
+        status, artifact_root = run_gate_a1_acquisition_r9(
+            project_root,
+            resume_root=args.resume_acquisition_r9,
+            max_new_tasks=args.max_new_tasks,
+        )
+        print(f"{status} {artifact_root}")
+        return 0 if status in {
+            "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
+            "READY_TO_RESUME_GATE_A1_ACQUISITION_R9",
         } else 2
     if args.acquire_r2 or args.resume_acquisition_r2 is not None:
         from graph_swarm.research.gate_a1_acquisition import (

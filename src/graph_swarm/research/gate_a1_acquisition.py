@@ -116,6 +116,13 @@ R8_WORKSPACE_LINE_ENDING_POLICY = "git_index_consistent_line_endings_v2"
 R8_STOPPING_POLICY = "objective_success_or_timeout_v1"
 R8_PERSISTENCE_SESSION_POLICY = "short_lived_session_v1"
 R8_PERSISTENCE_RETRY_POLICY = "retryable_transient_max_2_v1"
+R9_NAMESPACE = "GS-E003/Gate-A1/acquisition-r9"
+R9_CONFIG = "configs/experiments/gate_a1_acquisition_r9.yaml"
+R9_REVISION_REASON = "core_recovery_semantics_after_r8_tool_identity_mismatch"
+R9_RECOVERY_EVENT_SEMANTICS = "trusted_action_semantics_v2"
+R9_REPOSITORY_MUTATION_EVIDENCE_POLICY = "git_worktree_content_fingerprint_v2"
+R9_AGENT_TIMEOUT_SECONDS = 600
+R9_OBJECTIVE_TIMEOUT_SECONDS = 900
 
 
 class GateA1AcquisitionPreflightError(RuntimeError):
@@ -1185,6 +1192,41 @@ def _validate_r8_harness_configuration(configuration: Any) -> None:
         raise GateA1AcquisitionPreflightError("R8 timeout_seconds must be 600")
 
 
+def _validate_r9_harness_configuration(configuration: Any) -> None:
+    resolved = configuration.config
+    expected = {
+        "run_revision": "R9",
+        "revision_reason": R9_REVISION_REASON,
+        "model_visible_tool_output_chars": R8_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+        "objective_coverage_policy": R8_OBJECTIVE_COVERAGE_POLICY,
+        "objective_coverage_policy_selection_version": R7_COVERAGE_POLICY_SELECTION_VERSION,
+        "workspace_line_ending_policy": R8_WORKSPACE_LINE_ENDING_POLICY,
+        "persistence_session_policy": R8_PERSISTENCE_SESSION_POLICY,
+        "persistence_retry_policy": R8_PERSISTENCE_RETRY_POLICY,
+        "recovery_event_semantics": R9_RECOVERY_EVENT_SEMANTICS,
+        "repository_mutation_evidence_policy": R9_REPOSITORY_MUTATION_EVIDENCE_POLICY,
+        "stopping_policy": R8_STOPPING_POLICY,
+        "objective_mutation_check_policy": "repository_state_fingerprint_v1",
+    }
+    for field, expected_value in expected.items():
+        if getattr(resolved, field, None) != expected_value:
+            raise GateA1AcquisitionPreflightError(
+                f"R9 {field} must be {expected_value!r}"
+            )
+    if resolved.limits.max_actions is not None or resolved.limits.max_requests is not None:
+        raise GateA1AcquisitionPreflightError("R9 action/request ceilings must be null")
+    if resolved.limits.timeout_seconds != 600:
+        raise GateA1AcquisitionPreflightError("R9 timeout_seconds must be 600")
+    if resolved.agent_timeout_seconds != R9_AGENT_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R9 agent_timeout_seconds must be {R9_AGENT_TIMEOUT_SECONDS}"
+        )
+    if resolved.objective_timeout_seconds != R9_OBJECTIVE_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R9 objective_timeout_seconds must be {R9_OBJECTIVE_TIMEOUT_SECONDS}"
+        )
+
+
 def _r8_configuration_hash(  # pyright: ignore[reportUnusedFunction]
     configuration: Any,
     settings: Any,
@@ -1223,6 +1265,23 @@ def _r8_configuration_hash(  # pyright: ignore[reportUnusedFunction]
             for task_id in ACQUISITION_TASK_IDS
         },
     }
+    if configuration.config.run_revision == "R9":
+        payload["agent_timeout_seconds"] = getattr(
+            configuration.config, "agent_timeout_seconds", None
+        )
+        payload["objective_timeout_seconds"] = getattr(
+            configuration.config, "objective_timeout_seconds", None
+        )
+        payload["recovery_event_semantics"] = getattr(
+            configuration.config,
+            "recovery_event_semantics",
+            None,
+        )
+        payload["repository_mutation_evidence_policy"] = getattr(
+            configuration.config,
+            "repository_mutation_evidence_policy",
+            None,
+        )
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -1718,6 +1777,29 @@ def run_gate_a1_acquisition_r8(
     )
 
 
+def run_gate_a1_acquisition_r9(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run the fresh R9 core recovery-semantics acquisition harness."""
+    configuration = load_experiment_configuration(
+        project_root / R9_CONFIG,
+        project_root=project_root,
+    )
+    _validate_r9_harness_configuration(configuration)
+    from graph_swarm.research.gate_a1_r9 import (
+        run_gate_a1_acquisition_r9 as _run_gate_a1_acquisition_r9,
+    )
+
+    return _run_gate_a1_acquisition_r9(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+    )
+
+
 def run_gate_a1_acquisition(project_root: Path) -> tuple[str, Path]:
     """Run exactly T001-T005 acquisition and return final status plus artifact root."""
     project_root = project_root.expanduser().resolve()
@@ -1826,4 +1908,5 @@ __all__ = [
     "run_gate_a1_acquisition_r6",
     "run_gate_a1_acquisition_r7",
     "run_gate_a1_acquisition_r8",
+    "run_gate_a1_acquisition_r9",
 ]

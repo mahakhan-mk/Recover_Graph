@@ -1,6 +1,7 @@
 """Persist canonical agent events through the operational memory boundary."""
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from uuid import NAMESPACE_URL, uuid5
 
 from graph_swarm.detection.failure_detector import detect_failure
@@ -17,12 +18,92 @@ from graph_swarm.domain.tools import Tool
 from graph_swarm.graph.repository import OperationalMemoryRepository
 from graph_swarm.memory.recovery_evidence import (
     ConcreteRecoveryEvidence,
+    RepositoryMutationEvidence,
     arguments_json,
     has_concrete_change,
+    is_test_execution,
     normalize_planned_action,
 )
 
 PlannedActionContext = Mapping[str, PlannedAction] | Sequence[PlannedAction]
+
+
+@dataclass(frozen=True)
+class RecoveryEventChain:
+    """Earliest complete observational recovery sequence."""
+
+    failure_event: AgentEvent
+    failure: FailureEpisode
+    change_event: AgentEvent
+    change_action: PlannedAction
+    verification_event: AgentEvent
+
+
+def select_recovery_event_chain(
+    events: Sequence[AgentEvent],
+    planned_actions: Mapping[str, PlannedAction],
+    mutation_evidence: Mapping[str, RepositoryMutationEvidence] | None = None,
+) -> RecoveryEventChain | None:
+    """Select a deterministic test-failure -> change -> successful-test chain.
+
+    Test failures are preferred over generic command failures, while event
+    order remains the tie-breaker within each failure class.
+    """
+    evidence_by_action = mutation_evidence or {}
+    failures: list[tuple[int, AgentEvent, FailureEpisode]] = []
+    for index, event in enumerate(events):
+        action = planned_actions.get(event.action_id)
+        failure = detect_failure(event, action)
+        if failure is not None:
+            failures.append((index, event, failure))
+
+    candidates: list[tuple[tuple[int, int, int, int], RecoveryEventChain]] = []
+    for failure_index, failure_event, failure in failures:
+        for change_index in range(failure_index + 1, len(events)):
+            change_event = events[change_index]
+            if not change_event.result.success:
+                continue
+            change_action = planned_actions.get(change_event.action_id)
+            if change_action is None:
+                continue
+            action_evidence = evidence_by_action.get(change_action.id)
+            if not has_concrete_change(
+                change_action,
+                mutation_evidence=action_evidence,
+            ):
+                continue
+            found_verification = False
+            for verification_index in range(change_index + 1, len(events)):
+                verification_event = events[verification_index]
+                verification_action = planned_actions.get(verification_event.action_id)
+                if (
+                    not verification_event.result.success
+                    or verification_event.result.exit_code != 0
+                    or verification_action is None
+                    or verification_action.tool != verification_event.result.tool_name
+                    or not is_test_execution(verification_action)
+                ):
+                    continue
+                preference = 0 if failure.failure_type.value == "test_failure" else 1
+                candidates.append(
+                    (
+                        (preference, failure_index, change_index, verification_index),
+                        RecoveryEventChain(
+                            failure_event=failure_event,
+                            failure=failure,
+                            change_event=change_event,
+                            change_action=change_action,
+                            verification_event=verification_event,
+                        ),
+                    )
+                )
+                found_verification = True
+                break
+            if found_verification:
+                break
+    if not candidates:
+        return None
+    return min(candidates, key=lambda candidate: candidate[0])[1]
 
 
 class MissingTrustedPlannedActionError(ValueError):
@@ -61,7 +142,7 @@ def persist_agent_event(
     repository.link_action_tool(action.id, result.tool_name)
     repository.link_action_run(action.id, run.id)
 
-    failure = detect_failure(event)
+    failure = detect_failure(event, planned_action=action)
     if failure is None:
         return None
 
@@ -80,6 +161,7 @@ def persist_agent_event_stream(
     *,
     planned_actions: PlannedActionContext | None = None,
     require_trusted_planned_actions: bool = False,
+    mutation_evidence: Mapping[str, RepositoryMutationEvidence] | None = None,
 ) -> tuple[FailureEpisode, Resolution, Outcome] | None:
     """Persist GS-E001 recovery evidence from one ordered event stream.
 
@@ -95,10 +177,8 @@ def persist_agent_event_stream(
         )
         if missing_action_ids:
             raise MissingTrustedPlannedActionError(missing_action_ids)
-    detected_failure: FailureEpisode | None = None
-    failure_index: int | None = None
-    for index, event in enumerate(event_list):
-        failure = persist_agent_event(
+    for event in event_list:
+        persist_agent_event(
             repository,
             event,
             task,
@@ -106,47 +186,18 @@ def persist_agent_event_stream(
             environment,
             planned_action=action_context.get(event.action_id),
         )
-        if failure is not None and detected_failure is None:
-            detected_failure = failure
-            failure_index = index
-
-    if detected_failure is None or failure_index is None:
+    chain = select_recovery_event_chain(
+        event_list,
+        action_context,
+        mutation_evidence,
+    )
+    if chain is None:
         return None
-
-    change_index: int | None = None
-    change_event: AgentEvent | None = None
-    change_action: PlannedAction | None = None
-    for index in range(failure_index + 1, len(event_list)):
-        event = event_list[index]
-        action = action_context.get(event.action_id)
-        if (
-            event.result.success
-            and action is not None
-            and has_concrete_change(action)
-        ):
-            change_index = index
-            change_event = event
-            change_action = action
-            break
-
-    if change_event is None or change_index is None or change_action is None:
-        return None
-
-    successful_test_event: AgentEvent | None = None
-    for index in range(change_index + 1, len(event_list)):
-        event = event_list[index]
-        if (
-            event.result.tool_name == "run_tests"
-            and event.result.success
-            and event.result.exit_code == 0
-        ):
-            successful_test_event = event
-            break
-
-    if successful_test_event is None:
-        return None
-
+    detected_failure = chain.failure
+    change_action = chain.change_action
+    successful_test_event = chain.verification_event
     normalized_change = normalize_planned_action(change_action)
+    change_mutation_evidence = (mutation_evidence or {}).get(change_action.id)
     resolution_id = str(
         uuid5(NAMESPACE_URL, f"graph-swarm/resolution/{detected_failure.id}")
     )
@@ -161,6 +212,15 @@ def persist_agent_event_stream(
         task_id=task.id,
         source_chronological_index=task.chronological_index,
         environment_id=environment.id,
+        repository_mutation_evidence=change_mutation_evidence,
+    )
+    mutation_description = (
+        "repository_mutation_before="
+        f"{change_mutation_evidence.before_fingerprint}; "
+        "repository_mutation_after="
+        f"{change_mutation_evidence.after_fingerprint}; "
+        if change_mutation_evidence is not None
+        else ""
     )
     description = (
         "Observed concrete recovery action: "
@@ -171,6 +231,7 @@ def persist_agent_event_stream(
         f"operation={evidence.recovery_action.operation}; "
         f"arguments_json={arguments_json(evidence.recovery_action)}; "
         f"planned_at={evidence.recovery_action.planned_at.isoformat()}; "
+        f"{mutation_description}"
         f"source_failure_id={evidence.source_failure_id}; "
         f"environment_id={evidence.environment_id}; "
         f"source_chronological_index={evidence.source_chronological_index}; "

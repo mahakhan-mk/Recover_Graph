@@ -191,6 +191,7 @@ class FrozenSWEsmithObjective:
         objective_coverage_policy: str | None = None,
         coverage_policy_selection_version: str | None = None,
         effective_coverage_policies: Mapping[str, str] | None = None,
+        objective_timeout_seconds: float = 900,
     ) -> None:
         self.cases = cases
         self.environments = environments
@@ -210,6 +211,9 @@ class FrozenSWEsmithObjective:
                 "unsupported effective objective coverage policy: "
                 + ", ".join(sorted(invalid_policies))
             )
+        if objective_timeout_seconds <= 0:
+            raise ValueError("objective_timeout_seconds must be positive")
+        self.objective_timeout_seconds = objective_timeout_seconds
         self.observations: list[ObjectiveObservation] = []
 
     def __call__(self, task: Any, workspace: Path) -> bool:
@@ -233,7 +237,7 @@ class FrozenSWEsmithObjective:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=900,
+                timeout=self.objective_timeout_seconds,
             )
             output = f"{completed.stdout}\n{completed.stderr}"
             status = "passed" if completed.returncode == 0 else "test_failure"
@@ -1719,8 +1723,14 @@ def _materialize_workspace(
         raise RuntimeError(
             f"could not materialize frozen SWE-smith task {task.id}: {applied.stderr.strip()}"
         )
+    index_before_cleanup = _index_snapshot(destination)
     if workspace_line_ending_policy == "git_index_consistent_line_endings_v2":
         _remove_eol_only_worktree_noise(destination)
+    _assert_materialization_postcondition(
+        destination,
+        expected_index_snapshot=index_before_cleanup,
+        task_id=task.id,
+    )
     return destination
 
 
@@ -1882,6 +1892,89 @@ def _remove_eol_only_worktree_noise(workspace: Path) -> None:
             )
 
 
+def _index_snapshot(workspace: Path) -> bytes:
+    """Return the index entries without including mutable worktree metadata."""
+    result = subprocess.run(
+        ["git", "-C", str(workspace), "ls-files", "-s", "-z"],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"could not snapshot materialized workspace index: {result.stderr!r}"
+        )
+    return result.stdout
+
+
+def _worktree_eol_only_paths(workspace: Path) -> list[str]:
+    """Find unstaged paths whose only worktree difference is CRLF versus LF."""
+    changed = subprocess.run(
+        ["git", "-C", str(workspace), "status", "--porcelain=v1", "-z"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if changed.returncode != 0:
+        raise RuntimeError(
+            "could not inspect materialized worktree diff: "
+            f"{changed.stderr.strip()}"
+        )
+    eol_only: list[str] = []
+    for record in (record for record in changed.stdout.split("\0") if record):
+        if len(record) < 4 or record[1] != "M":
+            continue
+        relative_path = record[3:]
+        index_content = subprocess.run(
+            ["git", "-C", str(workspace), "show", f":{relative_path}"],
+            check=False,
+            capture_output=True,
+        )
+        if index_content.returncode != 0:
+            raise RuntimeError(
+                f"could not read index content for {relative_path}: "
+                f"{index_content.stderr!r}"
+            )
+        target = workspace / Path(relative_path)
+        if not target.is_file():
+            continue
+        worktree_bytes = target.read_bytes()
+        index_bytes = index_content.stdout
+        if b"\0" in worktree_bytes or b"\0" in index_bytes:
+            continue
+        diff_summary = subprocess.run(
+            ["git", "-C", str(workspace), "diff", "--numstat", "--", relative_path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if diff_summary.returncode != 0 or diff_summary.stdout.startswith("-\t-\t"):
+            continue
+        if worktree_bytes.replace(b"\r\n", b"\n") == index_bytes.replace(b"\r\n", b"\n"):
+            eol_only.append(relative_path)
+    return eol_only
+
+
+def _assert_materialization_postcondition(
+    workspace: Path,
+    *,
+    expected_index_snapshot: bytes,
+    task_id: str,
+) -> None:
+    """Ensure materialization leaves no EOL-only unstaged worktree delta."""
+    actual_index_snapshot = _index_snapshot(workspace)
+    if actual_index_snapshot != expected_index_snapshot:
+        raise RuntimeError(
+            f"materialization changed the Git index for {task_id}; "
+            "EOL cleanup must modify worktree bytes only"
+        )
+    remaining = _worktree_eol_only_paths(workspace)
+    if remaining:
+        raise RuntimeError(
+            f"materialization left EOL-only unstaged changes for {task_id}: "
+            + ", ".join(remaining)
+        )
+
+
 def _make_workspace_resolver(
     *,
     source_root: Path,
@@ -1935,7 +2028,16 @@ def _apply_patch(
         handle.write(patch)
         patch_path = Path(handle.name)
     try:
-        arguments = ["git", "-C", str(repository), "apply"]
+        arguments = [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
+            "apply",
+        ]
         if check_only:
             arguments.append("--check")
         arguments.extend(("--3way", "--whitespace=nowarn", str(patch_path)))

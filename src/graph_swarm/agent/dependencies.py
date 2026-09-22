@@ -11,6 +11,7 @@ from graph_swarm.agent.model_output import ModelOutputTelemetry
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.behavior import BehaviorChangeEvidence
 from graph_swarm.domain.events import AdviceEvent, AgentEvent
+from graph_swarm.memory.recovery_evidence import RepositoryMutationEvidence
 
 if TYPE_CHECKING:
     from graph_swarm.advisory.service import AdvisoryService
@@ -63,6 +64,10 @@ class AgentDependencies:
     events: list[AgentEvent] = field(default_factory=lambda: list[AgentEvent]())
     planned_actions: dict[str, PlannedAction] = field(
         default_factory=lambda: dict[str, PlannedAction]()
+    )
+    repository_mutation_evidence: dict[str, RepositoryMutationEvidence] = field(
+        default_factory=lambda: dict[str, RepositoryMutationEvidence](),
+        repr=False,
     )
     task: Task | None = None
     environment: EnvironmentContext | None = None
@@ -120,6 +125,31 @@ class AgentDependencies:
     def planned_action_for(self, action_id: str) -> PlannedAction | None:
         """Return the trusted runtime action for one completed action ID."""
         return self.planned_actions.get(action_id)
+
+    def record_repository_mutation_evidence(
+        self,
+        evidence: RepositoryMutationEvidence,
+    ) -> None:
+        """Store one runtime-created before/after mutation observation idempotently."""
+        action = self.planned_action_for(evidence.action_id)
+        if action is None:
+            raise ValueError(
+                "repository mutation evidence requires a trusted PlannedAction"
+            )
+        existing = self.repository_mutation_evidence.get(evidence.action_id)
+        if existing is not None and existing != evidence:
+            raise ValueError(
+                "repository mutation evidence ID already has different content: "
+                f"{evidence.action_id}"
+            )
+        self.repository_mutation_evidence[evidence.action_id] = evidence
+
+    def repository_mutation_evidence_for(
+        self,
+        action_id: str,
+    ) -> RepositoryMutationEvidence | None:
+        """Return runtime mutation evidence for one action, if observed."""
+        return self.repository_mutation_evidence.get(action_id)
 
     def has_advised_action(self, action_key: str) -> bool:
         return action_key in self._advised_action_keys

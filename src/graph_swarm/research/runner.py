@@ -38,6 +38,7 @@ from graph_swarm.agent.coding_agent import (
 )
 from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.agent.pacing import ProviderRequestPacing
+from graph_swarm.detection.failure_detector import failure_type_for_action
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.advice import AdviceResult
@@ -110,6 +111,8 @@ class ExperimentConfiguration(BaseModel):
     model_config_path: str = Field(alias="model_config")
     conditions: tuple[ExperimentCondition, ...]
     limits: ExperimentLimits
+    agent_timeout_seconds: float | None = Field(default=None, gt=0)
+    objective_timeout_seconds: float | None = Field(default=None, gt=0)
     task_manifest: str = "benchmark/manifests/pilot.jsonl"
     task_problems: str = "benchmark/annotations/recurrence_validation.csv"
     artifact_root: str = "research/evidence/results"
@@ -124,6 +127,8 @@ class ExperimentConfiguration(BaseModel):
     workspace_line_ending_policy: str | None = None
     persistence_session_policy: str | None = None
     persistence_retry_policy: str | None = None
+    recovery_event_semantics: str | None = None
+    repository_mutation_evidence_policy: str | None = None
     stopping_policy: str | None = None
     objective_mutation_check_policy: str | None = None
     development: bool = False
@@ -142,6 +147,8 @@ class ExperimentConfiguration(BaseModel):
         "workspace_line_ending_policy",
         "persistence_session_policy",
         "persistence_retry_policy",
+        "recovery_event_semantics",
+        "repository_mutation_evidence_policy",
         "stopping_policy",
         "objective_mutation_check_policy",
     )
@@ -985,7 +992,7 @@ class ExperimentRunner:
                 for part in message.parts
             )
         )
-        failure_type = _failure_type(executed_action)
+        failure_type = _failure_type(executed_action, planned_action)
         return ExperimentRunArtifact(
             experiment_id=self.configuration.config.experiment_id,
             gate_id=self.gate_id,
@@ -1074,13 +1081,12 @@ def _planned_action(event: AgentEvent) -> PlannedAction:
     )
 
 
-def _failure_type(result: ActionResult) -> FailureType | None:
-    if result.success:
-        return None
-    return {
-        "run_tests": FailureType.TEST_FAILURE,
-        "run_command": FailureType.COMMAND_FAILURE,
-    }.get(result.tool_name, FailureType.TOOL_PARAMETER_ERROR)
+def _failure_type(
+    result: ActionResult,
+    planned_action: PlannedAction | None = None,
+) -> FailureType | None:
+    """Use the canonical failure taxonomy for the artifact projection."""
+    return failure_type_for_action(result, planned_action)
 
 
 def _budget_termination(
