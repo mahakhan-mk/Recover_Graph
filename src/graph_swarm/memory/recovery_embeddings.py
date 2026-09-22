@@ -1,4 +1,4 @@
-"""Local, deterministic RecoveryPattern embedding infrastructure."""
+"""Hugging Face RecoveryPattern embedding infrastructure."""
 
 from __future__ import annotations
 
@@ -6,10 +6,13 @@ import math
 from collections.abc import Sequence
 from typing import Protocol, cast
 
+from huggingface_hub import InferenceClient
+
 from graph_swarm.domain.recovery_patterns import (
     RecoveryPattern,
     RecoveryPatternStatus,
 )
+from graph_swarm.settings import get_settings
 
 RECOVERY_PATTERN_EMBEDDING_TEXT_VERSION = "v1"
 RECOVERY_PATTERN_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -22,7 +25,7 @@ class RecoveryEmbeddingError(RuntimeError):
 
 
 class EmbeddingModelUnavailableError(RecoveryEmbeddingError):
-    """Raised when the frozen local SentenceTransformer cannot be loaded."""
+    """Raised when the frozen Hugging Face embedding model is unavailable."""
 
 
 class EmbeddingValidationError(RecoveryEmbeddingError, ValueError):
@@ -33,17 +36,6 @@ class EmbeddingEncoder(Protocol):
     """Narrow injectable boundary shared by production and deterministic tests."""
 
     def encode(self, text: str, *, normalize_embeddings: bool) -> object:
-        ...
-
-
-class _SentenceTransformerModel(Protocol):
-    def encode(
-        self,
-        text: str,
-        *,
-        normalize_embeddings: bool,
-        convert_to_numpy: bool,
-    ) -> object:
         ...
 
 
@@ -65,29 +57,37 @@ def recovery_pattern_embedding_text(pattern: RecoveryPattern) -> str:
     return f"{title}\n{guidance}"
 
 
-def _load_sentence_transformer() -> EmbeddingEncoder:
+def _load_huggingface_encoder(
+    *,
+    token: str,
+    model_name: str,
+) -> EmbeddingEncoder:
     try:
-        from sentence_transformers import SentenceTransformer
-
-        model = cast(
-            _SentenceTransformerModel,
-            SentenceTransformer(RECOVERY_PATTERN_EMBEDDING_MODEL),
+        client = InferenceClient(
+            provider="hf-inference",
+            api_key=token,
         )
     except Exception as error:
         raise EmbeddingModelUnavailableError(
-            "Unable to load local SentenceTransformer model "
-            f"{RECOVERY_PATTERN_EMBEDDING_MODEL!r}: {type(error).__name__}"
+            "Unable to initialize Hugging Face embedding client for "
+            f"{model_name!r}: {type(error).__name__}"
         ) from error
 
-    class _SentenceTransformerEncoder:
+    class _HuggingFaceEncoder:
         def encode(self, text: str, *, normalize_embeddings: bool) -> object:
-            return model.encode(
-                text,
-                normalize_embeddings=normalize_embeddings,
-                convert_to_numpy=True,
-            )
+            try:
+                return client.feature_extraction(
+                    text,
+                    model=model_name,
+                    normalize=normalize_embeddings,
+                )
+            except Exception as error:
+                raise EmbeddingModelUnavailableError(
+                    "Unable to obtain Hugging Face embedding for "
+                    f"{model_name!r}: {type(error).__name__}"
+                ) from error
 
-    return _SentenceTransformerEncoder()
+    return _HuggingFaceEncoder()
 
 
 def validate_embedding_vector(vector: object) -> list[float]:
@@ -115,14 +115,28 @@ def validate_embedding_vector(vector: object) -> list[float]:
 
 
 class RecoveryPatternEmbedder:
-    """Generate frozen local embeddings without any fallback model."""
+    """Generate frozen embeddings without any fallback model."""
 
     model_name = RECOVERY_PATTERN_EMBEDDING_MODEL
     dimension = RECOVERY_PATTERN_EMBEDDING_DIMENSION
     normalize_embeddings = RECOVERY_PATTERN_EMBEDDING_NORMALIZED
 
     def __init__(self, encoder: EmbeddingEncoder | None = None) -> None:
-        self._encoder = encoder if encoder is not None else _load_sentence_transformer()
+        if encoder is not None:
+            self._encoder = encoder
+            return
+
+        settings = get_settings()
+        token = settings.hf_token
+        if token is None:
+            raise EmbeddingModelUnavailableError(
+                "HF_TOKEN is required for RecoveryPattern embeddings"
+            )
+        self.model_name = settings.hf_embedding_model
+        self._encoder = _load_huggingface_encoder(
+            token=token,
+            model_name=self.model_name,
+        )
 
     def embed_text(self, text: str) -> list[float]:
         """Encode text with the frozen model and validate its native vector."""

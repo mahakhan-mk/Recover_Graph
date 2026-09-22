@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     neo4j_username: str
     neo4j_password: str
     neo4j_database: str
+    hf_token: str | None = None
+    hf_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     openrouter_api_key: str | None = None
     # Kept only for non-experimental legacy configuration inspection. Runtime
     # model selection must use one of the role-specific settings below.

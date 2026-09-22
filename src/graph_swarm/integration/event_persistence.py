@@ -84,10 +84,12 @@ def select_recovery_event_chain(
                     or not is_test_execution(verification_action)
                 ):
                     continue
-                preference = 0 if failure.failure_type.value == "test_failure" else 1
+                is_test_failure = failure.failure_type.value == "test_failure"
+                preference = 0 if is_test_failure else 1
+                failure_order = failure_index if is_test_failure else -failure_index
                 candidates.append(
                     (
-                        (preference, failure_index, change_index, verification_index),
+                        (preference, failure_order, change_index, verification_index),
                         RecoveryEventChain(
                             failure_event=failure_event,
                             failure=failure,

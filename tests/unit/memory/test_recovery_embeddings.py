@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
+import graph_swarm.memory.recovery_embeddings as recovery_embeddings
 from graph_swarm.domain.recovery_patterns import (
     EnvironmentConstraints,
     RecoveryPattern,
@@ -14,6 +15,7 @@ from graph_swarm.memory.recovery_embeddings import (
     RECOVERY_PATTERN_EMBEDDING_DIMENSION,
     RECOVERY_PATTERN_EMBEDDING_MODEL,
     RECOVERY_PATTERN_EMBEDDING_NORMALIZED,
+    EmbeddingModelUnavailableError,
     EmbeddingValidationError,
     RecoveryEmbeddingError,
     RecoveryPatternEmbedder,
@@ -91,6 +93,62 @@ def test_injected_encoder_is_normalized_and_returns_native_384_float_list() -> N
     assert len(vector) == 384
     assert all(isinstance(value, float) for value in vector)
     assert encoder.calls == [("restore the condition", True)]
+
+
+def test_injected_encoder_does_not_require_huggingface_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_get_settings() -> object:
+        raise AssertionError("injected encoders must not load settings")
+
+    monkeypatch.setattr(recovery_embeddings, "get_settings", fail_get_settings)
+
+    embedder = RecoveryPatternEmbedder(encoder=FakeEncoder())
+
+    assert len(embedder.embed_text("restore the condition")) == 384
+
+
+def test_missing_huggingface_token_raises_model_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        recovery_embeddings,
+        "get_settings",
+        lambda: Mock(hf_token=None, hf_embedding_model=RECOVERY_PATTERN_EMBEDDING_MODEL),
+    )
+
+    with pytest.raises(
+        EmbeddingModelUnavailableError,
+        match="HF_TOKEN is required for RecoveryPattern embeddings",
+    ):
+        RecoveryPatternEmbedder()
+
+
+def test_huggingface_loader_uses_configured_model_and_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vector = [0.25] * RECOVERY_PATTERN_EMBEDDING_DIMENSION
+    client = Mock()
+    client.feature_extraction.return_value = vector
+    inference_client = Mock(return_value=client)
+    monkeypatch.setattr(recovery_embeddings, "InferenceClient", inference_client)
+    monkeypatch.setattr(
+        recovery_embeddings,
+        "get_settings",
+        lambda: Mock(hf_token="test-token", hf_embedding_model=RECOVERY_PATTERN_EMBEDDING_MODEL),
+    )
+
+    embedder = RecoveryPatternEmbedder()
+    result = embedder.embed_text("restore the condition")
+
+    inference_client.assert_called_once_with(provider="hf-inference", api_key="test-token")
+    client.feature_extraction.assert_called_once_with(
+        "restore the condition",
+        model=RECOVERY_PATTERN_EMBEDDING_MODEL,
+        normalize=True,
+    )
+    assert result == vector
+    assert len(result) == RECOVERY_PATTERN_EMBEDDING_DIMENSION
 
 
 @pytest.mark.parametrize(
