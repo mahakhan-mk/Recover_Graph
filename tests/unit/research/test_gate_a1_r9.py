@@ -552,6 +552,98 @@ def test_command_failure_fallback_selects_latest_failure_before_mutation() -> No
     assert failure.id == chain.failure.id
 
 
+def test_infrastructure_command_failure_cannot_form_recovery_chain() -> None:
+    _task, _run, _environment, actions, base_events, mutation = _fixture()
+    rg = _action("rg", "run_command", ["rg", "--files"])
+    actions[rg.id] = rg
+    events = (
+        _event(rg, event_id="event-rg", success=False, exit_code=127),
+        *base_events[1:],
+    )
+
+    assert select_recovery_event_chain(events, actions, {mutation.action_id: mutation}) is None
+
+
+def test_python_script_command_failure_forms_recovery_chain() -> None:
+    _task, _run, _environment, actions, base_events, mutation = _fixture()
+    failed_python = _action("failed-python", "run_command", ["python", "script.py"])
+    actions[failed_python.id] = failed_python
+    events = (
+        _event(failed_python, event_id="event-failed-python", success=False, exit_code=1),
+        *base_events[1:],
+    )
+
+    chain = select_recovery_event_chain(events, actions, {mutation.action_id: mutation})
+
+    assert chain is not None
+    assert chain.failure_event.action_id == failed_python.id
+
+
+def test_test_failure_outranks_later_eligible_python_command_failure() -> None:
+    _task, _run, _environment, actions, base_events, mutation = _fixture()
+    later_python = _action(
+        "later-python",
+        "run_command",
+        ["python3", "-c", "raise RuntimeError('task')"],
+    )
+    actions[later_python.id] = later_python
+    events = (
+        base_events[0],
+        _event(later_python, event_id="event-later-python", success=False, exit_code=1),
+        *base_events[1:],
+    )
+
+    chain = select_recovery_event_chain(events, actions, {mutation.action_id: mutation})
+
+    assert chain is not None
+    assert chain.failure_event.action_id == actions["failed"].id
+
+
+def test_latest_eligible_python_command_failure_remains_fallback() -> None:
+    _task, _run, _environment, actions, base_events, mutation = _fixture()
+    early_python = _action("early-python", "run_command", ["python", "-c", "first()"])
+    later_python = _action("later-python", "run_command", ["python3.12", "task.py"])
+    actions.update({early_python.id: early_python, later_python.id: later_python})
+    events = (
+        _event(early_python, event_id="event-early-python", success=False, exit_code=1),
+        _event(later_python, event_id="event-later-python", success=False, exit_code=1),
+        *base_events[1:],
+    )
+
+    chain = select_recovery_event_chain(events, actions, {mutation.action_id: mutation})
+
+    assert chain is not None
+    assert chain.failure_event.action_id == later_python.id
+
+
+def test_infrastructure_command_failure_is_persisted_but_not_recovery_source() -> None:
+    task, run, environment, actions, base_events, mutation = _fixture()
+    rg = _action("rg", "run_command", ["rg", "--files"])
+    actions[rg.id] = rg
+    events = (
+        _event(rg, event_id="event-rg", success=False, exit_code=127),
+        *base_events[1:],
+    )
+    memory = Memory()
+
+    result = persist_agent_event_stream(
+        cast(Any, memory),
+        events,
+        task,
+        run,
+        environment,
+        planned_actions=actions,
+        require_trusted_planned_actions=True,
+        mutation_evidence={mutation.action_id: mutation},
+    )
+
+    assert result is None
+    assert memory.failures
+    persisted_failure = next(iter(memory.failures.values()))
+    assert persisted_failure.action_id == rg.id
+    assert persisted_failure.failure_type.value == "command_failure"
+
+
 def test_test_failure_still_outranks_generic_command_failures() -> None:
     _task, _run, _environment, actions, base_events, mutation = _fixture()
     early_command = _action("early-command", "run_command", ["pwd", "-l"])

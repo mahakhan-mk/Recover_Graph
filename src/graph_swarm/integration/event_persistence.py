@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import cast
 from uuid import NAMESPACE_URL, uuid5
 
 from graph_swarm.detection.failure_detector import detect_failure
@@ -9,7 +10,7 @@ from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
 from graph_swarm.domain.events import AgentEvent
-from graph_swarm.domain.failures import FailureEpisode
+from graph_swarm.domain.failures import FailureEpisode, FailureType
 from graph_swarm.domain.outcomes import Outcome
 from graph_swarm.domain.resolutions import Resolution, ResolutionStatus
 from graph_swarm.domain.runs import Run
@@ -44,10 +45,10 @@ def select_recovery_event_chain(
     planned_actions: Mapping[str, PlannedAction],
     mutation_evidence: Mapping[str, RepositoryMutationEvidence] | None = None,
 ) -> RecoveryEventChain | None:
-    """Select a deterministic test-failure -> change -> successful-test chain.
+    """Select a deterministic failure -> change -> successful-test chain.
 
-    Test failures are preferred over generic command failures, while event
-    order remains the tie-breaker within each failure class.
+    Test failures are preferred over eligible Python command failures, while
+    event order remains the tie-breaker within each failure class.
     """
     evidence_by_action = mutation_evidence or {}
     failures: list[tuple[int, AgentEvent, FailureEpisode]] = []
@@ -55,6 +56,11 @@ def select_recovery_event_chain(
         action = planned_actions.get(event.action_id)
         failure = detect_failure(event, action)
         if failure is not None:
+            if (
+                failure.failure_type is FailureType.COMMAND_FAILURE
+                and not _is_recovery_eligible_command_failure(action)
+            ):
+                continue
             failures.append((index, event, failure))
 
     candidates: list[tuple[tuple[int, int, int, int], RecoveryEventChain]] = []
@@ -106,6 +112,27 @@ def select_recovery_event_chain(
     if not candidates:
         return None
     return min(candidates, key=lambda candidate: candidate[0])[1]
+
+
+def _is_recovery_eligible_command_failure(action: PlannedAction | None) -> bool:
+    """Recognize trusted Python execution as eligible command failure evidence."""
+    if action is None or action.tool != "run_command":
+        return False
+    command = action.arguments.get("command")
+    if not isinstance(command, Sequence) or isinstance(command, (str, bytes)):
+        return False
+    command_values = tuple(cast(Sequence[object], command))
+    if not command_values or not all(isinstance(item, str) for item in command_values):
+        return False
+    argv = cast(tuple[str, ...], command_values)
+    executable = argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if not (executable.startswith("python") or executable in {"py", "py.exe"}):
+        return False
+    if len(argv) < 2:
+        return False
+    if argv[1] in {"-c", "-m"}:
+        return len(argv) >= 3 and bool(argv[2].strip())
+    return not argv[1].startswith("-")
 
 
 class MissingTrustedPlannedActionError(ValueError):
