@@ -47,14 +47,14 @@
       "workspace": "research/evidence/workspaces/gate-a1-task-environments/GS-T004/workspace"
     },
     {
-      "environment_fingerprint": "08c9dcaa8831807e",
-      "prepared_image": "graph-swarm/sprint3b-gs-t005:08c9dcaa8831807e",
+      "environment_fingerprint": "f8df3dfc333de6ee",
+      "prepared_image": "graph-swarm/sprint3b-gs-t005:f8df3dfc333de6ee",
       "repository": "swesmith/cknd__stackprinter.219fcc52",
       "runtime_type": "docker",
       "task_id": "GS-T005",
       "upstream_digest": "swebench/swesmith.x86_64.cknd_1776_stackprinter.219fcc52@sha256:d9e850c047b2555c62b1105db939c00d298f90985a1516dd75839fc7d7247de8",
       "upstream_image": "swebench/swesmith.x86_64.cknd_1776_stackprinter.219fcc52",
-      "validation_marker": "research/evidence/workspaces/gate-a1-task-environments/GS-T005/08c9dcaa8831807e/environment.json",
+      "validation_marker": "research/evidence/workspaces/gate-a1-task-environments/GS-T005/f8df3dfc333de6ee/environment.json",
       "workspace": "research/evidence/workspaces/gate-a1-task-environments/GS-T005/workspace"
     }
   ],
