@@ -1,0 +1,5 @@
+provider: openrouter
+model: runtime-selected-from-OPENROUTER_CODING_MODEL
+settings:
+  temperature: 0
+prompt_version: v2-runtime-guidance

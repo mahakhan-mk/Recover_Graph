@@ -109,6 +109,8 @@ FOREACH (_ IN CASE WHEN provenance_matches THEN [1] ELSE [] END |
         pattern.source_chronological_index = $source_chronological_index,
         pattern.source_tool = $source_tool,
         pattern.source_operation = $source_operation,
+        pattern.applicability_tool = $applicability_tool,
+        pattern.applicability_operation = $applicability_operation,
         pattern.source_failure_type = $source_failure_type,
         pattern.environment_runtime = $environment_runtime,
         pattern.environment_versions_json = $environment_versions_json,

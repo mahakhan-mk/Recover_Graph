@@ -7,7 +7,7 @@ import json
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai import Agent, ModelSettings, PromptedOutput
@@ -46,6 +46,9 @@ class RecoveryAbstractionValidationError(ValueError):
     """Raised when a structured abstraction is not grounded and reusable."""
 
 
+OBJECTIVE_ANCHORED_RECOVERY_EVIDENCE_SOURCE = "objective_anchored_v1"
+
+
 class RecoveryOutcomeEvidence(BaseModel):
     """Objective outcome facts supplied to the abstraction model."""
 
@@ -76,6 +79,9 @@ class RecoveryEvidencePackage(BaseModel):
     failure_symptom: str
     recovery_action_tool: str
     recovery_action_operation: str
+    recovery_action_id: str
+    trusted_recovery_action_id: str | None = None
+    recovery_evidence_source: str | None = None
     recovery_action_arguments: dict[str, object] = Field(default_factory=dict)
     outcome: RecoveryOutcomeEvidence
     source_environment_id: str
@@ -96,6 +102,7 @@ class RecoveryEvidencePackage(BaseModel):
         "failure_symptom",
         "recovery_action_tool",
         "recovery_action_operation",
+        "recovery_action_id",
         "source_environment_id",
         "source_runtime",
     )
@@ -128,7 +135,20 @@ def build_recovery_evidence_package(
 ) -> RecoveryEvidencePackage:
     """Build a bounded package from trusted source lineage only."""
     failed_action = lineage.failed_action.planned_action
-    recovery_action = lineage.recovery_action.planned_action
+    recovery_action_record = cast(Any, lineage.recovery_action)
+    if recovery_action_record is None:
+        raise RecoveryAbstractionValidationError(
+            "trusted recovery action is unavailable in observed-change lineage"
+        )
+    if len(lineage.recovery_action_candidates) > 1:
+        raise RecoveryAbstractionValidationError(
+            "objective-anchored recovery lineage has ambiguous observed-change actions"
+        )
+    recovery_action = recovery_action_record.planned_action
+    if not recovery_action.tool.strip() or not recovery_action.operation.strip():
+        raise RecoveryAbstractionValidationError(
+            "trusted recovery action tool and operation are required"
+        )
     outcome = lineage.outcome
     return RecoveryEvidencePackage(
         source_failure_id=lineage.failure.id,
@@ -145,6 +165,9 @@ def build_recovery_evidence_package(
         failure_symptom=lineage.failure.symptom,
         recovery_action_tool=recovery_action.tool,
         recovery_action_operation=recovery_action.operation,
+        recovery_action_id=recovery_action.id,
+        trusted_recovery_action_id=lineage.trusted_recovery_action_id,
+        recovery_evidence_source=lineage.recovery_evidence_source,
         recovery_action_arguments=normalize_arguments(recovery_action.arguments),
         outcome=RecoveryOutcomeEvidence(
             success=outcome.success,
@@ -418,6 +441,27 @@ def construct_recovery_pattern(
         raise RecoveryAbstractionValidationError(
             "objective outcome is not successful recovery evidence"
         )
+    applicability_tool: str | None = None
+    applicability_operation: str | None = None
+    if evidence.recovery_evidence_source == OBJECTIVE_ANCHORED_RECOVERY_EVIDENCE_SOURCE:
+        trusted_action_id = evidence.trusted_recovery_action_id
+        if not trusted_action_id or trusted_action_id != evidence.recovery_action_id:
+            raise RecoveryAbstractionValidationError(
+                "objective-anchored recovery lineage lacks one trusted observed mutation action"
+            )
+        if (
+            not evidence.recovery_action_tool.strip()
+            or not evidence.recovery_action_operation.strip()
+        ):
+            raise RecoveryAbstractionValidationError(
+                "objective-anchored recovery action tool and operation are required"
+            )
+        applicability_tool = evidence.recovery_action_tool
+        applicability_operation = evidence.recovery_action_operation
+    elif evidence.recovery_evidence_source is not None:
+        raise RecoveryAbstractionValidationError(
+            "unsupported recovery evidence source cannot derive applicability"
+        )
     return RecoveryPattern(
         id=deterministic_recovery_pattern_id(evidence),
         title=output.title.strip(),
@@ -429,6 +473,8 @@ def construct_recovery_pattern(
         source_chronological_index=evidence.source_chronological_index,
         source_tool=evidence.failed_action_tool,
         source_operation=evidence.failed_action_operation,
+        applicability_tool=applicability_tool,
+        applicability_operation=applicability_operation,
         source_failure_type=evidence.failure_type,
         environment_constraints=EnvironmentConstraints(
             runtime=evidence.source_runtime,
@@ -468,6 +514,7 @@ def abstract_and_persist_recovery_pattern(
 
 __all__ = [
     "FROZEN_RECOVERY_MODEL",
+    "OBJECTIVE_ANCHORED_RECOVERY_EVIDENCE_SOURCE",
     "RECOVERY_MODEL_SETTINGS",
     "RecoveryAbstractionModelError",
     "RecoveryAbstractionOutput",

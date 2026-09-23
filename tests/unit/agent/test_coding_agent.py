@@ -25,7 +25,7 @@ from graph_swarm.agent.model_output import (
     MODEL_OUTPUT_TRUNCATION_MARKER,
     model_visible_action_result,
 )
-from graph_swarm.agent.prompts import ROLLOUT1_SYSTEM_PROMPT
+from graph_swarm.agent.prompts import R13B_SYSTEM_PROMPT, ROLLOUT1_SYSTEM_PROMPT
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.settings import Settings
 
@@ -220,7 +220,7 @@ def test_coding_agent_accepts_offline_model_injection() -> None:
     assert agent.model is model
 
 
-async def test_agent_has_rollout_prompt_and_exactly_four_controlled_tools(
+async def test_agent_has_rollout_prompt_and_controlled_tools(
     tmp_path: Path,
 ) -> None:
     settings, model = make_offline_agent()
@@ -233,6 +233,7 @@ async def test_agent_has_rollout_prompt_and_exactly_four_controlled_tools(
     assert set(toolset.tools) == {
         "read_file",
         "write_file",
+        "edit_file",
         "run_tests",
         "run_command",
     }
@@ -357,3 +358,37 @@ def test_model_visible_output_and_error_share_one_total_cap(tmp_path: Path) -> N
         "model_visible_output_chars": len(visible.output) + len(visible.error),
         "output_truncated": True,
     }
+
+
+async def test_r13b_runtime_guidance_is_explicit_and_generic(tmp_path: Path) -> None:
+    settings, model = make_offline_agent()
+    dependencies = make_dependencies(tmp_path)
+    agent = create_coding_agent(
+        settings,
+        model=model,
+        system_prompt=R13B_SYSTEM_PROMPT,
+    )
+
+    prompt_parts = await agent.system_prompt_parts(deps=dependencies)
+    prompt = prompt_parts[0].content
+    assert prompt == R13B_SYSTEM_PROMPT
+    normalized_prompt = prompt.lower()
+    for expected in (
+        "structured argv",
+        "pipelines",
+        "redirection",
+        "do not assume optional shell utilities such as rg or file",
+        "use read_file",
+        "prefer\nedit_file",
+        "smallest reasonable edit",
+    ):
+        assert expected in normalized_prompt
+    for forbidden in (
+        "GS-T001",
+        "IcelandicLocale",
+        "arrow/locales.py",
+        "test_locales.py",
+        "gold patch",
+        "future tasks",
+    ):
+        assert forbidden not in prompt

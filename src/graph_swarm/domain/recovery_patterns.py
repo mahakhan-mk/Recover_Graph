@@ -3,9 +3,9 @@
 from datetime import datetime
 from enum import StrEnum
 from math import isfinite
-from typing import cast
+from typing import Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from graph_swarm.domain._validation import require_non_empty, require_timezone_aware
 
@@ -39,7 +39,15 @@ class EnvironmentConstraints(BaseModel):
 
 
 class RecoveryPattern(BaseModel):
-    """Historical operational evidence, not a causal explanation."""
+    """Historical operational evidence, not a causal explanation.
+
+    ``source_tool`` and ``source_operation`` preserve the tool and operation
+    associated with the historical failure provenance.  The optional
+    ``applicability_*`` fields identify the observed successful recovery action
+    class used for future structural applicability matching.  They are absent
+    on legacy patterns, which continue to use the source fields as their
+    structural key.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -53,6 +61,8 @@ class RecoveryPattern(BaseModel):
     source_chronological_index: int
     source_tool: str
     source_operation: str
+    applicability_tool: str | None = None
+    applicability_operation: str | None = None
     source_failure_type: str
     environment_constraints: EnvironmentConstraints = Field(
         default_factory=EnvironmentConstraints
@@ -80,6 +90,23 @@ class RecoveryPattern(BaseModel):
     @classmethod
     def require_non_empty_text(cls, value: str) -> str:
         return require_non_empty(value)
+
+    @field_validator("applicability_tool", "applicability_operation")
+    @classmethod
+    def require_non_empty_applicability_text(cls, value: str | None) -> str | None:
+        if value is not None:
+            return require_non_empty(value)
+        return value
+
+    @model_validator(mode="after")
+    def require_applicability_pair(self) -> Self:
+        if (self.applicability_tool is None) != (
+            self.applicability_operation is None
+        ):
+            raise ValueError(
+                "applicability_tool and applicability_operation must both be set or both be None"
+            )
+        return self
 
     @field_validator("source_chronological_index", "evidence_count")
     @classmethod

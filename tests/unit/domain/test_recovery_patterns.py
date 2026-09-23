@@ -50,6 +50,45 @@ def test_valid_pattern_has_typed_auditable_provenance() -> None:
     assert pattern.source_task_id == "task-001"
     assert pattern.source_chronological_index == 3
     assert pattern.environment_constraints.runtime == "python-3.13"
+    assert pattern.applicability_tool is None
+    assert pattern.applicability_operation is None
+
+
+def test_applicability_fields_round_trip_for_objective_anchored_pattern() -> None:
+    pattern = make_pattern(
+        source_tool="run_command",
+        source_operation="run_command",
+        applicability_tool="edit_file",
+        applicability_operation="edit_file",
+    )
+
+    restored = RecoveryPattern.model_validate_json(pattern.model_dump_json())
+
+    assert restored.source_tool == "run_command"
+    assert restored.source_operation == "run_command"
+    assert restored.applicability_tool == "edit_file"
+    assert restored.applicability_operation == "edit_file"
+
+
+@pytest.mark.parametrize("field", ("applicability_tool", "applicability_operation"))
+def test_applicability_fields_reject_whitespace(field: str) -> None:
+    with pytest.raises(ValidationError):
+        make_pattern(**{field: "  "})
+
+
+@pytest.mark.parametrize(
+    ("applicability_tool", "applicability_operation"),
+    (("edit_file", None), (None, "edit_file")),
+)
+def test_applicability_fields_must_be_present_as_a_pair(
+    applicability_tool: str | None,
+    applicability_operation: str | None,
+) -> None:
+    with pytest.raises(ValidationError, match="must both be set"):
+        make_pattern(
+            applicability_tool=applicability_tool,
+            applicability_operation=applicability_operation,
+        )
 
 
 @pytest.mark.parametrize(

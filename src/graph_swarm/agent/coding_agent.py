@@ -99,6 +99,7 @@ def create_coding_agent(
     *,
     model: Model | None = None,
     capabilities: Sequence[AgentCapability[AgentDependencies]] | None = None,
+    system_prompt: str | None = None,
 ) -> Agent[AgentDependencies, str]:
     """Build the controlled coding agent without performing a model request.
 
@@ -117,7 +118,7 @@ def create_coding_agent(
         selected_model,
         deps_type=AgentDependencies,
         output_type=str,
-        system_prompt=ROLLOUT1_SYSTEM_PROMPT,
+        system_prompt=system_prompt or ROLLOUT1_SYSTEM_PROMPT,
         retries={"tools": _CODING_AGENT_TOOL_RETRIES},
         capabilities=capabilities,
     )

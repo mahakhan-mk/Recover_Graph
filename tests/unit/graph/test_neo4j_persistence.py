@@ -176,6 +176,27 @@ def test_entity_writes_use_canonical_merge_identity_and_parameters() -> None:
     assert pattern_parameters["environment_versions_json"] == '{"pytest":"8.0"}'
     assert pattern_parameters["environment_dependencies_json"] == '{"package":"1.2"}'
     assert pattern_parameters["environment_markers_json"] == '{"platform":"linux"}'
+    assert pattern_parameters["applicability_tool"] is None
+    assert pattern_parameters["applicability_operation"] is None
+
+    objective_pattern = make_recovery_pattern().model_copy(
+        update={
+            "source_tool": "run_command",
+            "source_operation": "run_command",
+            "applicability_tool": "edit_file",
+            "applicability_operation": "edit_file",
+        }
+    )
+    with patch.object(
+        repository,
+        "execute_query",
+        return_value=FakeResult([{"provenance_matches": True}]),
+    ) as execute_query:
+        repository.save_recovery_pattern(objective_pattern)
+
+    objective_parameters = execute_query.call_args.kwargs
+    assert objective_parameters["applicability_tool"] == "edit_file"
+    assert objective_parameters["applicability_operation"] == "edit_file"
 
 
 def test_save_action_rejects_mismatched_ids_before_database_write() -> None:

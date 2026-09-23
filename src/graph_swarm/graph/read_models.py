@@ -76,6 +76,9 @@ class RecoveryEvidenceLineage(BaseModel):
     environment: EnvironmentContext
     failed_action: ActionLineageRecord
     recovery_action: ActionLineageRecord
+    recovery_action_candidates: tuple[ActionLineageRecord, ...] = ()
+    recovery_evidence_source: str | None = None
+    trusted_recovery_action_id: str | None = None
 
 
 class RecoveryPatternLineage(BaseModel):

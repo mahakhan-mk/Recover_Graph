@@ -150,6 +150,26 @@ R12_STOPPING_POLICY = "objective_anchored_recovery_or_timeout_v1"
 R12_OBJECTIVE_MUTATION_CHECK_POLICY = (
     "pre_agent_failure_then_post_mutation_success_v1"
 )
+R13_NAMESPACE = "GS-E003/Gate-A1/acquisition-r13"
+R13_CONFIG = "configs/experiments/gate_a1_acquisition_r13.yaml"
+R13_EXPECTED_CODING_MODEL = R12_EXPECTED_CODING_MODEL
+R13_EXPECTED_ABSTRACTION_MODEL = R12_EXPECTED_ABSTRACTION_MODEL
+R13_REVISION_REASON = (
+    "separate_failure_provenance_from_recovery_applicability_after_r12_pattern_key_mismatch"
+)
+R13_RECOVERY_EVENT_SEMANTICS = R12_RECOVERY_EVENT_SEMANTICS
+R13_STOPPING_POLICY = R12_STOPPING_POLICY
+R13_OBJECTIVE_MUTATION_CHECK_POLICY = R12_OBJECTIVE_MUTATION_CHECK_POLICY
+R13B_NAMESPACE = "GS-E003/Gate-A1/acquisition-r13b"
+R13B_CONFIG = "configs/experiments/gate_a1_acquisition_r13b_v2.yaml"
+R13B_EXPECTED_CODING_MODEL = R13_EXPECTED_CODING_MODEL
+R13B_EXPECTED_ABSTRACTION_MODEL = R13_EXPECTED_ABSTRACTION_MODEL
+R13B_REVISION_REASON = (
+    "increase_agent_wall_clock_for_free_provider_latency_variance"
+)
+R13B_PROMPT_VERSION = "v2-runtime-guidance"
+R13B_AGENT_TIMEOUT_SECONDS = 900
+R13B_TIMEOUT_SECONDS = 900
 
 
 class GateA1AcquisitionPreflightError(RuntimeError):
@@ -1362,6 +1382,84 @@ def _validate_r12_harness_configuration(configuration: Any) -> None:
         )
 
 
+def _validate_r13_harness_configuration(configuration: Any) -> None:
+    resolved = configuration.config
+    expected = {
+        "run_revision": "R13",
+        "revision_reason": R13_REVISION_REASON,
+        "model_visible_tool_output_chars": R8_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+        "objective_coverage_policy": R8_OBJECTIVE_COVERAGE_POLICY,
+        "objective_coverage_policy_selection_version": R7_COVERAGE_POLICY_SELECTION_VERSION,
+        "workspace_line_ending_policy": R8_WORKSPACE_LINE_ENDING_POLICY,
+        "persistence_session_policy": R8_PERSISTENCE_SESSION_POLICY,
+        "persistence_retry_policy": R8_PERSISTENCE_RETRY_POLICY,
+        "recovery_event_semantics": R13_RECOVERY_EVENT_SEMANTICS,
+        "repository_mutation_evidence_policy": R9_REPOSITORY_MUTATION_EVIDENCE_POLICY,
+        "stopping_policy": R13_STOPPING_POLICY,
+        "objective_mutation_check_policy": R13_OBJECTIVE_MUTATION_CHECK_POLICY,
+        "command_argv_policy": R10_COMMAND_ARGV_POLICY,
+    }
+    for field, expected_value in expected.items():
+        if getattr(resolved, field, None) != expected_value:
+            raise GateA1AcquisitionPreflightError(
+                f"R13 {field} must be {expected_value!r}"
+            )
+    if resolved.limits.max_actions is not None or resolved.limits.max_requests is not None:
+        raise GateA1AcquisitionPreflightError("R13 action/request ceilings must be null")
+    if resolved.limits.timeout_seconds != R9_AGENT_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError("R13 timeout_seconds must be 600")
+    if resolved.agent_timeout_seconds != R9_AGENT_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R13 agent_timeout_seconds must be {R9_AGENT_TIMEOUT_SECONDS}"
+        )
+    if resolved.objective_timeout_seconds != R9_OBJECTIVE_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R13 objective_timeout_seconds must be {R9_OBJECTIVE_TIMEOUT_SECONDS}"
+        )
+
+
+def _validate_r13b_harness_configuration(configuration: Any) -> None:
+    resolved = configuration.config
+    expected = {
+        "run_revision": "R13b",
+        "revision_reason": R13B_REVISION_REASON,
+        "model_visible_tool_output_chars": R8_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+        "objective_coverage_policy": R8_OBJECTIVE_COVERAGE_POLICY,
+        "objective_coverage_policy_selection_version": R7_COVERAGE_POLICY_SELECTION_VERSION,
+        "workspace_line_ending_policy": R8_WORKSPACE_LINE_ENDING_POLICY,
+        "persistence_session_policy": R8_PERSISTENCE_SESSION_POLICY,
+        "persistence_retry_policy": R8_PERSISTENCE_RETRY_POLICY,
+        "recovery_event_semantics": R13_RECOVERY_EVENT_SEMANTICS,
+        "repository_mutation_evidence_policy": R9_REPOSITORY_MUTATION_EVIDENCE_POLICY,
+        "stopping_policy": R13_STOPPING_POLICY,
+        "objective_mutation_check_policy": R13_OBJECTIVE_MUTATION_CHECK_POLICY,
+        "command_argv_policy": R10_COMMAND_ARGV_POLICY,
+    }
+    for field, expected_value in expected.items():
+        if getattr(resolved, field, None) != expected_value:
+            raise GateA1AcquisitionPreflightError(
+                f"R13b {field} must be {expected_value!r}"
+            )
+    if configuration.model.prompt_version != R13B_PROMPT_VERSION:
+        raise GateA1AcquisitionPreflightError(
+            f"R13b prompt_version must be {R13B_PROMPT_VERSION!r}"
+        )
+    if resolved.limits.max_actions is not None or resolved.limits.max_requests is not None:
+        raise GateA1AcquisitionPreflightError("R13b action/request ceilings must be null")
+    if resolved.limits.timeout_seconds != R13B_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R13b timeout_seconds must be {R13B_TIMEOUT_SECONDS}"
+        )
+    if resolved.agent_timeout_seconds != R13B_AGENT_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R13b agent_timeout_seconds must be {R13B_AGENT_TIMEOUT_SECONDS}"
+        )
+    if resolved.objective_timeout_seconds != R9_OBJECTIVE_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R13b objective_timeout_seconds must be {R9_OBJECTIVE_TIMEOUT_SECONDS}"
+        )
+
+
 def _r8_configuration_hash(  # pyright: ignore[reportUnusedFunction]
     configuration: Any,
     settings: Any,
@@ -1450,6 +1548,38 @@ def _r8_configuration_hash(  # pyright: ignore[reportUnusedFunction]
             configuration.config, "command_argv_policy", None
         )
     if configuration.config.run_revision == "R12":
+        payload["agent_timeout_seconds"] = getattr(
+            configuration.config, "agent_timeout_seconds", None
+        )
+        payload["objective_timeout_seconds"] = getattr(
+            configuration.config, "objective_timeout_seconds", None
+        )
+        payload["recovery_event_semantics"] = getattr(
+            configuration.config, "recovery_event_semantics", None
+        )
+        payload["repository_mutation_evidence_policy"] = getattr(
+            configuration.config, "repository_mutation_evidence_policy", None
+        )
+        payload["command_argv_policy"] = getattr(
+            configuration.config, "command_argv_policy", None
+        )
+    if configuration.config.run_revision == "R13":
+        payload["agent_timeout_seconds"] = getattr(
+            configuration.config, "agent_timeout_seconds", None
+        )
+        payload["objective_timeout_seconds"] = getattr(
+            configuration.config, "objective_timeout_seconds", None
+        )
+        payload["recovery_event_semantics"] = getattr(
+            configuration.config, "recovery_event_semantics", None
+        )
+        payload["repository_mutation_evidence_policy"] = getattr(
+            configuration.config, "repository_mutation_evidence_policy", None
+        )
+        payload["command_argv_policy"] = getattr(
+            configuration.config, "command_argv_policy", None
+        )
+    if configuration.config.run_revision == "R13b":
         payload["agent_timeout_seconds"] = getattr(
             configuration.config, "agent_timeout_seconds", None
         )
@@ -2052,6 +2182,67 @@ def run_gate_a1_acquisition_r12(
     )
 
 
+def run_gate_a1_acquisition_r13(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run R13's objective-anchored acquisition harness."""
+    configuration = load_experiment_configuration(
+        project_root / R13_CONFIG,
+        project_root=project_root,
+    )
+    _validate_r13_harness_configuration(configuration)
+    from graph_swarm.research.gate_a1_r13 import (
+        run_gate_a1_acquisition_r13 as _run_gate_a1_acquisition_r13,
+    )
+
+    return _run_gate_a1_acquisition_r13(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+    )
+
+
+def run_gate_a1_acquisition_r13b(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run R13b through the canonical R13 objective-anchored runner."""
+    configuration = load_experiment_configuration(
+        project_root / R13B_CONFIG,
+        project_root=project_root,
+    )
+    _validate_r13b_harness_configuration(configuration)
+    from experiments.sprint3 import _configured_runtime
+    from graph_swarm.agent.prompts import R13B_SYSTEM_PROMPT
+    from graph_swarm.research.gate_a1_r13 import (
+        run_gate_a1_acquisition_r13 as _run_gate_a1_acquisition_r13,
+    )
+
+    configured = _configured_runtime(
+        configuration,
+        project_root / "benchmark/workspaces",
+        project_root / "research/evidence/workspaces",
+    )
+    return _run_gate_a1_acquisition_r13(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+        _configuration=configured,
+        _revision="R13b",
+        _run_prefix="acquisition-r13b",
+        _namespace=R13B_NAMESPACE,
+        _condition="acquisition-r13b",
+        _system_prompt=R13B_SYSTEM_PROMPT,
+        _coding_model=R13B_EXPECTED_CODING_MODEL,
+        _abstraction_model=R13B_EXPECTED_ABSTRACTION_MODEL,
+    )
+
+
 def run_gate_a1_acquisition(project_root: Path) -> tuple[str, Path]:
     """Run exactly T001-T005 acquisition and return final status plus artifact root."""
     project_root = project_root.expanduser().resolve()
@@ -2164,4 +2355,6 @@ __all__ = [
     "run_gate_a1_acquisition_r10",
     "run_gate_a1_acquisition_r11",
     "run_gate_a1_acquisition_r12",
+    "run_gate_a1_acquisition_r13",
+    "run_gate_a1_acquisition_r13b",
 ]

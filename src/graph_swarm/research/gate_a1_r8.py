@@ -76,6 +76,10 @@ def objective_final_check_policy(
     """Return the bounded post-agent objective policy for one revision."""
     if revision == "R12":
         return "skipped_r12_requires_mutation_bound_objective"
+    if revision == "R13":
+        return "skipped_r13_requires_mutation_bound_objective"
+    if revision == "R13b":
+        return "skipped_r13b_requires_mutation_bound_objective"
     if (
         revision in {"R10", "R11"}
         and isinstance(runtime_error, AgentWallClockTimeoutError)
@@ -83,6 +87,23 @@ def objective_final_check_policy(
     ):
         return "skipped_no_repository_mutation_after_agent_timeout"
     return "performed"
+
+
+def recovery_pattern_telemetry(pattern: Any, revision: str) -> dict[str, object]:
+    telemetry: dict[str, object] = {
+        "pattern_id": pattern.id,
+        "verification_status": pattern.verification_status.value,
+    }
+    if revision in {"R13", "R13b"}:
+        telemetry.update(
+            {
+                "source_tool": pattern.source_tool,
+                "source_operation": pattern.source_operation,
+                "applicability_tool": pattern.applicability_tool,
+                "applicability_operation": pattern.applicability_operation,
+            }
+        )
+    return telemetry
 
 
 def classify_r8_acquisition(
@@ -643,6 +664,7 @@ def _run_r8_task(
     condition: str = "acquisition-r8",
     controller_type: type[R8ObjectiveController] = R8ObjectiveController,
     objective_anchored_acquisition: bool = False,
+    system_prompt: str | None = None,
 ) -> tuple[dict[str, object], Any]:
     import time
     from datetime import UTC, datetime
@@ -733,7 +755,11 @@ def _run_r8_task(
                     "task_id": task.id,
                 },
             )
-            agent = create_coding_agent(settings, capabilities=[step_persistence])
+            agent = create_coding_agent(
+                settings,
+                capabilities=[step_persistence],
+                system_prompt=system_prompt,
+            )
             agent_started = time.perf_counter()
             result = run_coding_agent(
                 agent,
@@ -830,6 +856,23 @@ def _run_r8_task(
                 "outcome_id": outcome.id,
             }
             lineage = memory.get_recovery_evidence(failure.id)
+            if revision in {"R13", "R13b"}:
+                from graph_swarm.memory.recovery_abstraction import (
+                    OBJECTIVE_ANCHORED_RECOVERY_EVIDENCE_SOURCE,
+                )
+
+                lineage = lineage.model_copy(
+                    update={
+                        "recovery_evidence_source": (
+                            OBJECTIVE_ANCHORED_RECOVERY_EVIDENCE_SOURCE
+                        ),
+                        "trusted_recovery_action_id": getattr(
+                            controller,
+                            "objective_success_trigger_action_id",
+                            None,
+                        ),
+                    }
+                )
             pattern = abstract_and_persist_recovery_pattern(
                 lineage,
                 cast(Any, memory),
@@ -845,12 +888,7 @@ def _run_r8_task(
                 embedder,
             )
             recovery_pattern_embedded = embedded.embedding is not None
-            patterns.append(
-                {
-                    "pattern_id": embedded.id,
-                    "verification_status": embedded.verification_status.value,
-                }
-            )
+            patterns.append(recovery_pattern_telemetry(embedded, revision))
     except Exception as error:
         persistence_error = persistence_error or error
     task_success = controller.objective_success
@@ -932,6 +970,16 @@ def _run_r8_task(
         "events": [event.model_dump(mode="json") for event in dependencies.events],
         "agent_output": None if result is None else result.output,
     }
+    if revision == "R13b":
+        artifact.update(
+            {
+                "run_revision": revision,
+                "config_version": configuration.config.config_version,
+                "revision_reason": configuration.config.revision_reason,
+                "prompt_version": configuration.model.prompt_version,
+                "coding_model": settings.openrouter_coding_model,
+            }
+        )
     if objective_anchored_acquisition:
         pre_error = getattr(controller, "pre_agent_objective_error", None)
         pre_passed = getattr(controller, "pre_agent_objective_passed", None)
@@ -979,7 +1027,7 @@ def _run_r8_task(
                 ),
             }
         )
-    if revision in {"R9", "R10", "R11", "R12"}:
+    if revision in {"R9", "R10", "R11", "R12", "R13", "R13b"}:
         artifact.update(
             {
                 "agent_timeout_seconds": agent_timeout_seconds,

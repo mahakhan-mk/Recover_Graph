@@ -102,14 +102,25 @@ class RecoveryPatternApplicabilityService:
         matched: list[str] = []
         rejected: list[str] = []
 
-        if _normalize_action_value(pattern.source_tool) != _normalize_action_value(
+        effective_tool = (
+            pattern.applicability_tool
+            if pattern.applicability_tool is not None
+            else pattern.source_tool
+        )
+        effective_operation = (
+            pattern.applicability_operation
+            if pattern.applicability_operation is not None
+            else pattern.source_operation
+        )
+
+        if _normalize_action_value(effective_tool) != _normalize_action_value(
             planned_action.tool
         ):
             rejected.append("tool_mismatch")
         else:
             matched.append("tool")
 
-        if _normalize_action_value(pattern.source_operation) != _normalize_action_value(
+        if _normalize_action_value(effective_operation) != _normalize_action_value(
             planned_action.operation
         ):
             rejected.append("operation_mismatch")

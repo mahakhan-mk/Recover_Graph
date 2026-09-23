@@ -37,6 +37,7 @@ from graph_swarm.memory.recovery_abstraction import (
     deterministic_recovery_pattern_id,
     validate_recovery_abstraction,
 )
+from graph_swarm.research.gate_a1_r8 import recovery_pattern_telemetry
 from graph_swarm.settings import Settings
 
 NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
@@ -84,11 +85,19 @@ def make_action_record(
     return ActionLineageRecord(planned_action=planned, result=result)
 
 
-def make_lineage() -> RecoveryEvidenceLineage:
+def make_lineage(
+    *,
+    failed_tool: str = "run_tests",
+    failed_operation: str = "pytest",
+    recovery_tool: str = "write_file",
+    recovery_operation: str = "write_file",
+    recovery_evidence_source: str | None = None,
+    trusted_recovery_action_id: str | None = None,
+) -> RecoveryEvidenceLineage:
     failed_action = make_action_record(
         "failed-action-001",
-        "run_tests",
-        "pytest",
+        failed_tool,
+        failed_operation,
         {"paths": ["tests"], "options": {"quiet": True}},
         success=False,
         output="1 failed",
@@ -96,8 +105,8 @@ def make_lineage() -> RecoveryEvidenceLineage:
     )
     recovery_action = make_action_record(
         "recovery-action-001",
-        "write_file",
-        "write_file",
+        recovery_tool,
+        recovery_operation,
         {"path": "src/example.py", "content": "return value"},
         success=True,
         output="written",
@@ -144,6 +153,8 @@ def make_lineage() -> RecoveryEvidenceLineage:
         ),
         failed_action=failed_action,
         recovery_action=recovery_action,
+        recovery_evidence_source=recovery_evidence_source,
+        trusted_recovery_action_id=trusted_recovery_action_id,
     )
 
 
@@ -227,6 +238,103 @@ def test_trusted_provenance_and_environment_populate_pattern() -> None:
     assert pattern.verification_status is RecoveryPatternStatus.OBSERVED_SUCCESSFUL
     assert pattern.evidence_count == 1
     assert pattern.verification_status is not RecoveryPatternStatus.VERIFIED_FOR_EXPERIMENT
+
+
+def test_objective_anchored_pattern_separates_failure_and_applicability_keys() -> None:
+    repository = Mock(spec=OperationalMemoryRepository)
+    lineage = make_lineage(
+        failed_tool="run_command",
+        failed_operation="run_command",
+        recovery_tool="edit_file",
+        recovery_operation="edit_file",
+        recovery_evidence_source="objective_anchored_v1",
+        trusted_recovery_action_id="recovery-action-001",
+    )
+
+    pattern = abstract_and_persist_recovery_pattern(
+        lineage,
+        repository,
+        make_settings(),
+        model=make_model(),
+        created_at=NOW,
+    )
+
+    assert pattern.source_tool == "run_command"
+    assert pattern.source_operation == "run_command"
+    assert pattern.applicability_tool == "edit_file"
+    assert pattern.applicability_operation == "edit_file"
+    assert pattern.model_dump(mode="json")["applicability_tool"] == "edit_file"
+
+    serialized_r13b_telemetry = json.loads(
+        json.dumps(recovery_pattern_telemetry(pattern, "R13b"))
+    )
+    assert serialized_r13b_telemetry == {
+        "pattern_id": pattern.id,
+        "verification_status": pattern.verification_status.value,
+        "source_tool": "run_command",
+        "source_operation": "run_command",
+        "applicability_tool": "edit_file",
+        "applicability_operation": "edit_file",
+    }
+    assert recovery_pattern_telemetry(pattern, "R13") == serialized_r13b_telemetry
+
+
+@pytest.mark.parametrize(
+    ("lineage_update", "message"),
+    (
+        ({"recovery_action": None}, "trusted recovery action"),
+        (
+            {"trusted_recovery_action_id": "different-action"},
+            "one trusted observed mutation action",
+        ),
+        (
+            {
+                "recovery_action_candidates": (
+                    make_lineage(
+                        recovery_evidence_source="objective_anchored_v1",
+                        trusted_recovery_action_id="recovery-action-001",
+                    ).recovery_action,
+                    make_lineage(
+                        recovery_evidence_source="objective_anchored_v1",
+                        trusted_recovery_action_id="recovery-action-001",
+                    ).recovery_action,
+                )
+            },
+            "ambiguous observed-change",
+        ),
+    ),
+)
+def test_objective_anchored_lineage_fails_closed(
+    lineage_update: dict[str, object],
+    message: str,
+) -> None:
+    lineage = make_lineage(
+        recovery_evidence_source="objective_anchored_v1",
+        trusted_recovery_action_id="recovery-action-001",
+    ).model_copy(update=lineage_update)
+
+    try:
+        evidence = build_recovery_evidence_package(lineage)
+    except RecoveryAbstractionValidationError as error:
+        assert message in str(error)
+        return
+
+    with pytest.raises(RecoveryAbstractionValidationError, match=message):
+        construct_recovery_pattern(
+            RecoveryAbstractionOutput(
+                title="Restore the intended assertion input",
+                guidance=(
+                    "Inspect the failing test input and make a concrete correction "
+                    "before rerunning the test."
+                ),
+                evidence_summary="The concrete change preceded a successful outcome.",
+            ),
+            evidence,
+            source_failure_id=evidence.source_failure_id,
+            source_resolution_id=evidence.source_resolution_id,
+            source_outcome_id=evidence.source_outcome_id,
+            created_at=NOW,
+        )
 
 
 def test_pattern_identity_is_stable_for_identical_source_evidence() -> None:

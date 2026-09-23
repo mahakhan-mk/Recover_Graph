@@ -236,6 +236,14 @@ def _read_recovery_pattern(properties: Mapping[str, object]) -> RecoveryPattern:
         ),
         source_tool=_required_text(properties, "source_tool"),
         source_operation=_required_text(properties, "source_operation"),
+        applicability_tool=cast(
+            str | None,
+            _optional_value(properties, "applicability_tool"),
+        ),
+        applicability_operation=cast(
+            str | None,
+            _optional_value(properties, "applicability_operation"),
+        ),
         source_failure_type=_required_text(properties, "source_failure_type"),
         environment_constraints=EnvironmentConstraints(
             runtime=cast(str | None, _optional_value(properties, "environment_runtime")),
@@ -470,6 +478,8 @@ class Neo4jRepository:
             source_chronological_index=pattern.source_chronological_index,
             source_tool=pattern.source_tool,
             source_operation=pattern.source_operation,
+            applicability_tool=pattern.applicability_tool,
+            applicability_operation=pattern.applicability_operation,
             source_failure_type=pattern.source_failure_type,
             environment_runtime=pattern.environment_constraints.runtime,
             environment_versions_json=_json_object(

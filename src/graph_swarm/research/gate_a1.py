@@ -1021,11 +1021,33 @@ def main() -> int:
         metavar="RUN_ROOT",
         help="resume Gate A1 Acquisition R12 without rerunning started tasks",
     )
+    modes.add_argument(
+        "--acquire-r13",
+        action="store_true",
+        help="execute the explicitly versioned Gate A1 Acquisition R13",
+    )
+    modes.add_argument(
+        "--resume-acquisition-r13",
+        type=Path,
+        metavar="RUN_ROOT",
+        help="resume Gate A1 Acquisition R13 without rerunning started tasks",
+    )
+    modes.add_argument(
+        "--acquire-r13b",
+        action="store_true",
+        help="execute the explicitly versioned Gate A1 Acquisition R13b",
+    )
+    modes.add_argument(
+        "--resume-acquisition-r13b",
+        type=Path,
+        metavar="RUN_ROOT",
+        help="resume Gate A1 Acquisition R13b without rerunning started tasks",
+    )
     parser.add_argument(
         "--max-new-tasks",
         type=int,
         metavar="COUNT",
-        help="start at most COUNT never-started R2-R12 tasks in this invocation",
+        help="start at most COUNT never-started R2-R13b tasks in this invocation",
     )
     args = parser.parse_args()
     project_root = args.project_root.resolve()
@@ -1052,9 +1074,13 @@ def main() -> int:
         or args.resume_acquisition_r11 is not None
         or args.acquire_r12
         or args.resume_acquisition_r12 is not None
+        or args.acquire_r13
+        or args.resume_acquisition_r13 is not None
+        or args.acquire_r13b
+        or args.resume_acquisition_r13b is not None
     ):
         parser.error(
-            "--max-new-tasks requires an R2-R12 "
+            "--max-new-tasks requires an R2-R13b "
             "acquisition/resume mode"
         )
     if args.prepare_environments:
@@ -1217,6 +1243,36 @@ def main() -> int:
         return 0 if status in {
             "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
             "READY_TO_RESUME_GATE_A1_ACQUISITION_R12",
+        } else 2
+    if args.acquire_r13 or args.resume_acquisition_r13 is not None:
+        from graph_swarm.research.gate_a1_acquisition import (
+            run_gate_a1_acquisition_r13,
+        )
+
+        status, artifact_root = run_gate_a1_acquisition_r13(
+            project_root,
+            resume_root=args.resume_acquisition_r13,
+            max_new_tasks=args.max_new_tasks,
+        )
+        print(f"{status} {artifact_root}")
+        return 0 if status in {
+            "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
+            "READY_TO_RESUME_GATE_A1_ACQUISITION_R13",
+        } else 2
+    if args.acquire_r13b or args.resume_acquisition_r13b is not None:
+        from graph_swarm.research.gate_a1_acquisition import (
+            run_gate_a1_acquisition_r13b,
+        )
+
+        status, artifact_root = run_gate_a1_acquisition_r13b(
+            project_root,
+            resume_root=args.resume_acquisition_r13b,
+            max_new_tasks=args.max_new_tasks,
+        )
+        print(f"{status} {artifact_root}")
+        return 0 if status in {
+            "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
+            "READY_TO_RESUME_GATE_A1_ACQUISITION_R13B",
         } else 2
     if args.acquire_r2 or args.resume_acquisition_r2 is not None:
         from graph_swarm.research.gate_a1_acquisition import (
