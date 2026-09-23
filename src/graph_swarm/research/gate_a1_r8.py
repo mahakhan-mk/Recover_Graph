@@ -38,7 +38,7 @@ R8_STOPPING_POLICY = "objective_success_or_timeout_v1"
 R8_PERSISTENCE_SESSION_POLICY = "short_lived_session_v1"
 R8_PERSISTENCE_RETRY_POLICY = "retryable_transient_max_2_v1"
 R8_MAX_PERSISTENCE_ATTEMPTS = 2
-R8_MUTATING_TOOLS = frozenset({"write_file", "run_command", "run_tests"})
+R8_MUTATING_TOOLS = frozenset({"write_file", "edit_file", "run_command", "run_tests"})
 
 
 def agent_timeout_seconds_for_configuration(configuration: Any) -> float:

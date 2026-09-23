@@ -30,6 +30,7 @@ from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.agent.model_output import model_visible_action_result
 from graph_swarm.agent.pacing import ProviderRequestPacing, attach_provider_request_pacing
 from graph_swarm.agent.prompts import ROLLOUT1_SYSTEM_PROMPT
+from graph_swarm.agent.tools.edit_file import edit_file as controlled_edit_file
 from graph_swarm.agent.tools.read_file import (
     DEFAULT_READ_FILE_LENGTH,
     DEFAULT_READ_FILE_OFFSET,
@@ -167,6 +168,42 @@ def create_coding_agent(
         return model_visible_action_result(result, ctx.deps.model_output_telemetry)
 
     agent.tool(write_file)
+
+    def edit_file(
+        ctx: RunContext[AgentDependencies],
+        path: str,
+        old_text: str,
+        new_text: str,
+        expected_replacements: int = 1,
+    ) -> ActionResult:
+        """Use for small exact edits to existing text files.
+
+        ``old_text`` must match exactly. Prefer this over rewriting a large
+        file with ``write_file`` when only a small section changes.
+        """
+        action = prepare_tool_action(
+            ctx.deps,
+            "edit_file",
+            "edit_file",
+            {
+                "path": path,
+                "old_text": old_text,
+                "new_text": new_text,
+                "expected_replacements": expected_replacements,
+            },
+        )
+        result = controlled_edit_file(
+            ctx.deps,
+            path,
+            old_text,
+            new_text,
+            expected_replacements=expected_replacements,
+            action_id=action.id,
+        )
+        record_post_advice_action(ctx.deps, action, ctx.deps.events[-1])
+        return model_visible_action_result(result, ctx.deps.model_output_telemetry)
+
+    agent.tool(edit_file)
 
     def run_tests(ctx: RunContext[AgentDependencies]) -> ActionResult:
         """Run the repository test suite within the configured timeout."""

@@ -9,14 +9,20 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+from graph_swarm.agent.advisory import prepare_tool_action
 from graph_swarm.agent.coding_agent import AgentWallClockTimeoutError
 from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.tools.edit_file import edit_file
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.events import AgentEvent, AgentEventType
 from graph_swarm.research import gate_a1
 from graph_swarm.research import gate_a1_acquisition as acquisition
-from graph_swarm.research.gate_a1_r8 import objective_final_check_policy
+from graph_swarm.research.gate_a1_r8 import (
+    ObjectiveSatisfied,
+    attach_r8_objective_controller,
+    objective_final_check_policy,
+)
 from graph_swarm.research.gate_a1_r10 import R10ObjectiveController
 from graph_swarm.research.gate_a1_r11 import R11ObjectiveController
 from graph_swarm.research.gate_a1_r12 import R12ObjectiveController
@@ -307,10 +313,8 @@ def test_r12_controller_stops_after_first_successful_mutation_without_test_event
     )
     try:
         controller.after_event(event)
-    except Exception as error:
-        from graph_swarm.research.gate_a1_r8 import ObjectiveSatisfied
-
-        assert isinstance(error, ObjectiveSatisfied)
+    except ObjectiveSatisfied:
+        pass
     else:
         raise AssertionError("R12 did not stop after trusted objective success")
     assert controller.objective_success_trigger_action_id == action.id
@@ -401,3 +405,96 @@ def test_r12_final_check_policy_is_always_mutation_bound() -> None:
         None,
         has_repository_mutation=False,
     ) == "skipped_r12_requires_mutation_bound_objective"
+
+
+def test_r12_edit_file_lifecycle_records_real_mutation_and_binds_objective(
+    tmp_path: Path,
+) -> None:
+    dependencies = AgentDependencies(tmp_path, "run-r12-edit", "GS-T001")
+    target = tmp_path / "source.py"
+    target.write_text("broken", encoding="utf-8")
+    objective = _R12ScriptedObjective(
+        [
+            (False, "test_failure", 1, True),
+            (True, "passed", 0, True),
+        ]
+    )
+    controller = R12ObjectiveController(
+        task=SimpleNamespace(id="GS-T001"),
+        workspace=tmp_path,
+        objective=objective,
+        dependencies=dependencies,
+    )
+    attach_r8_objective_controller(dependencies, controller)
+    def fingerprint(workspace: Path) -> str:
+        return (workspace / "source.py").read_text(encoding="utf-8")
+
+    controller.mutation_fingerprint = staticmethod(fingerprint)  # type: ignore[assignment]
+    assert controller.check_pre_agent_objective() is False
+    action = prepare_tool_action(
+        dependencies,
+        "edit_file",
+        "edit_file",
+        {
+            "path": "source.py",
+            "old_text": "broken",
+            "new_text": "fixed",
+            "expected_replacements": 1,
+        },
+    )
+    try:
+        edit_file(
+            dependencies,
+            "source.py",
+            "broken",
+            "fixed",
+            action_id=action.id,
+        )
+    except ObjectiveSatisfied:
+        pass
+    assert action.id in dependencies.repository_mutation_evidence
+    assert controller.objective_success_trigger_action_id == action.id
+
+
+def test_r12_noop_edit_does_not_create_mutation_evidence(tmp_path: Path) -> None:
+    dependencies = AgentDependencies(tmp_path, "run-r12-noop", "GS-T001")
+    target = tmp_path / "source.py"
+    target.write_text("unchanged", encoding="utf-8")
+    objective = _R12ScriptedObjective(
+        [(False, "test_failure", 1, True), (True, "passed", 0, True)]
+    )
+    controller = R12ObjectiveController(
+        task=SimpleNamespace(id="GS-T001"),
+        workspace=tmp_path,
+        objective=objective,
+        dependencies=dependencies,
+    )
+    attach_r8_objective_controller(dependencies, controller)
+
+    def fingerprint(workspace: Path) -> str:
+        return (workspace / "source.py").read_text(encoding="utf-8")
+
+    controller.mutation_fingerprint = staticmethod(fingerprint)  # type: ignore[assignment]
+    assert controller.check_pre_agent_objective() is False
+    action = prepare_tool_action(
+        dependencies,
+        "edit_file",
+        "edit_file",
+        {
+            "path": "source.py",
+            "old_text": "unchanged",
+            "new_text": "unchanged",
+            "expected_replacements": 1,
+        },
+    )
+    result = edit_file(
+        dependencies,
+        "source.py",
+        "unchanged",
+        "unchanged",
+        action_id=action.id,
+    )
+
+    assert result.success is True
+    assert dependencies.repository_mutation_evidence == {}
+    assert controller.objective_success_trigger_action_id is None
