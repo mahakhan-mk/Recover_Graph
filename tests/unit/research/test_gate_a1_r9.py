@@ -1,5 +1,6 @@
 # pyright: reportPrivateUsage=false
 
+import json
 import subprocess
 import sys
 from dataclasses import replace
@@ -465,7 +466,7 @@ def test_r9_recovers_pytest_run_command_mutation_chain_idempotently() -> None:
         cast(Any, memory),
         cast(Any, object()),
         model=TestModel(
-            custom_output_args={
+            custom_output_text=json.dumps({
                 "title": "Repair the failing locale behavior",
                 "guidance": (
                     "Inspect the failing locale input and apply the smallest concrete "
@@ -475,7 +476,7 @@ def test_r9_recovers_pytest_run_command_mutation_chain_idempotently() -> None:
                     "A pytest command failure was followed by an observed repository "
                     "change and a successful targeted pytest command."
                 ),
-            }
+            })
         ),
     )
     pattern_two = abstract_and_persist_recovery_pattern(
@@ -483,7 +484,7 @@ def test_r9_recovers_pytest_run_command_mutation_chain_idempotently() -> None:
         cast(Any, memory),
         cast(Any, object()),
         model=TestModel(
-            custom_output_args={
+            custom_output_text=json.dumps({
                 "title": "Repair the failing locale behavior",
                 "guidance": (
                     "Inspect the failing locale input and apply the smallest concrete "
@@ -493,7 +494,7 @@ def test_r9_recovers_pytest_run_command_mutation_chain_idempotently() -> None:
                     "A pytest command failure was followed by an observed repository "
                     "change and a successful targeted pytest command."
                 ),
-            }
+            })
         ),
     )
     assert pattern_one.id == pattern_two.id

@@ -8,6 +8,7 @@ unit tests can exercise the lifecycle without credentials, Docker, or Neo4j.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import os
 import re
@@ -20,6 +21,7 @@ from typing import Any, Protocol, cast
 
 from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
 
+from graph_swarm.agent.coding_agent import AgentWallClockTimeoutError
 from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.detection.failure_detector import detect_failure
 from graph_swarm.domain.actions import PlannedAction
@@ -49,6 +51,38 @@ def agent_timeout_seconds_for_configuration(configuration: Any) -> float:
     if not isinstance(timeout, (int, float)) or timeout <= 0:
         raise ValueError("agent timeout must be positive")
     return float(timeout)
+
+
+def _objective_observation_payload(objective: Any) -> dict[str, object] | None:
+    observations = getattr(objective, "observations", None)
+    if not observations:
+        return None
+    latest = observations[-1]
+    if dataclasses.is_dataclass(latest):
+        return cast(dict[str, object], dataclasses.asdict(cast(Any, latest)))
+    model_dump = getattr(latest, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        return cast(dict[str, object], dumped) if isinstance(dumped, dict) else None
+    return None
+
+
+def objective_final_check_policy(
+    revision: str,
+    runtime_error: BaseException | None,
+    *,
+    has_repository_mutation: bool,
+) -> str:
+    """Return the bounded post-agent objective policy for one revision."""
+    if revision == "R12":
+        return "skipped_r12_requires_mutation_bound_objective"
+    if (
+        revision in {"R10", "R11"}
+        and isinstance(runtime_error, AgentWallClockTimeoutError)
+        and not has_repository_mutation
+    ):
+        return "skipped_no_repository_mutation_after_agent_timeout"
+    return "performed"
 
 
 def classify_r8_acquisition(
@@ -608,6 +642,7 @@ def _run_r8_task(
     revision: str = "R8",
     condition: str = "acquisition-r8",
     controller_type: type[R8ObjectiveController] = R8ObjectiveController,
+    objective_anchored_acquisition: bool = False,
 ) -> tuple[dict[str, object], Any]:
     import time
     from datetime import UTC, datetime
@@ -616,11 +651,18 @@ def _run_r8_task(
     from pydantic_ai_harness.step_persistence import SqliteStepStore, StepPersistence
 
     from experiments.sprint3 import _materialize_workspace
-    from graph_swarm.agent.coding_agent import create_coding_agent, run_coding_agent
+    from graph_swarm.agent.coding_agent import (
+        create_coding_agent,
+        run_coding_agent,
+        timeout_provenance,
+    )
     from graph_swarm.agent.dependencies import AgentDependencies
     from graph_swarm.domain.environment import EnvironmentContext
     from graph_swarm.domain.runs import Run
-    from graph_swarm.integration.event_persistence import persist_agent_event_stream
+    from graph_swarm.integration.event_persistence import (
+        persist_agent_event_stream,
+        persist_objective_anchored_recovery,
+    )
     from graph_swarm.memory.recovery_abstraction import abstract_and_persist_recovery_pattern
     from graph_swarm.memory.recovery_embeddings import (
         RecoveryPatternEmbedder,
@@ -674,32 +716,39 @@ def _run_r8_task(
     agent_duration_seconds = 0.0
     agent_timeout_seconds = agent_timeout_seconds_for_configuration(configuration)
     try:
-        step_persistence = StepPersistence(
-            store=SqliteStepStore(database=run_dir / "steps.sqlite"),
-            agent_name="graph_swarm_coding_agent",
-            run_id=run_id,
-            metadata={
-                "gate": "GS-E003 / Gate A1",
-                "revision": revision,
-                "task_id": task.id,
-            },
-        )
-        agent = create_coding_agent(settings, capabilities=[step_persistence])
-        agent_started = time.perf_counter()
-        result = run_coding_agent(
-            agent,
-            settings,
-            dependencies,
-            __import__(
-                "graph_swarm.research.runner", fromlist=["build_task_prompt"]
-            ).build_task_prompt(task),
-            max_actions=None,
-            max_requests=None,
-            timeout_seconds=agent_timeout_seconds,
-            model_settings=cast(ModelSettings, configuration.model.settings),
-            request_pacing=pacing,
-            disable_request_limit=True,
-        )
+        pre_agent_passed = False
+        if objective_anchored_acquisition:
+            pre_agent_passed = bool(controller.check_pre_agent_objective())
+        if not objective_anchored_acquisition or (
+            not pre_agent_passed
+            and getattr(controller, "pre_agent_objective_error", None) is None
+        ):
+            step_persistence = StepPersistence(
+                store=SqliteStepStore(database=run_dir / "steps.sqlite"),
+                agent_name="graph_swarm_coding_agent",
+                run_id=run_id,
+                metadata={
+                    "gate": "GS-E003 / Gate A1",
+                    "revision": revision,
+                    "task_id": task.id,
+                },
+            )
+            agent = create_coding_agent(settings, capabilities=[step_persistence])
+            agent_started = time.perf_counter()
+            result = run_coding_agent(
+                agent,
+                settings,
+                dependencies,
+                __import__(
+                    "graph_swarm.research.runner", fromlist=["build_task_prompt"]
+                ).build_task_prompt(task),
+                max_actions=None,
+                max_requests=None,
+                timeout_seconds=agent_timeout_seconds,
+                model_settings=cast(ModelSettings, configuration.model.settings),
+                request_pacing=pacing,
+                disable_request_limit=True,
+            )
     except ObjectiveSatisfied:
         pass
     except InLoopPersistenceError as error:
@@ -709,8 +758,29 @@ def _run_r8_task(
     finally:
         if agent_started is not None:
             agent_duration_seconds = time.perf_counter() - agent_started
-    if not controller.objective_success:
-        controller.final_check()
+    objective_final_check = "not_needed_objective_already_satisfied"
+    if objective_anchored_acquisition and getattr(
+        controller, "pre_agent_objective_passed", None
+    ):
+        objective_final_check = "not_needed_pre_agent_objective_already_satisfied"
+    elif objective_anchored_acquisition and getattr(
+        controller, "pre_agent_objective_error", None
+    ) is not None:
+        objective_final_check = "not_needed_pre_agent_objective_error"
+    elif objective_anchored_acquisition:
+        objective_final_check = objective_final_check_policy(
+            revision,
+            runtime_error,
+            has_repository_mutation=bool(dependencies.repository_mutation_evidence),
+        )
+    elif not controller.objective_success:
+        objective_final_check = objective_final_check_policy(
+            revision,
+            runtime_error,
+            has_repository_mutation=bool(dependencies.repository_mutation_evidence),
+        )
+        if objective_final_check == "performed":
+            controller.final_check()
     persistence_error: Exception | None = persistence_error or controller.persistence_error
     recovery: dict[str, object] | None = None
     recovery_pattern_created = False
@@ -718,16 +788,40 @@ def _run_r8_task(
     recovery_pattern_embedded = False
     patterns: list[dict[str, object]] = []
     try:
-        persisted = persist_agent_event_stream(
-            cast(Any, memory),
-            dependencies.events,
-            task,
-            run,
-            environment_context,
-            planned_actions=dependencies.planned_actions,
-            require_trusted_planned_actions=True,
-            mutation_evidence=dependencies.repository_mutation_evidence,
-        )
+        if objective_anchored_acquisition:
+            persisted = None
+            if (
+                getattr(controller, "pre_agent_objective_passed", None) is False
+                and getattr(controller, "pre_agent_objective_error", None) is None
+                and getattr(controller, "objective_success_trigger_action_id", None)
+                is not None
+                and getattr(controller, "objective_evidence_error", None) is None
+            ):
+                persisted = persist_objective_anchored_recovery(
+                    cast(Any, memory),
+                    dependencies.events,
+                    task,
+                    run,
+                    environment_context,
+                    pre_agent_objective=controller.pre_agent_objective_anchor(),
+                    post_mutation_objective=controller.post_mutation_objective_anchor(),
+                    planned_actions=dependencies.planned_actions,
+                    mutation_evidence=dependencies.repository_mutation_evidence,
+                    objective_success_trigger_action_id=cast(
+                        str, controller.objective_success_trigger_action_id
+                    ),
+                )
+        else:
+            persisted = persist_agent_event_stream(
+                cast(Any, memory),
+                dependencies.events,
+                task,
+                run,
+                environment_context,
+                planned_actions=dependencies.planned_actions,
+                require_trusted_planned_actions=True,
+                mutation_evidence=dependencies.repository_mutation_evidence,
+            )
         if persisted is not None:
             failure, resolution, outcome = persisted
             recovery = {
@@ -838,7 +932,54 @@ def _run_r8_task(
         "events": [event.model_dump(mode="json") for event in dependencies.events],
         "agent_output": None if result is None else result.output,
     }
-    if revision == "R9":
+    if objective_anchored_acquisition:
+        pre_error = getattr(controller, "pre_agent_objective_error", None)
+        pre_passed = getattr(controller, "pre_agent_objective_passed", None)
+        if pre_passed is True:
+            artifact["status"] = "invalid_acquisition_baseline"
+            artifact["acquisition_success"] = False
+            artifact["acquisition_reason"] = "pre_agent_objective_already_satisfied"
+        elif pre_error is not None:
+            artifact["status"] = "blocked_pre_agent_objective_error"
+            artifact["acquisition_success"] = False
+            artifact["acquisition_reason"] = "pre_agent_objective_error"
+        elif getattr(controller, "objective_evidence_error", None) is not None:
+            artifact["status"] = "blocked_objective_evidence_error"
+            artifact["acquisition_success"] = False
+            artifact["acquisition_reason"] = "objective_evidence_error"
+        artifact.update(
+            {
+                "complete_trusted_lineage": recovery is not None,
+                "pattern_created": recovery_pattern_created,
+                "pattern_persisted": recovery_pattern_persisted,
+                "pattern_embedded": recovery_pattern_embedded,
+                "pre_agent_objective_checked": bool(
+                    getattr(controller, "pre_agent_objective_checked", False)
+                ),
+                "pre_agent_objective_passed": pre_passed,
+                "pre_agent_objective_error": (
+                    None if pre_error is None else type(pre_error).__name__
+                ),
+                "objective_evidence_error": (
+                    None
+                    if getattr(controller, "objective_evidence_error", None) is None
+                    else type(controller.objective_evidence_error).__name__
+                ),
+                "pre_agent_objective_observation": getattr(
+                    controller, "pre_agent_objective_observation", None
+                ),
+                "objective_success_trigger_action_id": getattr(
+                    controller, "objective_success_trigger_action_id", None
+                ),
+                "post_mutation_objective_observation": getattr(
+                    controller, "post_mutation_objective_observation", None
+                ),
+                "recovery_evidence_source": (
+                    "objective_anchored_v1" if recovery is not None else None
+                ),
+            }
+        )
+    if revision in {"R9", "R10", "R11", "R12"}:
         artifact.update(
             {
                 "agent_timeout_seconds": agent_timeout_seconds,
@@ -850,6 +991,22 @@ def _run_r8_task(
                     controller.objective_evaluation_duration_seconds
                 ),
                 "total_task_duration_seconds": total_task_duration_seconds,
+                "command_argv_policy": getattr(
+                    configuration.config, "command_argv_policy", None
+                ),
+                "objective_final_check": objective_final_check,
+                "agent_runtime_error_message": (
+                    None
+                    if runtime_error is None
+                    else _sanitized_message(runtime_error)
+                ),
+                "objective_error_message": (
+                    None
+                    if controller.objective_error is None
+                    else _sanitized_message(controller.objective_error)
+                ),
+                "objective_observation": _objective_observation_payload(objective),
+                "timeout_provenance": timeout_provenance(runtime_error),
             }
         )
     _write_json(run_dir / "acquisition.json", artifact)
@@ -870,6 +1027,7 @@ __all__ = [
     "ShortLivedNeo4jRepository",
     "attach_r8_objective_controller",
     "git_worktree_content_fingerprint",
+    "objective_final_check_policy",
     "repository_state_fingerprint",
     "r8_acquisition_readiness",
 ]

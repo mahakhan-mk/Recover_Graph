@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import cast
 from uuid import NAMESPACE_URL, uuid5
 
@@ -9,7 +10,7 @@ from graph_swarm.detection.failure_detector import detect_failure
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
-from graph_swarm.domain.events import AgentEvent
+from graph_swarm.domain.events import AgentEvent, AgentEventType
 from graph_swarm.domain.failures import FailureEpisode, FailureType
 from graph_swarm.domain.outcomes import Outcome
 from graph_swarm.domain.resolutions import Resolution, ResolutionStatus
@@ -38,6 +39,28 @@ class RecoveryEventChain:
     change_event: AgentEvent
     change_action: PlannedAction
     verification_event: AgentEvent
+
+
+@dataclass(frozen=True)
+class ObjectiveAnchor:
+    """Typed, out-of-band observation of one frozen objective evaluation."""
+
+    run_id: str
+    task_id: str
+    passed: bool
+    return_code: int | None
+    status: str
+    started_at: datetime
+    completed_at: datetime
+
+    def __post_init__(self) -> None:
+        if not self.run_id.strip() or not self.task_id.strip() or not self.status.strip():
+            raise ValueError("objective anchors require run and task IDs")
+        for value in (self.started_at, self.completed_at):
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("objective anchor timestamps must be timezone-aware")
+        if self.completed_at < self.started_at:
+            raise ValueError("objective anchor completed_at must not precede started_at")
 
 
 def select_recovery_event_chain(
@@ -293,6 +316,223 @@ def persist_agent_event_stream(
         evidence.recovery_action.id,
     )
     return detected_failure, resolution, outcome
+
+
+def persist_objective_anchored_recovery(
+    repository: OperationalMemoryRepository,
+    events: Sequence[AgentEvent],
+    task: Task,
+    run: Run,
+    environment: EnvironmentContext,
+    *,
+    pre_agent_objective: ObjectiveAnchor,
+    post_mutation_objective: ObjectiveAnchor,
+    planned_actions: PlannedActionContext,
+    mutation_evidence: Mapping[str, RepositoryMutationEvidence],
+    objective_success_trigger_action_id: str,
+) -> tuple[FailureEpisode, Resolution, Outcome]:
+    """Persist R12's objective-anchored, mutation-backed recovery lineage.
+
+    Objective anchors are audit observations, not agent events.  They are
+    represented in the graph by deterministic synthetic pytest actions while
+    the observed change relationship remains attached to the real mutating
+    agent action.
+    """
+    if (
+        pre_agent_objective.passed
+        or pre_agent_objective.status != "test_failure"
+        or pre_agent_objective.return_code in (None, 0)
+    ):
+        raise ValueError("R12 pre-agent objective anchor must represent failure")
+    if (
+        not post_mutation_objective.passed
+        or post_mutation_objective.status != "passed"
+        or post_mutation_objective.return_code != 0
+    ):
+        raise ValueError("R12 post-mutation objective anchor must represent success")
+    _require_anchor_identity(pre_agent_objective, task, run)
+    _require_anchor_identity(post_mutation_objective, task, run)
+
+    action_context = _index_planned_actions(planned_actions)
+    recovery_action = action_context.get(objective_success_trigger_action_id)
+    if recovery_action is None:
+        raise ValueError("R12 recovery action must exist in trusted planned_actions")
+    if recovery_action.task_id != task.id or recovery_action.run_id != run.id:
+        raise ValueError("R12 recovery action does not belong to this task/run")
+    recovery_evidence = mutation_evidence.get(objective_success_trigger_action_id)
+    if recovery_evidence is None or recovery_evidence.action_id != recovery_action.id:
+        raise ValueError("R12 recovery action must have mutation evidence")
+    recovery_event = next(
+        (event for event in events if event.action_id == objective_success_trigger_action_id),
+        None,
+    )
+    if recovery_event is None:
+        raise ValueError("R12 recovery action must have a corresponding AgentEvent")
+    if not recovery_event.result.success:
+        raise ValueError("R12 recovery action event must be successful")
+    _require_matching_identity(recovery_event, task, run)
+    if not (
+        pre_agent_objective.completed_at
+        <= recovery_event.occurred_at
+        <= post_mutation_objective.started_at
+    ):
+        raise ValueError("R12 objective and mutation timestamps are out of order")
+
+    for event in events:
+        planned = action_context.get(event.action_id)
+        if planned is None:
+            raise MissingTrustedPlannedActionError((event.action_id,))
+        persist_agent_event(
+            repository,
+            event,
+            task,
+            run,
+            environment,
+            planned_action=planned,
+        )
+
+    failure_action, failure_event = _synthetic_objective_pair(
+        run=run,
+        task=task,
+        anchor=pre_agent_objective,
+        kind="failure",
+        success=False,
+        exit_code=pre_agent_objective.return_code,
+    )
+    detected_failure = persist_agent_event(
+        repository,
+        failure_event,
+        task,
+        run,
+        environment,
+        planned_action=failure_action,
+    )
+    if detected_failure is None:  # pragma: no cover - guarded by typed inputs
+        raise ValueError("R12 synthetic objective failure was not detected")
+
+    success_action, success_event = _synthetic_objective_pair(
+        run=run,
+        task=task,
+        anchor=post_mutation_objective,
+        kind="success",
+        success=True,
+        exit_code=0,
+    )
+    persist_agent_event(
+        repository,
+        success_event,
+        task,
+        run,
+        environment,
+        planned_action=success_action,
+    )
+
+    resolution_id = str(
+        uuid5(NAMESPACE_URL, f"graph-swarm/resolution/{detected_failure.id}")
+    )
+    outcome_id = str(
+        uuid5(NAMESPACE_URL, f"graph-swarm/outcome/{success_event.event_id}")
+    )
+    normalized_change = normalize_planned_action(recovery_action)
+    evidence = ConcreteRecoveryEvidence(
+        recovery_action=normalized_change,
+        source_failure_id=detected_failure.id,
+        resolution_id=resolution_id,
+        objective_outcome_id=outcome_id,
+        task_id=task.id,
+        source_chronological_index=task.chronological_index,
+        environment_id=environment.id,
+        repository_mutation_evidence=recovery_evidence,
+    )
+    description = (
+        "Observed objective-anchored recovery action: "
+        "evidence_source=objective_anchored_v1; "
+        f"action_id={evidence.recovery_action.id}; "
+        f"run_id={run.id}; task_id={task.id}; repository={task.repository}; "
+        f"repository_mutation_before={recovery_evidence.before_fingerprint}; "
+        f"repository_mutation_after={recovery_evidence.after_fingerprint}; "
+        f"source_failure_id={detected_failure.id}; "
+        f"objective_success_action_id={success_action.id}."
+    )
+    resolution = Resolution(
+        id=resolution_id,
+        failure_id=detected_failure.id,
+        description=description,
+        status=ResolutionStatus.OBSERVED_SUCCESSFUL,
+        successful_observations=1,
+        failed_observations=0,
+        observed_at=post_mutation_objective.completed_at,
+    )
+    outcome = Outcome(
+        id=outcome_id,
+        action_id=success_action.id,
+        success=True,
+        exit_code=0,
+        observed_at=post_mutation_objective.completed_at,
+    )
+    repository.save_resolution(resolution)
+    repository.link_failure_resolution(detected_failure.id, resolution.id)
+    repository.save_outcome(outcome)
+    repository.link_resolution_outcome(resolution.id, outcome.id)
+    repository.link_resolution_observed_change(
+        resolution.id,
+        objective_success_trigger_action_id,
+    )
+    return detected_failure, resolution, outcome
+
+
+def _require_anchor_identity(anchor: ObjectiveAnchor, task: Task, run: Run) -> None:
+    if anchor.task_id != task.id or anchor.run_id != run.id:
+        raise ValueError("objective anchor does not belong to this task/run")
+
+
+def _synthetic_objective_pair(
+    *,
+    run: Run,
+    task: Task,
+    anchor: ObjectiveAnchor,
+    kind: str,
+    success: bool,
+    exit_code: int | None,
+) -> tuple[PlannedAction, AgentEvent]:
+    action_id = str(
+        uuid5(NAMESPACE_URL, f"graph-swarm/r12/{run.id}/objective-{kind}-action")
+    )
+    event_id = str(
+        uuid5(NAMESPACE_URL, f"graph-swarm/r12/{run.id}/objective-{kind}-event")
+    )
+    action = PlannedAction(
+        id=action_id,
+        run_id=run.id,
+        task_id=task.id,
+        tool="run_command",
+        operation="run_command",
+        arguments={"command": ["python", "-m", "pytest"]},
+        planned_at=anchor.started_at,
+    )
+    result = ActionResult(
+        action_id=action_id,
+        tool_name="run_command",
+        success=success,
+        exit_code=exit_code,
+        output=(
+            None
+            if success
+            else "frozen objective failed before agent execution"
+        ),
+        started_at=anchor.started_at,
+        completed_at=anchor.completed_at,
+    )
+    event = AgentEvent(
+        event_id=event_id,
+        run_id=run.id,
+        task_id=task.id,
+        action_id=action_id,
+        event_type=AgentEventType.ACTION_COMPLETED,
+        result=result,
+        occurred_at=anchor.completed_at,
+    )
+    return action, event
 
 
 def _planned_action(

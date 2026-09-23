@@ -113,6 +113,7 @@ class ExperimentConfiguration(BaseModel):
     limits: ExperimentLimits
     agent_timeout_seconds: float | None = Field(default=None, gt=0)
     objective_timeout_seconds: float | None = Field(default=None, gt=0)
+    command_argv_policy: str | None = None
     task_manifest: str = "benchmark/manifests/pilot.jsonl"
     task_problems: str = "benchmark/annotations/recurrence_validation.csv"
     artifact_root: str = "research/evidence/results"
@@ -151,6 +152,7 @@ class ExperimentConfiguration(BaseModel):
         "repository_mutation_evidence_policy",
         "stopping_policy",
         "objective_mutation_check_policy",
+        "command_argv_policy",
     )
     @classmethod
     def require_optional_policy_text(cls, value: str | None) -> str | None:

@@ -1,8 +1,11 @@
+import json
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 from pydantic import ValidationError
+from pydantic_ai import PromptedOutput
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
 
@@ -157,7 +160,7 @@ def make_model(**updates: object) -> TestModel:
         ),
     }
     output.update(updates)
-    return TestModel(custom_output_args=output)
+    return TestModel(custom_output_text=json.dumps(output))
 
 
 def test_bounded_evidence_package_excludes_benchmark_and_future_metadata() -> None:
@@ -368,6 +371,14 @@ def test_configured_abstraction_model_is_role_specific() -> None:
     assert agent.model.model_name == "another/model"
 
 
+def test_abstraction_agent_uses_prompted_output() -> None:
+    agent = create_recovery_abstraction_agent(make_settings(), model=make_model())
+    output_type = cast(PromptedOutput[RecoveryAbstractionOutput], agent.output_type)
+
+    assert isinstance(output_type, PromptedOutput)
+    assert output_type.outputs is RecoveryAbstractionOutput
+
+
 def test_malformed_structured_output_is_explicit_and_does_not_persist() -> None:
     repository = Mock(spec=OperationalMemoryRepository)
 
@@ -376,7 +387,7 @@ def test_malformed_structured_output_is_explicit_and_does_not_persist() -> None:
             make_lineage(),
             repository,
             make_settings(),
-            model=TestModel(custom_output_args={"title": "missing fields"}),
+            model=TestModel(custom_output_text=json.dumps({"title": "missing fields"})),
             created_at=NOW,
         )
 
@@ -391,7 +402,22 @@ def test_model_cannot_supply_provenance_fields() -> None:
             make_lineage(),
             repository,
             make_settings(),
-            model=make_model(source_failure_id="invented-failure"),
+            model=TestModel(
+                custom_output_text=json.dumps(
+                    {
+                        "title": "Restore the intended assertion input",
+                        "guidance": (
+                            "Inspect the failing test input and make the smallest concrete "
+                            "correction before rerunning the test."
+                        ),
+                        "evidence_summary": (
+                            "The historical test failure was followed by a concrete file "
+                            "change and a successful test outcome."
+                        ),
+                        "source_failure_id": "invented-failure",
+                    }
+                )
+            ),
             created_at=NOW,
         )
 

@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from pydantic_ai import Agent, ModelSettings
+from pydantic_ai import Agent, ModelSettings, PromptedOutput
 from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
@@ -185,7 +185,7 @@ def create_recovery_abstraction_agent(
         )
     return Agent(
         selected_model,
-        output_type=RecoveryAbstractionOutput,
+        output_type=PromptedOutput(RecoveryAbstractionOutput),
         system_prompt=RECOVERY_ABSTRACTION_SYSTEM_PROMPT,
         model_settings=RECOVERY_MODEL_SETTINGS,
         retries=0,

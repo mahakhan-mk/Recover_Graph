@@ -5,7 +5,10 @@ from pathlib import Path
 import pytest
 
 from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
-from graph_swarm.agent.tools.run_command import run_command
+from graph_swarm.agent.tools.run_command import (
+    canonicalize_command,
+    run_command,
+)
 from graph_swarm.domain.action import ActionResult
 
 
@@ -37,6 +40,136 @@ def assert_timestamps_are_valid(result: ActionResult) -> None:
     assert result.completed_at.tzinfo is not None
     assert result.completed_at.utcoffset() is not None
     assert result.completed_at >= result.started_at
+
+
+def test_single_string_command_is_canonicalized_to_posix_argv() -> None:
+    assert canonicalize_command(["git status --short"]) == ["git", "status", "--short"]
+
+
+def test_quoted_pytest_selector_survives_canonicalization() -> None:
+    assert canonicalize_command(
+        ["python -m pytest 'tests/test_locales.py::TestIcelandicLocale::test_format_timeframe' -q"]
+    ) == [
+        "python",
+        "-m",
+        "pytest",
+        "tests/test_locales.py::TestIcelandicLocale::test_format_timeframe",
+        "-q",
+    ]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["bash", "-lc", "echo hi | head"],
+        ["sh", "-c", "echo hi"],
+        ["/bin/bash", "-lc", "echo hi | head"],
+        ["bash -lc 'echo hi | head'"],
+    ],
+)
+def test_shell_launchers_are_rejected_fail_soft_before_execution(
+    tmp_path: Path,
+    command: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        calls.append((args, kwargs))
+        raise AssertionError("direct shell launcher was executed")
+
+    monkeypatch.setattr("graph_swarm.agent.tools.run_command.subprocess.run", fake_run)
+    dependencies = make_dependencies(tmp_path)
+    result = run_command(dependencies, command, timeout_seconds=5)
+
+    assert result.success is False
+    assert result.exit_code is None
+    assert result.error == (
+        "run_command does not support direct shell invocation; "
+        "invoke one executable with separate argv elements."
+    )
+    assert calls == []
+    assert len(dependencies.events) == 1
+    assert dependencies.events[0].result == result
+
+
+@pytest.mark.parametrize(
+    "operator", ["|", "||", "&&", ";", ">", ">>", "<", "<<", "`", "$("]
+)
+def test_shell_operators_are_rejected_before_execution(
+    tmp_path: Path,
+    operator: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        calls.append((args, kwargs))
+        raise AssertionError("shell-control command was executed")
+
+    monkeypatch.setattr("graph_swarm.agent.tools.run_command.subprocess.run", fake_run)
+    result = run_command(
+        make_dependencies(tmp_path),
+        [f"git status --short {operator} cat"],
+        timeout_seconds=5,
+    )
+
+    assert result.success is False
+    assert result.exit_code is None
+    assert result.error == (
+        "run_command requires structured argv; shell pipelines/redirection are unsupported. "
+        "Invoke one executable with separate argv elements."
+    )
+    assert calls == []
+    assert result.tool_name == "run_command"
+
+
+def test_rejected_command_emits_failed_event_and_valid_command_can_follow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dependencies = make_dependencies(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "valid command ran\n", "")
+
+    monkeypatch.setattr("graph_swarm.agent.tools.run_command.subprocess.run", fake_run)
+
+    rejected = run_command(
+        dependencies,
+        ["python -c \"print('rejected')\" | cat"],
+        timeout_seconds=5,
+    )
+    valid = run_command(
+        dependencies,
+        ["python -c \"print('valid')\""],
+        timeout_seconds=5,
+    )
+
+    assert rejected.success is False
+    assert valid.success is True
+    assert calls == [["python", "-c", "print('valid')"]]
+    assert [event.result for event in dependencies.events] == [rejected, valid]
+
+
+def test_shell_metacharacters_inside_python_argument_remain_allowed(tmp_path: Path) -> None:
+    assert canonicalize_command(["python", "-c", "print(1); print(2)"]) == [
+        "python",
+        "-c",
+        "print(1); print(2)",
+    ]
+
+    result = run_command(
+        make_dependencies(tmp_path),
+        [sys.executable, "-c", "print(1); print(2)"],
+        timeout_seconds=5,
+    )
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output.splitlines() == ["1", "2"]
 
 
 def test_successful_command_returns_canonical_result(tmp_path: Path) -> None:

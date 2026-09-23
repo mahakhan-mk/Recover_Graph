@@ -1,14 +1,94 @@
 """Controlled structured-argv process execution tool."""
 
 import os
+import shlex
 import subprocess
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.agent.hooks import emit_action_event
 from graph_swarm.domain.action import ActionResult
+
+_SHELL_OPERATOR_TOKENS = frozenset({"|", "||", "&&", ";", ">", ">>", "<", "<<", "`"})
+_UNSUPPORTED_SHELL_CONTROL_ERROR = (
+    "run_command requires structured argv; shell pipelines/redirection are unsupported. "
+    "Invoke one executable with separate argv elements."
+)
+_SHELL_EXECUTABLE_BASENAMES = frozenset({"sh", "bash", "dash", "ash", "zsh", "ksh"})
+_UNSUPPORTED_SHELL_LAUNCHER_ERROR = (
+    "run_command does not support direct shell invocation; "
+    "invoke one executable with separate argv elements."
+)
+
+
+class CommandCanonicalizationError(ValueError):
+    """Raised when model command input is not safe structured argv."""
+
+
+def _shell_control_outside_quotes(value: str) -> bool:
+    single = False
+    double = False
+    escaped = False
+    for index, character in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if character == "\\" and not single:
+            escaped = True
+            continue
+        if character == "'" and not double:
+            single = not single
+            continue
+        if character == '"' and not single:
+            double = not double
+            continue
+        if single or double:
+            continue
+        if character in "|;&><`" or value[index : index + 2] == "$(":
+            return True
+    return False
+
+
+def _is_direct_shell_launcher(values: Sequence[str]) -> bool:
+    executable = values[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if executable.endswith(".exe"):
+        executable = executable[:-4]
+    return executable in _SHELL_EXECUTABLE_BASENAMES
+
+
+def canonicalize_command(command: Sequence[str]) -> list[str]:
+    """Canonicalize model command input into deterministic POSIX argv.
+
+    A one-element command is treated as a model-emitted command string and
+    tokenized with POSIX ``shlex`` rules.  Already structured argv is retained
+    verbatim, apart from rejecting standalone shell operators.
+    """
+    values = list(command)
+    if not values:
+        raise CommandCanonicalizationError("run_command requires non-empty structured argv")
+    if any(not isinstance(value, str) for value in cast(Sequence[object], values)):
+        raise CommandCanonicalizationError("run_command requires structured argv strings")
+    if len(values) == 1:
+        raw = values[0]
+        if _shell_control_outside_quotes(raw):
+            raise CommandCanonicalizationError(_UNSUPPORTED_SHELL_CONTROL_ERROR)
+        try:
+            values = shlex.split(raw, posix=True)
+        except ValueError as error:
+            raise CommandCanonicalizationError(
+                "run_command requires valid POSIX structured argv"
+            ) from error
+    elif any(value in _SHELL_OPERATOR_TOKENS or "$(" in value for value in values):
+        raise CommandCanonicalizationError(_UNSUPPORTED_SHELL_CONTROL_ERROR)
+    if not values:
+        raise CommandCanonicalizationError("run_command requires non-empty structured argv")
+    if _is_direct_shell_launcher(values):
+        raise CommandCanonicalizationError(_UNSUPPORTED_SHELL_LAUNCHER_ERROR)
+    return values
 
 
 def _completion_time(started_at: datetime) -> datetime:
@@ -203,7 +283,30 @@ def run_command(
     *,
     action_id: str | None = None,
 ) -> ActionResult:
-    """Execute a structured command in the configured workspace."""
+    """Execute structured argv with ``shell=False``.
+
+    Correct: ``["git", "status", "--short"]`` or
+    ``["python", "-m", "pytest", "tests/test_locales.py::Test...", "-q"]``.
+    Incorrect: ``["git status --short"]``.  ``rg`` is not guaranteed in
+    benchmark containers; prefer portable tools or Python when necessary.
+    """
+    action_id = action_id or str(uuid4())
+    started_at = datetime.now(UTC)
+    try:
+        if command:
+            command = canonicalize_command(command)
+    except CommandCanonicalizationError as error:
+        result = _result(
+            action_id,
+            "run_command",
+            started_at,
+            False,
+            None,
+            None,
+            str(error),
+        )
+        emit_action_event(dependencies, result)
+        return result
     result = execute_process(
         dependencies,
         command,

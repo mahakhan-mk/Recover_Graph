@@ -123,6 +123,33 @@ R9_RECOVERY_EVENT_SEMANTICS = "trusted_action_semantics_v2"
 R9_REPOSITORY_MUTATION_EVIDENCE_POLICY = "git_worktree_content_fingerprint_v2"
 R9_AGENT_TIMEOUT_SECONDS = 600
 R9_OBJECTIVE_TIMEOUT_SECONDS = 900
+R10_NAMESPACE = "GS-E003/Gate-A1/acquisition-r10"
+R10_CONFIG = "configs/experiments/gate_a1_acquisition_r10.yaml"
+R10_EXPECTED_CODING_MODEL = "qwen/qwen3-coder:free"
+R10_EXPECTED_ABSTRACTION_MODEL = R5_EXPECTED_ABSTRACTION_MODEL
+R10_REVISION_REASON = "agent_runtime_and_structured_argv_stabilization_after_r9"
+R10_COMMAND_ARGV_POLICY = "structured_argv_canonicalization_v2"
+R11_NAMESPACE = "GS-E003/Gate-A1/acquisition-r11"
+R11_CONFIG = "configs/experiments/gate_a1_acquisition_r11.yaml"
+R11_EXPECTED_CODING_MODEL = R5_EXPECTED_CODING_MODEL
+R11_EXPECTED_ABSTRACTION_MODEL = R5_EXPECTED_ABSTRACTION_MODEL
+R11_REVISION_REASON = (
+    "restore_track_a_frozen_nex_model_after_invalid_r10_qwen_provider_revision"
+)
+R12_NAMESPACE = "GS-E003/Gate-A1/acquisition-r12"
+R12_CONFIG = "configs/experiments/gate_a1_acquisition_r12.yaml"
+R12_EXPECTED_CODING_MODEL = R11_EXPECTED_CODING_MODEL
+R12_EXPECTED_ABSTRACTION_MODEL = R11_EXPECTED_ABSTRACTION_MODEL
+R12_REVISION_REASON = (
+    "deterministic_objective_anchored_acquisition_after_r11_ordering_failure"
+)
+R12_RECOVERY_EVENT_SEMANTICS = (
+    "objective_anchor_trusted_mutation_objective_success_v1"
+)
+R12_STOPPING_POLICY = "objective_anchored_recovery_or_timeout_v1"
+R12_OBJECTIVE_MUTATION_CHECK_POLICY = (
+    "pre_agent_failure_then_post_mutation_success_v1"
+)
 
 
 class GateA1AcquisitionPreflightError(RuntimeError):
@@ -1227,6 +1254,114 @@ def _validate_r9_harness_configuration(configuration: Any) -> None:
         )
 
 
+def _validate_r10_harness_configuration(configuration: Any) -> None:
+    resolved = configuration.config
+    expected = {
+        "run_revision": "R10",
+        "revision_reason": R10_REVISION_REASON,
+        "model_visible_tool_output_chars": R8_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+        "objective_coverage_policy": R8_OBJECTIVE_COVERAGE_POLICY,
+        "objective_coverage_policy_selection_version": R7_COVERAGE_POLICY_SELECTION_VERSION,
+        "workspace_line_ending_policy": R8_WORKSPACE_LINE_ENDING_POLICY,
+        "persistence_session_policy": R8_PERSISTENCE_SESSION_POLICY,
+        "persistence_retry_policy": R8_PERSISTENCE_RETRY_POLICY,
+        "recovery_event_semantics": R9_RECOVERY_EVENT_SEMANTICS,
+        "repository_mutation_evidence_policy": R9_REPOSITORY_MUTATION_EVIDENCE_POLICY,
+        "stopping_policy": R8_STOPPING_POLICY,
+        "objective_mutation_check_policy": "repository_state_fingerprint_v1",
+        "command_argv_policy": R10_COMMAND_ARGV_POLICY,
+    }
+    for field, expected_value in expected.items():
+        if getattr(resolved, field, None) != expected_value:
+            raise GateA1AcquisitionPreflightError(
+                f"R10 {field} must be {expected_value!r}"
+            )
+    if resolved.limits.max_actions is not None or resolved.limits.max_requests is not None:
+        raise GateA1AcquisitionPreflightError("R10 action/request ceilings must be null")
+    if resolved.limits.timeout_seconds != 600:
+        raise GateA1AcquisitionPreflightError("R10 timeout_seconds must be 600")
+    if resolved.agent_timeout_seconds != R9_AGENT_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R10 agent_timeout_seconds must be {R9_AGENT_TIMEOUT_SECONDS}"
+        )
+    if resolved.objective_timeout_seconds != R9_OBJECTIVE_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R10 objective_timeout_seconds must be {R9_OBJECTIVE_TIMEOUT_SECONDS}"
+        )
+
+
+def _validate_r11_harness_configuration(configuration: Any) -> None:
+    resolved = configuration.config
+    expected = {
+        "run_revision": "R11",
+        "revision_reason": R11_REVISION_REASON,
+        "model_visible_tool_output_chars": R8_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+        "objective_coverage_policy": R8_OBJECTIVE_COVERAGE_POLICY,
+        "objective_coverage_policy_selection_version": R7_COVERAGE_POLICY_SELECTION_VERSION,
+        "workspace_line_ending_policy": R8_WORKSPACE_LINE_ENDING_POLICY,
+        "persistence_session_policy": R8_PERSISTENCE_SESSION_POLICY,
+        "persistence_retry_policy": R8_PERSISTENCE_RETRY_POLICY,
+        "recovery_event_semantics": R9_RECOVERY_EVENT_SEMANTICS,
+        "repository_mutation_evidence_policy": R9_REPOSITORY_MUTATION_EVIDENCE_POLICY,
+        "stopping_policy": R8_STOPPING_POLICY,
+        "objective_mutation_check_policy": "repository_state_fingerprint_v1",
+        "command_argv_policy": R10_COMMAND_ARGV_POLICY,
+    }
+    for field, expected_value in expected.items():
+        if getattr(resolved, field, None) != expected_value:
+            raise GateA1AcquisitionPreflightError(
+                f"R11 {field} must be {expected_value!r}"
+            )
+    if resolved.limits.max_actions is not None or resolved.limits.max_requests is not None:
+        raise GateA1AcquisitionPreflightError("R11 action/request ceilings must be null")
+    if resolved.limits.timeout_seconds != R9_AGENT_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError("R11 timeout_seconds must be 600")
+    if resolved.agent_timeout_seconds != R9_AGENT_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R11 agent_timeout_seconds must be {R9_AGENT_TIMEOUT_SECONDS}"
+        )
+    if resolved.objective_timeout_seconds != R9_OBJECTIVE_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R11 objective_timeout_seconds must be {R9_OBJECTIVE_TIMEOUT_SECONDS}"
+        )
+
+
+def _validate_r12_harness_configuration(configuration: Any) -> None:
+    resolved = configuration.config
+    expected = {
+        "run_revision": "R12",
+        "revision_reason": R12_REVISION_REASON,
+        "model_visible_tool_output_chars": R8_MODEL_VISIBLE_TOOL_OUTPUT_CHARS,
+        "objective_coverage_policy": R8_OBJECTIVE_COVERAGE_POLICY,
+        "objective_coverage_policy_selection_version": R7_COVERAGE_POLICY_SELECTION_VERSION,
+        "workspace_line_ending_policy": R8_WORKSPACE_LINE_ENDING_POLICY,
+        "persistence_session_policy": R8_PERSISTENCE_SESSION_POLICY,
+        "persistence_retry_policy": R8_PERSISTENCE_RETRY_POLICY,
+        "recovery_event_semantics": R12_RECOVERY_EVENT_SEMANTICS,
+        "repository_mutation_evidence_policy": R9_REPOSITORY_MUTATION_EVIDENCE_POLICY,
+        "stopping_policy": R12_STOPPING_POLICY,
+        "objective_mutation_check_policy": R12_OBJECTIVE_MUTATION_CHECK_POLICY,
+        "command_argv_policy": R10_COMMAND_ARGV_POLICY,
+    }
+    for field, expected_value in expected.items():
+        if getattr(resolved, field, None) != expected_value:
+            raise GateA1AcquisitionPreflightError(
+                f"R12 {field} must be {expected_value!r}"
+            )
+    if resolved.limits.max_actions is not None or resolved.limits.max_requests is not None:
+        raise GateA1AcquisitionPreflightError("R12 action/request ceilings must be null")
+    if resolved.limits.timeout_seconds != R9_AGENT_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError("R12 timeout_seconds must be 600")
+    if resolved.agent_timeout_seconds != R9_AGENT_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R12 agent_timeout_seconds must be {R9_AGENT_TIMEOUT_SECONDS}"
+        )
+    if resolved.objective_timeout_seconds != R9_OBJECTIVE_TIMEOUT_SECONDS:
+        raise GateA1AcquisitionPreflightError(
+            f"R12 objective_timeout_seconds must be {R9_OBJECTIVE_TIMEOUT_SECONDS}"
+        )
+
+
 def _r8_configuration_hash(  # pyright: ignore[reportUnusedFunction]
     configuration: Any,
     settings: Any,
@@ -1281,6 +1416,54 @@ def _r8_configuration_hash(  # pyright: ignore[reportUnusedFunction]
             configuration.config,
             "repository_mutation_evidence_policy",
             None,
+        )
+    if configuration.config.run_revision == "R10":
+        payload["agent_timeout_seconds"] = getattr(
+            configuration.config, "agent_timeout_seconds", None
+        )
+        payload["objective_timeout_seconds"] = getattr(
+            configuration.config, "objective_timeout_seconds", None
+        )
+        payload["recovery_event_semantics"] = getattr(
+            configuration.config, "recovery_event_semantics", None
+        )
+        payload["repository_mutation_evidence_policy"] = getattr(
+            configuration.config, "repository_mutation_evidence_policy", None
+        )
+        payload["command_argv_policy"] = getattr(
+            configuration.config, "command_argv_policy", None
+        )
+    if configuration.config.run_revision == "R11":
+        payload["agent_timeout_seconds"] = getattr(
+            configuration.config, "agent_timeout_seconds", None
+        )
+        payload["objective_timeout_seconds"] = getattr(
+            configuration.config, "objective_timeout_seconds", None
+        )
+        payload["recovery_event_semantics"] = getattr(
+            configuration.config, "recovery_event_semantics", None
+        )
+        payload["repository_mutation_evidence_policy"] = getattr(
+            configuration.config, "repository_mutation_evidence_policy", None
+        )
+        payload["command_argv_policy"] = getattr(
+            configuration.config, "command_argv_policy", None
+        )
+    if configuration.config.run_revision == "R12":
+        payload["agent_timeout_seconds"] = getattr(
+            configuration.config, "agent_timeout_seconds", None
+        )
+        payload["objective_timeout_seconds"] = getattr(
+            configuration.config, "objective_timeout_seconds", None
+        )
+        payload["recovery_event_semantics"] = getattr(
+            configuration.config, "recovery_event_semantics", None
+        )
+        payload["repository_mutation_evidence_policy"] = getattr(
+            configuration.config, "repository_mutation_evidence_policy", None
+        )
+        payload["command_argv_policy"] = getattr(
+            configuration.config, "command_argv_policy", None
         )
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1800,6 +1983,75 @@ def run_gate_a1_acquisition_r9(
     )
 
 
+def run_gate_a1_acquisition_r10(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run the final R10 acquisition runtime when explicitly requested."""
+    configuration = load_experiment_configuration(
+        project_root / R10_CONFIG,
+        project_root=project_root,
+    )
+    _validate_r10_harness_configuration(configuration)
+    from graph_swarm.research.gate_a1_r10 import (
+        run_gate_a1_acquisition_r10 as _run_gate_a1_acquisition_r10,
+    )
+
+    return _run_gate_a1_acquisition_r10(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+    )
+
+
+def run_gate_a1_acquisition_r11(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run R11 with the restored frozen Track A coding model."""
+    configuration = load_experiment_configuration(
+        project_root / R11_CONFIG,
+        project_root=project_root,
+    )
+    _validate_r11_harness_configuration(configuration)
+    from graph_swarm.research.gate_a1_r11 import (
+        run_gate_a1_acquisition_r11 as _run_gate_a1_acquisition_r11,
+    )
+
+    return _run_gate_a1_acquisition_r11(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+    )
+
+
+def run_gate_a1_acquisition_r12(
+    project_root: Path,
+    *,
+    resume_root: Path | None = None,
+    max_new_tasks: int | None = None,
+) -> tuple[str, Path]:
+    """Run R12's objective-anchored acquisition harness."""
+    configuration = load_experiment_configuration(
+        project_root / R12_CONFIG,
+        project_root=project_root,
+    )
+    _validate_r12_harness_configuration(configuration)
+    from graph_swarm.research.gate_a1_r12 import (
+        run_gate_a1_acquisition_r12 as _run_gate_a1_acquisition_r12,
+    )
+
+    return _run_gate_a1_acquisition_r12(
+        project_root,
+        resume_root=resume_root,
+        max_new_tasks=max_new_tasks,
+    )
+
+
 def run_gate_a1_acquisition(project_root: Path) -> tuple[str, Path]:
     """Run exactly T001-T005 acquisition and return final status plus artifact root."""
     project_root = project_root.expanduser().resolve()
@@ -1909,4 +2161,7 @@ __all__ = [
     "run_gate_a1_acquisition_r7",
     "run_gate_a1_acquisition_r8",
     "run_gate_a1_acquisition_r9",
+    "run_gate_a1_acquisition_r10",
+    "run_gate_a1_acquisition_r11",
+    "run_gate_a1_acquisition_r12",
 ]

@@ -37,6 +37,10 @@ from graph_swarm.agent.tools.read_file import (
 from graph_swarm.agent.tools.read_file import (
     read_file as controlled_read_file,
 )
+from graph_swarm.agent.tools.run_command import (
+    CommandCanonicalizationError,
+    canonicalize_command,
+)
 from graph_swarm.agent.tools.run_command import run_command as controlled_run_command
 from graph_swarm.agent.tools.run_tests import run_tests as controlled_run_tests
 from graph_swarm.agent.tools.write_file import write_file as controlled_write_file
@@ -181,16 +185,29 @@ def create_coding_agent(
         ctx: RunContext[AgentDependencies],
         command: list[str],
     ) -> ActionResult:
-        """Run structured argv within the configured timeout."""
+        """Run canonical structured argv with shell=False.
+
+        Correct examples: ["git", "status", "--short"] and
+        ["python", "-m", "pytest", "tests/test_locales.py::Test...", "-q"].
+        Incorrect: ["git status --short"].  Shell pipelines and redirection
+        are unsupported.  ``rg`` is not guaranteed in benchmark containers;
+        prefer portable tools or Python when necessary.
+        """
+        try:
+            canonical_command = canonicalize_command(command)
+        except CommandCanonicalizationError:
+            # Keep the rejected action inside the normal tool-result boundary;
+            # controlled_run_command emits the validation failure event.
+            canonical_command = list(command)
         action = prepare_tool_action(
             ctx.deps,
             "run_command",
             "run_command",
-            {"command": command},
+            {"command": canonical_command},
         )
         result = controlled_run_command(
             ctx.deps,
-            command,
+            canonical_command,
             settings.agent_command_timeout_seconds,
             action_id=action.id,
         )

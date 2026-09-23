@@ -1,5 +1,8 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock
+
+import pytest
 
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
@@ -8,9 +11,14 @@ from graph_swarm.domain.events import AgentEvent, AgentEventType
 from graph_swarm.domain.runs import Run
 from graph_swarm.domain.tasks import Task
 from graph_swarm.graph.repository import OperationalMemoryRepository
-from graph_swarm.integration.event_persistence import persist_agent_event_stream
+from graph_swarm.integration.event_persistence import (
+    ObjectiveAnchor,
+    persist_agent_event_stream,
+    persist_objective_anchored_recovery,
+)
 from graph_swarm.memory.recovery_evidence import (
     ConcreteRecoveryEvidence,
+    RepositoryMutationEvidence,
     has_concrete_change,
 )
 
@@ -387,3 +395,139 @@ def test_repeated_persistence_reuses_stable_lineage_ids_and_relationship() -> No
     assert second is not None
     assert tuple(item.id for item in first) == tuple(item.id for item in second)
     assert repository.link_resolution_observed_change.call_count == 2
+
+
+def test_objective_anchored_recovery_uses_real_mutation_and_generic_synthetic_anchors() -> None:
+    task, run, environment = make_context()
+    action = make_action(
+        "action-write-r12",
+        "write_file",
+        "write_file",
+        {"path": "calculator.py", "content": "def add(a, b): return a + b"},
+        2,
+    )
+    event = make_event(
+        action,
+        event_id="event-write-r12",
+        success=True,
+        exit_code=0,
+        output="write complete",
+    )
+    pre = ObjectiveAnchor(
+        run_id=run.id,
+        task_id=task.id,
+        passed=False,
+        return_code=1,
+        status="test_failure",
+        started_at=NOW,
+        completed_at=NOW + timedelta(seconds=1),
+    )
+    post = ObjectiveAnchor(
+        run_id=run.id,
+        task_id=task.id,
+        passed=True,
+        return_code=0,
+        status="passed",
+        started_at=NOW + timedelta(seconds=3),
+        completed_at=NOW + timedelta(seconds=4),
+    )
+    repository = Mock(spec=OperationalMemoryRepository)
+
+    result = persist_objective_anchored_recovery(
+        repository,
+        [event],
+        task,
+        run,
+        environment,
+        pre_agent_objective=pre,
+        post_mutation_objective=post,
+        planned_actions={action.id: action},
+        mutation_evidence={
+            action.id: RepositoryMutationEvidence(
+                action_id=action.id,
+                before_fingerprint="before",
+                after_fingerprint="after",
+            )
+        },
+        objective_success_trigger_action_id=action.id,
+    )
+
+    assert result is not None
+    failure, resolution, outcome = result
+    assert failure.failure_type.value == "test_failure"
+    assert resolution.status.value == "observed_successful"
+    assert outcome.success is True
+    assert "evidence_source=objective_anchored_v1" in resolution.description
+    repository.link_resolution_observed_change.assert_called_once_with(
+        resolution.id,
+        action.id,
+    )
+    saved_actions = {
+        call.args[0].id: call.args[0]
+        for call in repository.save_action.call_args_list
+    }
+    synthetic = [
+        saved
+        for saved in saved_actions.values()
+        if saved.id != action.id
+    ]
+    assert len(synthetic) == 2
+    assert all(item.arguments == {"command": ["python", "-m", "pytest"]} for item in synthetic)
+
+
+def test_objective_anchored_recovery_rejects_invalid_anchor_statuses() -> None:
+    task, run, environment = make_context()
+    pre = ObjectiveAnchor(
+        run_id=run.id,
+        task_id=task.id,
+        passed=False,
+        return_code=1,
+        status="test_failure",
+        started_at=NOW,
+        completed_at=NOW + timedelta(seconds=1),
+    )
+    post = ObjectiveAnchor(
+        run_id=run.id,
+        task_id=task.id,
+        passed=True,
+        return_code=0,
+        status="passed",
+        started_at=NOW + timedelta(seconds=3),
+        completed_at=NOW + timedelta(seconds=4),
+    )
+    invalid_pre = (
+        replace(pre, status="objective_infrastructure_failure"),
+        replace(pre, status="passed", passed=True, return_code=0),
+    )
+    invalid_post = (
+        replace(post, status="test_failure", passed=False, return_code=1),
+        replace(post, return_code=1),
+    )
+    for candidate in (*invalid_pre,):
+        with pytest.raises(ValueError, match="pre-agent objective anchor"):
+            persist_objective_anchored_recovery(
+                Mock(spec=OperationalMemoryRepository),
+                [],
+                task,
+                run,
+                environment,
+                pre_agent_objective=candidate,
+                post_mutation_objective=post,
+                planned_actions={},
+                mutation_evidence={},
+                objective_success_trigger_action_id="missing",
+            )
+    for candidate in invalid_post:
+        with pytest.raises(ValueError, match="post-mutation objective anchor"):
+            persist_objective_anchored_recovery(
+                Mock(spec=OperationalMemoryRepository),
+                [],
+                task,
+                run,
+                environment,
+                pre_agent_objective=pre,
+                post_mutation_objective=candidate,
+                planned_actions={},
+                mutation_evidence={},
+                objective_success_trigger_action_id="missing",
+            )

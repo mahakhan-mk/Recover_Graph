@@ -615,6 +615,102 @@ def test_container_objective_uses_source_first_workspace_environment(
     assert command[image_index + 1] == "/usr/bin/python3.10"
 
 
+def test_materialize_workspace_applies_patch_without_ambient_eol_noise(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "source"
+    repository = source_root / "repo"
+    repository.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(repository), "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.name", "Materialization Test"],
+        check=True,
+    )
+    target = repository / "arrow" / "locales.py"
+    target.parent.mkdir()
+    baseline = b"base\nsecond\nthird\n"
+    target.write_bytes(baseline)
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "baseline"], check=True)
+    expected_index = subprocess.run(
+        ["git", "-C", str(repository), "ls-files", "-s", "-z"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    mutated = b"base\nintentional mutation\nsecond\nthird\n"
+    target.write_bytes(mutated)
+    patch = subprocess.run(
+        ["git", "-C", str(repository), "diff", "--", "arrow/locales.py"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    target.write_bytes(baseline)
+    mutated_blob = subprocess.run(
+        ["git", "-C", str(repository), "hash-object", "--stdin"],
+        check=True,
+        input=mutated,
+        capture_output=True,
+    ).stdout.strip()
+    baseline_blob = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", ":arrow/locales.py"],
+        check=True,
+        capture_output=True,
+    ).stdout.strip()
+    expected_index = expected_index.replace(baseline_blob, mutated_blob)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "core.autocrlf", "true"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "core.eol", "crlf"],
+        check=True,
+    )
+    task = Task(
+        id="GS-T001",
+        problem_statement="materialize",
+        family_id="family",
+        repository="repo",
+        chronological_index=1,
+    )
+
+    workspace = sprint3._materialize_workspace(  # pyright: ignore[reportPrivateUsage]
+        source_root=source_root,
+        execution_root=tmp_path / "execution",
+        frozen_cases={"GS-T001": FrozenSWEsmithCase("instance", (), patch)},
+        condition="acquisition-r9",
+        task=task,
+        workspace_line_ending_policy="git_index_consistent_line_endings_v2",
+    )
+
+    status = subprocess.run(
+        ["git", "-C", str(workspace), "status", "--short"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    diff = subprocess.run(
+        ["git", "-C", str(workspace), "diff", "--", "arrow/locales.py"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert status.strip() == "M  arrow/locales.py"
+    assert subprocess.run(
+        ["git", "-C", str(workspace), "ls-files", "-s", "-z"],
+        check=True,
+        capture_output=True,
+    ).stdout == expected_index
+    assert diff == ""
+    assert (workspace / "arrow" / "locales.py").read_bytes().replace(
+        b"\r\n", b"\n"
+    ) == b"base\nintentional mutation\nsecond\nthird\n"
+
+
 def test_container_agent_runtime_separates_docker_cli_and_python() -> None:
     environment = IsolatedTaskEnvironment(
         "GS-T006",
@@ -675,9 +771,11 @@ def test_objective_command_disables_coverage_thresholds_only_at_objective_bounda
         {"GS-T006": IsolatedTaskEnvironment("GS-T006", Path("venv-python"))},
     )
     commands: list[tuple[str, ...]] = []
+    timeouts: list[object] = []
 
     def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
         commands.append(command)
+        timeouts.append(kwargs["timeout"])
         return type(
             "Completed",
             (),
@@ -688,6 +786,7 @@ def test_objective_command_disables_coverage_thresholds_only_at_objective_bounda
 
     assert objective(task_case.task, tmp_path) is True
     assert "--no-cov" in commands[0]
+    assert timeouts == [900]
     assert objective.observations[-1].status == "passed"
 
 

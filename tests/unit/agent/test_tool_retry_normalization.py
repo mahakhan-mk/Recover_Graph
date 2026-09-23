@@ -142,6 +142,102 @@ def test_failed_read_result_is_returned_to_model_and_recorded(tmp_path: Path) ->
     assert observed_returns[0].error == "file does not exist"
 
 
+def test_run_command_planned_action_stores_canonical_argv(tmp_path: Path) -> None:
+    settings = make_settings()
+    dependencies = make_dependencies(tmp_path)
+
+    def respond(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        if any(
+            isinstance(part, ToolReturnPart) and part.tool_name == "run_command"
+            for message in messages
+            for part in message.parts
+        ):
+            return ModelResponse(parts=[TextPart("command completed")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    "run_command",
+                    {"command": ["python -c \"print('canonical')\""]},
+                )
+            ]
+        )
+
+    agent = create_coding_agent(settings, model=FunctionModel(respond))
+    result = run_coding_agent(
+        agent,
+        settings,
+        dependencies,
+        "Run the command.",
+        max_actions=5,
+        max_requests=5,
+    )
+
+    assert result.output == "command completed"
+    assert len(dependencies.planned_actions) == 1
+    action = next(iter(dependencies.planned_actions.values()))
+    assert action.arguments["command"] == ["python", "-c", "print('canonical')"]
+    assert dependencies.events[0].result.success is True
+
+
+def test_rejected_run_command_is_returned_to_agent_and_agent_continues(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings()
+    dependencies = make_dependencies(tmp_path)
+    observed_returns: list[ActionResult] = []
+
+    def respond(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        tool_returns = [
+            part
+            for message in messages
+            for part in message.parts
+            if isinstance(part, ToolReturnPart) and part.tool_name == "run_command"
+        ]
+        if tool_returns:
+            assert isinstance(tool_returns[-1].content, ActionResult)
+            observed_returns.append(tool_returns[-1].content)
+            if len(tool_returns) == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "run_command",
+                            {"command": ["python -c \"print('valid')\""]},
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart("continued after validation failure")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    "run_command",
+                    {"command": ["bash", "-lc", "echo invalid"]},
+                )
+            ]
+        )
+
+    agent = create_coding_agent(settings, model=FunctionModel(respond))
+    result = run_coding_agent(
+        agent,
+        settings,
+        dependencies,
+        "Try the command and continue after any validation failure.",
+        max_actions=5,
+        max_requests=5,
+    )
+
+    assert result.output == "continued after validation failure"
+    assert len(observed_returns) == 2
+    assert observed_returns[0].success is False
+    assert observed_returns[0].exit_code is None
+    assert observed_returns[0].error is not None
+    assert observed_returns[1].success is True
+    assert len(dependencies.events) == 2
+    assert len(dependencies.planned_actions) == 2
+    assert dependencies.planned_actions[dependencies.events[0].action_id].arguments == {
+        "command": ["bash", "-lc", "echo invalid"]
+    }
+
+
 def test_repeated_ordinary_filesystem_mistakes_do_not_exhaust_tool_retries(
     tmp_path: Path,
 ) -> None:

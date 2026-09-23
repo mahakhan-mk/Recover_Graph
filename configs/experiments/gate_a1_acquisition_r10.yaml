@@ -1,0 +1,32 @@
+experiment_id: GS-E003
+rollout: track_a_gate_a1_acquisition_r10
+config_version: gate-a1-r10-v1
+run_revision: R10
+revision_reason: agent_runtime_and_structured_argv_stabilization_after_r9
+model_visible_tool_output_chars: 16000
+objective_coverage_policy: no_cov
+objective_coverage_policy_selection_version: pytest_help_option_discovery_v1
+workspace_line_ending_policy: git_index_consistent_line_endings_v2
+persistence_session_policy: short_lived_session_v1
+persistence_retry_policy: retryable_transient_max_2_v1
+recovery_event_semantics: trusted_action_semantics_v2
+repository_mutation_evidence_policy: git_worktree_content_fingerprint_v2
+command_argv_policy: structured_argv_canonicalization_v2
+stopping_policy: objective_success_or_timeout_v1
+objective_mutation_check_policy: repository_state_fingerprint_v1
+development: true
+pilot: true
+model_config: configs/models/openrouter_coding.yaml
+task_manifest: benchmark/manifests/pilot.jsonl
+task_problems: benchmark/annotations/recurrence_validation.csv
+artifact_root: research/evidence/results
+workspace_baseline_root: benchmark/workspaces
+workspace_execution_root: research/evidence/workspaces
+conditions:
+  - B0
+limits:
+  max_actions: null
+  max_requests: null
+  timeout_seconds: 600
+agent_timeout_seconds: 600
+objective_timeout_seconds: 900
