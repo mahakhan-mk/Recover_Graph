@@ -1,0 +1,227 @@
+{
+  "acquisition_corpus_ready": true,
+  "canonical_acquisition_root": "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z",
+  "configuration": {
+    "abstraction_model": "cohere/north-mini-code:free",
+    "agent_timeout_seconds": {
+      "configured": 900,
+      "effective_overridden_tasks": {
+        "GS-T002": 3600,
+        "GS-T003": 3600,
+        "GS-T004": 7200,
+        "GS-T005": 7200
+      },
+      "environment_variable": "GRAPH_SWARM_AGENT_TIMEOUT_SECONDS"
+    },
+    "command_argv_policy": "structured_argv_canonicalization_v2",
+    "config_version": "gate-a1-r13b-v2",
+    "configuration_hash": "606d69aac4ed506d1a3b738052bfef34238f8463777eec5fb08188e15d237529",
+    "coding_model": "nex-agi/nex-n2.5-pro:free",
+    "objective_timeout_seconds": 900,
+    "pre_mutation_stagnation_guard": {
+      "abort_after_seconds": 1800,
+      "nudge_after_seconds": 1200,
+      "policy": "pre_mutation_stagnation_guard_v1"
+    },
+    "prompt_version": "v2-runtime-guidance",
+    "run_revision": "R13b"
+  },
+  "counts": {
+    "acquisition_corpus_ready": true,
+    "completed_tasks": 5,
+    "eligible_acquisition_tasks": 5,
+    "logical_tasks": 5
+  },
+  "errors": [],
+  "experiment": "GS-E003",
+  "freeze_commit_sha": "857bd073de420d0129435e3bb47e96db3741ad4f",
+  "gate": "Gate A1",
+  "known_anomalies": [
+    {
+      "task_id": "GS-T002",
+      "detail": "Initial attempt was unsuccessful due to a documented 900-second agent wall-clock timeout; selected controlled retry succeeded. The initial artifact remains preserved."
+    },
+    {
+      "task_id": "GS-T003",
+      "detail": "Original coding trajectory reached trusted recovery lineage, but downstream structured abstraction/pattern creation failed; selected pattern-only retry reused the trusted evidence and completed abstraction, embedding, and persistence."
+    },
+    {
+      "task_id": "GS-T004",
+      "detail": "Initial 3600-second agent wall-clock run timed out without complete trusted recovery lineage; selected controlled retry attempt 2 succeeded. The initial timeout artifact remains preserved."
+    }
+  ],
+  "manifest": {
+    "errors": [],
+    "status": "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION"
+  },
+  "revision": "R13b",
+  "retry_provenance": [
+    {
+      "initial_run_id": "GS-E003-A1-R13b-GS-T002-690b2420ef934192ac19c4bd3c112492",
+      "policy": "single_explicit_failed_task_retry_v1",
+      "selected_attempt": 2,
+      "selected_run_id": "GS-E003-A1-R13b-GS-T002-bf6b0cd4d66949a7b1c2234c031ee770",
+      "task_id": "GS-T002"
+    },
+    {
+      "initial_run_id": "GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db",
+      "pattern_id": "recovery-pattern-f490f62ab931191c6eac6db1",
+      "policy": "single_explicit_pattern_retry_v1",
+      "selected_attempt": 1,
+      "selected_run_id": "GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db",
+      "task_id": "GS-T003"
+    },
+    {
+      "initial_run_id": "GS-E003-A1-R13b-GS-T004-645478c46c064554a16408334b007222",
+      "policy": "single_explicit_failed_task_retry_v1",
+      "selected_attempt": 2,
+      "selected_run_id": "GS-E003-A1-R13b-GS-T004-ac49dfcc4dd64f6c9acaaab4a5ed885e",
+      "task_id": "GS-T004"
+    }
+  ],
+  "runtime_engineering_history": [
+    "structured argv canonicalization",
+    "fail-soft command handling",
+    "objective anchoring",
+    "source/applicability separation",
+    "runtime guidance",
+    "environment-configurable timeout",
+    "controlled failed-task retry",
+    "pattern-only retry",
+    "pre-mutation stagnation guard",
+    "selected-attempt manifest aggregation"
+  ],
+  "selected_logical_tasks": [
+    {
+      "abstraction_model": "cohere/north-mini-code:free",
+      "acquisition_success": true,
+      "applicability_operation": "edit_file",
+      "applicability_tool": "edit_file",
+      "coding_model": "nex-agi/nex-n2.5-pro:free",
+      "complete_trusted_lineage": true,
+      "config_version": "gate-a1-r13b-v2",
+      "effective_agent_timeout_seconds": 900,
+      "objective_success_trigger_action_id": "bedeab96-af66-4f9d-84dd-e49931d9158e",
+      "objective_timeout_seconds": 900,
+      "pattern_created": true,
+      "pattern_embedded": true,
+      "pattern_id": "recovery-pattern-ad07a6a45718b848a30ad377",
+      "pattern_persisted": true,
+      "prompt_version": "v2-runtime-guidance",
+      "recovery_evidence_source": "objective_anchored_v1",
+      "selected_attempt": 1,
+      "selected_kind": "initial",
+      "selected_run_id": "GS-E003-A1-R13b-GS-T001-d2418a3ebc4a4ea9963cb5207bd73f3f",
+      "source_operation": "run_command",
+      "source_tool": "run_command",
+      "task_id": "GS-T001",
+      "task_success": true,
+      "verification_status": "observed_successful"
+    },
+    {
+      "abstraction_model": "cohere/north-mini-code:free",
+      "acquisition_success": true,
+      "applicability_operation": "edit_file",
+      "applicability_tool": "edit_file",
+      "coding_model": "nex-agi/nex-n2.5-pro:free",
+      "complete_trusted_lineage": true,
+      "config_version": "gate-a1-r13b-v2",
+      "effective_agent_timeout_seconds": 3600,
+      "objective_success_trigger_action_id": "24b0efd9-7a7c-4a10-a5b1-146a8cbadefd",
+      "objective_timeout_seconds": 900,
+      "pattern_created": true,
+      "pattern_embedded": true,
+      "pattern_id": "recovery-pattern-162e3999c4a2c66a1ff647ed",
+      "pattern_persisted": true,
+      "prompt_version": "v2-runtime-guidance",
+      "recovery_evidence_source": "objective_anchored_v1",
+      "selected_attempt": 2,
+      "selected_kind": "controlled_retry",
+      "selected_run_id": "GS-E003-A1-R13b-GS-T002-bf6b0cd4d66949a7b1c2234c031ee770",
+      "source_operation": "run_command",
+      "source_tool": "run_command",
+      "task_id": "GS-T002",
+      "task_success": true,
+      "verification_status": "observed_successful"
+    },
+    {
+      "abstraction_model": "cohere/north-mini-code:free",
+      "acquisition_success": true,
+      "applicability_operation": "edit_file",
+      "applicability_tool": "edit_file",
+      "coding_model": "nex-agi/nex-n2.5-pro:free",
+      "complete_trusted_lineage": true,
+      "config_version": "gate-a1-r13b-v2",
+      "effective_agent_timeout_seconds": 3600,
+      "objective_success_trigger_action_id": "66132630-37c0-447d-83f4-655b570c6f85",
+      "objective_timeout_seconds": 900,
+      "pattern_created": true,
+      "pattern_embedded": true,
+      "pattern_id": "recovery-pattern-f490f62ab931191c6eac6db1",
+      "pattern_persisted": true,
+      "prompt_version": "v2-runtime-guidance",
+      "recovery_evidence_source": "objective_anchored_v1",
+      "selected_attempt": 1,
+      "selected_kind": "pattern_retry",
+      "selected_run_id": "GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db",
+      "source_operation": "edit_file",
+      "source_tool": "edit_file",
+      "task_id": "GS-T003",
+      "task_success": true,
+      "verification_status": "observed_successful"
+    },
+    {
+      "abstraction_model": "cohere/north-mini-code:free",
+      "acquisition_success": true,
+      "applicability_operation": "edit_file",
+      "applicability_tool": "edit_file",
+      "coding_model": "nex-agi/nex-n2.5-pro:free",
+      "complete_trusted_lineage": true,
+      "config_version": "gate-a1-r13b-v2",
+      "effective_agent_timeout_seconds": 7200,
+      "objective_success_trigger_action_id": "d1a73483-745d-4972-9fd5-3a02907926d7",
+      "objective_timeout_seconds": 900,
+      "pattern_created": true,
+      "pattern_embedded": true,
+      "pattern_id": "recovery-pattern-99a54266f940e1d4648f4698",
+      "pattern_persisted": true,
+      "prompt_version": "v2-runtime-guidance",
+      "recovery_evidence_source": "objective_anchored_v1",
+      "selected_attempt": 2,
+      "selected_kind": "controlled_retry",
+      "selected_run_id": "GS-E003-A1-R13b-GS-T004-ac49dfcc4dd64f6c9acaaab4a5ed885e",
+      "source_operation": "run_command",
+      "source_tool": "run_command",
+      "task_id": "GS-T004",
+      "task_success": true,
+      "verification_status": "observed_successful"
+    },
+    {
+      "abstraction_model": "cohere/north-mini-code:free",
+      "acquisition_success": true,
+      "applicability_operation": "edit_file",
+      "applicability_tool": "edit_file",
+      "coding_model": "nex-agi/nex-n2.5-pro:free",
+      "complete_trusted_lineage": true,
+      "config_version": "gate-a1-r13b-v2",
+      "effective_agent_timeout_seconds": 7200,
+      "objective_success_trigger_action_id": "1469008b-b5c5-4092-b739-896cbe72ab8b",
+      "objective_timeout_seconds": 900,
+      "pattern_created": true,
+      "pattern_embedded": true,
+      "pattern_id": "recovery-pattern-fd7b65022b22dc5f2a42816f",
+      "pattern_persisted": true,
+      "prompt_version": "v2-runtime-guidance",
+      "recovery_evidence_source": "objective_anchored_v1",
+      "selected_attempt": 1,
+      "selected_kind": "initial",
+      "selected_run_id": "GS-E003-A1-R13b-GS-T005-ba0d94867f6944cd8341a28a44c4013b",
+      "source_operation": "run_command",
+      "source_tool": "run_command",
+      "task_id": "GS-T005",
+      "task_success": true,
+      "verification_status": "observed_successful"
+    }
+  ],
+  "status": "PASSED"
+}

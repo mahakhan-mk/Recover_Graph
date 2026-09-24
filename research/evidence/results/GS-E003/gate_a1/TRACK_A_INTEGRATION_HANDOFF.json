@@ -1,0 +1,59 @@
+{
+  "canonical_acquisition_path": "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z",
+  "configuration_hash": "606d69aac4ed506d1a3b738052bfef34238f8463777eec5fb08188e15d237529",
+  "corpus_ready": true,
+  "experiment": "GS-E003",
+  "gate": "Gate A1",
+  "git_sha": "857bd073de420d0129435e3bb47e96db3741ad4f",
+  "models": {
+    "abstraction": "cohere/north-mini-code:free",
+    "coding": "nex-agi/nex-n2.5-pro:free"
+  },
+  "revision": "R13b",
+  "selected_pattern_ids": [
+    "recovery-pattern-ad07a6a45718b848a30ad377",
+    "recovery-pattern-162e3999c4a2c66a1ff647ed",
+    "recovery-pattern-f490f62ab931191c6eac6db1",
+    "recovery-pattern-99a54266f940e1d4648f4698",
+    "recovery-pattern-fd7b65022b22dc5f2a42816f"
+  ],
+  "selected_retry_provenance": [
+    {
+      "initial_run_id": "GS-E003-A1-R13b-GS-T002-690b2420ef934192ac19c4bd3c112492",
+      "policy": "single_explicit_failed_task_retry_v1",
+      "selected_attempt": 2,
+      "selected_run_id": "GS-E003-A1-R13b-GS-T002-bf6b0cd4d66949a7b1c2234c031ee770",
+      "task_id": "GS-T002"
+    },
+    {
+      "initial_run_id": "GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db",
+      "pattern_id": "recovery-pattern-f490f62ab931191c6eac6db1",
+      "policy": "single_explicit_pattern_retry_v1",
+      "selected_attempt": 1,
+      "selected_run_id": "GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db",
+      "task_id": "GS-T003"
+    },
+    {
+      "initial_run_id": "GS-E003-A1-R13b-GS-T004-645478c46c064554a16408334b007222",
+      "policy": "single_explicit_failed_task_retry_v1",
+      "selected_attempt": 2,
+      "selected_run_id": "GS-E003-A1-R13b-GS-T004-ac49dfcc4dd64f6c9acaaab4a5ed885e",
+      "task_id": "GS-T004"
+    }
+  ],
+  "selected_run_ids": [
+    "GS-E003-A1-R13b-GS-T001-d2418a3ebc4a4ea9963cb5207bd73f3f",
+    "GS-E003-A1-R13b-GS-T002-bf6b0cd4d66949a7b1c2234c031ee770",
+    "GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db",
+    "GS-E003-A1-R13b-GS-T004-ac49dfcc4dd64f6c9acaaab4a5ed885e",
+    "GS-E003-A1-R13b-GS-T005-ba0d94867f6944cd8341a28a44c4013b"
+  ],
+  "status": "PASSED",
+  "task_ids": [
+    "GS-T001",
+    "GS-T002",
+    "GS-T003",
+    "GS-T004",
+    "GS-T005"
+  ]
+}
