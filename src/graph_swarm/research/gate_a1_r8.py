@@ -665,6 +665,9 @@ def _run_r8_task(
     controller_type: type[R8ObjectiveController] = R8ObjectiveController,
     objective_anchored_acquisition: bool = False,
     system_prompt: str | None = None,
+    agent_timeout_seconds: float | None = None,
+    objective_timeout_seconds: float | None = None,
+    runtime_timeout_overrides: dict[str, dict[str, object]] | None = None,
 ) -> tuple[dict[str, object], Any]:
     import time
     from datetime import UTC, datetime
@@ -736,7 +739,11 @@ def _run_r8_task(
     started = time.perf_counter()
     agent_started: float | None = None
     agent_duration_seconds = 0.0
-    agent_timeout_seconds = agent_timeout_seconds_for_configuration(configuration)
+    effective_agent_timeout_seconds = (
+        agent_timeout_seconds
+        if agent_timeout_seconds is not None
+        else agent_timeout_seconds_for_configuration(configuration)
+    )
     try:
         pre_agent_passed = False
         if objective_anchored_acquisition:
@@ -770,7 +777,7 @@ def _run_r8_task(
                 ).build_task_prompt(task),
                 max_actions=None,
                 max_requests=None,
-                timeout_seconds=agent_timeout_seconds,
+                timeout_seconds=effective_agent_timeout_seconds,
                 model_settings=cast(ModelSettings, configuration.model.settings),
                 request_pacing=pacing,
                 disable_request_limit=True,
@@ -1030,9 +1037,11 @@ def _run_r8_task(
     if revision in {"R9", "R10", "R11", "R12", "R13", "R13b"}:
         artifact.update(
             {
-                "agent_timeout_seconds": agent_timeout_seconds,
-                "objective_timeout_seconds": getattr(
-                    configuration.config, "objective_timeout_seconds", None
+                "agent_timeout_seconds": effective_agent_timeout_seconds,
+                "objective_timeout_seconds": (
+                    objective_timeout_seconds
+                    if objective_timeout_seconds is not None
+                    else getattr(configuration.config, "objective_timeout_seconds", None)
                 ),
                 "agent_duration_seconds": agent_duration_seconds,
                 "objective_evaluation_duration_seconds": (
@@ -1057,6 +1066,8 @@ def _run_r8_task(
                 "timeout_provenance": timeout_provenance(runtime_error),
             }
         )
+        if runtime_timeout_overrides is not None:
+            artifact["runtime_timeout_overrides"] = runtime_timeout_overrides
     _write_json(run_dir / "acquisition.json", artifact)
     return artifact, embedder
 

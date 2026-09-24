@@ -11,8 +11,6 @@ from typing import Any, cast
 
 from graph_swarm.research.gate_a1_acquisition import (
     ACQUISITION_TASK_IDS,
-    R9_AGENT_TIMEOUT_SECONDS,
-    R9_OBJECTIVE_TIMEOUT_SECONDS,
     R9_REPOSITORY_MUTATION_EVIDENCE_POLICY,
     R10_COMMAND_ARGV_POLICY,
     R13_CONFIG,
@@ -31,6 +29,8 @@ from graph_swarm.research.gate_a1_acquisition import (
     _validate_preflight_configuration,
     _validate_r13_harness_configuration,
     _write_json,
+    r13_runtime_timeout_resolutions,
+    runtime_timeout_provenance,
 )
 from graph_swarm.research.gate_a1_r8 import (
     R8_LINE_ENDING_POLICY,
@@ -71,6 +71,21 @@ def run_gate_a1_acquisition_r13(
     project_root = project_root.expanduser().resolve()
     if max_new_tasks is not None and max_new_tasks <= 0:
         raise ValueError("max_new_tasks must be positive")
+
+    if _configuration is None:
+        configuration = _configured_runtime(
+            load_experiment_configuration(
+                project_root / R13_CONFIG,
+                project_root=project_root,
+            ),
+            project_root / "benchmark/workspaces",
+            project_root / "research/evidence/workspaces",
+        )
+        _validate_r13_harness_configuration(configuration)
+    else:
+        configuration = _configuration
+    timeout_resolutions = r13_runtime_timeout_resolutions(configuration)
+
     if resume_root is None:
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         artifact_root = (
@@ -94,18 +109,6 @@ def run_gate_a1_acquisition_r13(
                 f"{_revision} rejects resume roots from older revisions"
             )
 
-    if _configuration is None:
-        configuration = _configured_runtime(
-            load_experiment_configuration(
-                project_root / R13_CONFIG,
-                project_root=project_root,
-            ),
-            project_root / "benchmark/workspaces",
-            project_root / "research/evidence/workspaces",
-        )
-        _validate_r13_harness_configuration(configuration)
-    else:
-        configuration = _configuration
     cases = _task_cases(configuration, ACQUISITION_TASK_IDS)
     settings = _settings_for_agent(
         coding_model=_coding_model,
@@ -129,7 +132,7 @@ def run_gate_a1_acquisition_r13(
         environments,
         objective_coverage_policy=configuration.config.objective_coverage_policy,
         coverage_policy_selection_version=configuration.config.objective_coverage_policy_selection_version,
-        objective_timeout_seconds=cast(float, configuration.config.objective_timeout_seconds),
+        objective_timeout_seconds=timeout_resolutions["objective"].effective_seconds,
     )
     configuration_hash = _r8_configuration_hash(configuration, settings, environments)
     manifest: dict[str, object] = {
@@ -144,12 +147,9 @@ def run_gate_a1_acquisition_r13(
         "abstraction_model": settings.openrouter_abstraction_model,
         "prompt_version": configuration.model.prompt_version,
         "limits": configuration.config.limits.model_dump(mode="json"),
-        "agent_timeout_seconds": getattr(
-            configuration.config,
-            "agent_timeout_seconds",
-            R9_AGENT_TIMEOUT_SECONDS,
-        ),
-        "objective_timeout_seconds": R9_OBJECTIVE_TIMEOUT_SECONDS,
+        "agent_timeout_seconds": timeout_resolutions["agent"].effective_seconds,
+        "objective_timeout_seconds": timeout_resolutions["objective"].effective_seconds,
+        "runtime_timeout_overrides": runtime_timeout_provenance(timeout_resolutions),
         "stopping_policy": configuration.config.stopping_policy or R13_STOPPING_POLICY,
         "objective_mutation_check_policy": (
             configuration.config.objective_mutation_check_policy
@@ -252,6 +252,9 @@ def run_gate_a1_acquisition_r13(
             controller_type=_controller_type,
             objective_anchored_acquisition=True,
             system_prompt=_system_prompt,
+            agent_timeout_seconds=timeout_resolutions["agent"].effective_seconds,
+            objective_timeout_seconds=timeout_resolutions["objective"].effective_seconds,
+            runtime_timeout_overrides=runtime_timeout_provenance(timeout_resolutions),
         )
         task_records.append(task_artifact)
         _write_json(completed_marker, task_artifact)

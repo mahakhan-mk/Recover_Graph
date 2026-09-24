@@ -10,6 +10,8 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import math
+import os
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -170,6 +172,102 @@ R13B_REVISION_REASON = (
 R13B_PROMPT_VERSION = "v2-runtime-guidance"
 R13B_AGENT_TIMEOUT_SECONDS = 900
 R13B_TIMEOUT_SECONDS = 900
+AGENT_TIMEOUT_ENVIRONMENT_VARIABLE = "GRAPH_SWARM_AGENT_TIMEOUT_SECONDS"
+OBJECTIVE_TIMEOUT_ENVIRONMENT_VARIABLE = "GRAPH_SWARM_OBJECTIVE_TIMEOUT_SECONDS"
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeTimeoutResolution:
+    """Configured and effective timeout values for one acquisition budget."""
+
+    environment_variable: str
+    configured_seconds: float
+    effective_seconds: float
+    override_applied: bool
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "environment_variable": self.environment_variable,
+            "configured_seconds": self.configured_seconds,
+            "effective_seconds": self.effective_seconds,
+            "override_applied": self.override_applied,
+        }
+
+
+def resolve_runtime_timeout(
+    configured_timeout: object,
+    environment_variable: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> RuntimeTimeoutResolution:
+    """Resolve one positive finite timeout with an optional environment override."""
+    try:
+        configured_seconds = float(cast(Any, configured_timeout))
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"configured timeout for {environment_variable} must be positive and finite"
+        ) from error
+    if not math.isfinite(configured_seconds) or configured_seconds <= 0:
+        raise ValueError(
+            f"configured timeout for {environment_variable} must be positive and finite"
+        )
+
+    values = os.environ if environ is None else environ
+    if environment_variable not in values:
+        return RuntimeTimeoutResolution(
+            environment_variable=environment_variable,
+            configured_seconds=configured_seconds,
+            effective_seconds=configured_seconds,
+            override_applied=False,
+        )
+
+    raw_value = values[environment_variable]
+    try:
+        effective_seconds = float(raw_value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"{environment_variable} must be a positive finite numeric value; "
+            f"got {raw_value!r}"
+        ) from error
+    if not math.isfinite(effective_seconds) or effective_seconds <= 0:
+        raise ValueError(
+            f"{environment_variable} must be a positive finite numeric value; "
+            f"got {raw_value!r}"
+        )
+    return RuntimeTimeoutResolution(
+        environment_variable=environment_variable,
+        configured_seconds=configured_seconds,
+        effective_seconds=effective_seconds,
+        override_applied=True,
+    )
+
+
+def r13_runtime_timeout_resolutions(configuration: Any) -> dict[str, RuntimeTimeoutResolution]:
+    """Resolve environment-configurable budgets for the R13/R13b runtime only."""
+    return {
+        "agent": resolve_runtime_timeout(
+            getattr(
+                configuration.config,
+                "agent_timeout_seconds",
+                configuration.config.limits.timeout_seconds,
+            ),
+            AGENT_TIMEOUT_ENVIRONMENT_VARIABLE,
+        ),
+        "objective": resolve_runtime_timeout(
+            getattr(
+                configuration.config,
+                "objective_timeout_seconds",
+                configuration.config.limits.timeout_seconds,
+            ),
+            OBJECTIVE_TIMEOUT_ENVIRONMENT_VARIABLE,
+        ),
+    }
+
+
+def runtime_timeout_provenance(
+    resolutions: Mapping[str, RuntimeTimeoutResolution],
+) -> dict[str, dict[str, object]]:
+    return {name: resolution.as_dict() for name, resolution in resolutions.items()}
 
 
 class GateA1AcquisitionPreflightError(RuntimeError):

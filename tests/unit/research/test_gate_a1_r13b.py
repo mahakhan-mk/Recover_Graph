@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from graph_swarm.agent.prompts import R13B_RUNTIME_GUIDANCE, R13B_SYSTEM_PROMPT
 from graph_swarm.research import gate_a1_acquisition as acquisition
 from graph_swarm.research.gate_a1_r8 import objective_final_check_policy
@@ -83,3 +85,112 @@ def test_r13b_configuration_validator_rejects_wrong_prompt_version() -> None:
     except acquisition.GateA1AcquisitionPreflightError:
         return
     raise AssertionError("R13b validator accepted the wrong prompt version")
+
+
+def test_r13_runtime_timeout_defaults_preserve_configured_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(acquisition.AGENT_TIMEOUT_ENVIRONMENT_VARIABLE, raising=False)
+    monkeypatch.delenv(acquisition.OBJECTIVE_TIMEOUT_ENVIRONMENT_VARIABLE, raising=False)
+    configuration = load_experiment_configuration(
+        ROOT / acquisition.R13B_CONFIG,
+        project_root=ROOT,
+    )
+
+    resolutions = acquisition.r13_runtime_timeout_resolutions(configuration)
+
+    assert resolutions["agent"].configured_seconds == 900
+    assert resolutions["agent"].effective_seconds == 900
+    assert resolutions["agent"].override_applied is False
+    assert resolutions["objective"].configured_seconds == 900
+    assert resolutions["objective"].effective_seconds == 900
+    assert resolutions["objective"].override_applied is False
+
+
+@pytest.mark.parametrize(
+    ("environment_variable", "value", "expected_agent", "expected_objective"),
+    [
+        (acquisition.AGENT_TIMEOUT_ENVIRONMENT_VARIABLE, "3600", 3600, 900),
+        (acquisition.OBJECTIVE_TIMEOUT_ENVIRONMENT_VARIABLE, "1800", 900, 1800),
+        ("both", "3600", 3600, 3600),
+    ],
+)
+def test_r13_runtime_timeout_overrides_are_independent(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_variable: str,
+    value: str,
+    expected_agent: int,
+    expected_objective: int,
+) -> None:
+    monkeypatch.delenv(acquisition.AGENT_TIMEOUT_ENVIRONMENT_VARIABLE, raising=False)
+    monkeypatch.delenv(acquisition.OBJECTIVE_TIMEOUT_ENVIRONMENT_VARIABLE, raising=False)
+    if environment_variable == "both":
+        monkeypatch.setenv(acquisition.AGENT_TIMEOUT_ENVIRONMENT_VARIABLE, value)
+        monkeypatch.setenv(acquisition.OBJECTIVE_TIMEOUT_ENVIRONMENT_VARIABLE, value)
+    else:
+        monkeypatch.setenv(environment_variable, value)
+    configuration = load_experiment_configuration(
+        ROOT / acquisition.R13B_CONFIG,
+        project_root=ROOT,
+    )
+
+    resolutions = acquisition.r13_runtime_timeout_resolutions(configuration)
+
+    assert resolutions["agent"].effective_seconds == expected_agent
+    assert resolutions["objective"].effective_seconds == expected_objective
+    assert resolutions["agent"].override_applied is (expected_agent != 900)
+    assert resolutions["objective"].override_applied is (expected_objective != 900)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "NaN", "Infinity", ""])
+def test_invalid_r13_runtime_timeout_override_fails_before_agent_startup(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv(acquisition.AGENT_TIMEOUT_ENVIRONMENT_VARIABLE, value)
+    agent_startup_attempted = False
+
+    def fail_if_settings_are_resolved() -> object:
+        nonlocal agent_startup_attempted
+        agent_startup_attempted = True
+        raise AssertionError("agent settings were resolved before invalid timeout failed")
+
+    monkeypatch.setattr(
+        "graph_swarm.research.gate_a1_r13._settings_for_agent",
+        fail_if_settings_are_resolved,
+    )
+
+    with pytest.raises(ValueError, match=acquisition.AGENT_TIMEOUT_ENVIRONMENT_VARIABLE):
+        acquisition.run_gate_a1_acquisition_r13b(ROOT)
+
+    assert agent_startup_attempted is False
+
+
+def test_r13_runtime_timeout_provenance_records_configured_effective_and_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(acquisition.AGENT_TIMEOUT_ENVIRONMENT_VARIABLE, "3600")
+    monkeypatch.delenv(acquisition.OBJECTIVE_TIMEOUT_ENVIRONMENT_VARIABLE, raising=False)
+    configuration = load_experiment_configuration(
+        ROOT / acquisition.R13B_CONFIG,
+        project_root=ROOT,
+    )
+
+    provenance = acquisition.runtime_timeout_provenance(
+        acquisition.r13_runtime_timeout_resolutions(configuration)
+    )
+
+    assert provenance == {
+        "agent": {
+            "environment_variable": "GRAPH_SWARM_AGENT_TIMEOUT_SECONDS",
+            "configured_seconds": 900,
+            "effective_seconds": 3600,
+            "override_applied": True,
+        },
+        "objective": {
+            "environment_variable": "GRAPH_SWARM_OBJECTIVE_TIMEOUT_SECONDS",
+            "configured_seconds": 900,
+            "effective_seconds": 900,
+            "override_applied": False,
+        },
+    }
