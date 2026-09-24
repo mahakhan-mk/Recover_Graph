@@ -1044,6 +1044,11 @@ def main() -> int:
         help="resume Gate A1 Acquisition R13b without rerunning started tasks",
     )
     parser.add_argument(
+        "--retry-r13b-task",
+        metavar="TASK_ID",
+        help="perform the one explicit controlled retry for a failed R13b task",
+    )
+    parser.add_argument(
         "--max-new-tasks",
         type=int,
         metavar="COUNT",
@@ -1083,6 +1088,10 @@ def main() -> int:
             "--max-new-tasks requires an R2-R13b "
             "acquisition/resume mode"
         )
+    if args.retry_r13b_task is not None and args.resume_acquisition_r13b is None:
+        parser.error("--retry-r13b-task requires --resume-acquisition-r13b")
+    if args.retry_r13b_task is not None and args.max_new_tasks is not None:
+        parser.error("--retry-r13b-task cannot be combined with --max-new-tasks")
     if args.prepare_environments:
         print(prepare_gate_a1_environments(project_root))
         return 0
@@ -1268,6 +1277,7 @@ def main() -> int:
             project_root,
             resume_root=args.resume_acquisition_r13b,
             max_new_tasks=args.max_new_tasks,
+            retry_task_id=args.retry_r13b_task,
         )
         print(f"{status} {artifact_root}")
         return 0 if status in {

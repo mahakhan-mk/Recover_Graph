@@ -2308,6 +2308,7 @@ def run_gate_a1_acquisition_r13b(
     *,
     resume_root: Path | None = None,
     max_new_tasks: int | None = None,
+    retry_task_id: str | None = None,
 ) -> tuple[str, Path]:
     """Run R13b through the canonical R13 objective-anchored runner."""
     configuration = load_experiment_configuration(
@@ -2335,6 +2336,7 @@ def run_gate_a1_acquisition_r13b(
         _run_prefix="acquisition-r13b",
         _namespace=R13B_NAMESPACE,
         _condition="acquisition-r13b",
+        retry_task_id=retry_task_id,
         _system_prompt=R13B_SYSTEM_PROMPT,
         _coding_model=R13B_EXPECTED_CODING_MODEL,
         _abstraction_model=R13B_EXPECTED_ABSTRACTION_MODEL,

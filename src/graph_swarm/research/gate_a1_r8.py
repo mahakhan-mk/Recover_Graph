@@ -668,6 +668,8 @@ def _run_r8_task(
     agent_timeout_seconds: float | None = None,
     objective_timeout_seconds: float | None = None,
     runtime_timeout_overrides: dict[str, dict[str, object]] | None = None,
+    attempt_number: int | None = None,
+    attempt_kind: str | None = None,
 ) -> tuple[dict[str, object], Any]:
     import time
     from datetime import UTC, datetime
@@ -1068,6 +1070,10 @@ def _run_r8_task(
         )
         if runtime_timeout_overrides is not None:
             artifact["runtime_timeout_overrides"] = runtime_timeout_overrides
+        if attempt_number is not None:
+            artifact["attempt"] = attempt_number
+        if attempt_kind is not None:
+            artifact["kind"] = attempt_kind
     _write_json(run_dir / "acquisition.json", artifact)
     return artifact, embedder
 
