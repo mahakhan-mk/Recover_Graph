@@ -1,3 +1,5 @@
+# pyright: reportUnknownArgumentType=false, reportUnknownLambdaType=false
+
 import hashlib
 import json
 from pathlib import Path
@@ -420,3 +422,371 @@ def test_r13b_cli_rejects_retry_without_resume_or_with_max_tasks(
     )
     with pytest.raises(SystemExit):
         gate_a1.main()
+
+
+def _pattern_retry_fixture(root: Path) -> tuple[Path, dict[str, object]]:
+    root.mkdir()
+    records: dict[str, object] = {}
+    for task_id in acquisition.ACQUISITION_TASK_IDS:
+        record: dict[str, object] = {
+            "task_id": task_id,
+            "run_id": f"initial-{task_id}",
+            "task_success": task_id == "GS-T003",
+            "acquisition_success": task_id in {"GS-T001", "GS-T002"},
+        }
+        if task_id == "GS-T003":
+            record.update(
+                {
+                    "complete_trusted_lineage": True,
+                    "counts": {"recoveries": 1, "patterns": 0},
+                    "recovery_evidence_source": (
+                        "objective_anchored_v1"
+                    ),
+                    "objective_success_trigger_action_id": "action-003",
+                    "recovery_lineage": {
+                        "failure_id": "failure-003",
+                        "resolution_id": "resolution-003",
+                        "outcome_id": "outcome-003",
+                    },
+                    "pattern_created": False,
+                    "pattern_persisted": False,
+                    "pattern_embedded": False,
+                    "acquisition_reason": "recovery_pattern_not_created",
+                }
+            )
+        records[task_id] = record
+        completed = root / "tasks" / task_id / "completed.json"
+        completed.parent.mkdir(parents=True, exist_ok=True)
+        completed.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+    manifest = {
+        "run_revision": "R13b",
+        "config_version": "gate-a1-r13b-v2",
+        "tasks": list(records.values()),
+        "completed_task_ids": list(acquisition.ACQUISITION_TASK_IDS),
+    }
+    manifest_path = root / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    return manifest_path, records
+
+
+class _PatternRetryLineage:
+    def __init__(self) -> None:
+        self.failure = SimpleNamespace(id="failure-003")
+        self.resolution = SimpleNamespace(id="resolution-003")
+        self.outcome = SimpleNamespace(id="outcome-003")
+        self.recovery_action = SimpleNamespace(
+            planned_action=SimpleNamespace(
+                id="action-003",
+                tool="git",
+                operation="apply_patch",
+            )
+        )
+
+    def model_copy(self, *, update: dict[str, object]) -> "_PatternRetryLineage":
+        del update
+        return self
+
+
+def test_r13b_pattern_retry_reuses_canonical_lineage_and_preserves_original(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configuration = load_experiment_configuration(
+        ROOT / acquisition.R13B_CONFIG,
+        project_root=ROOT,
+    )
+    manifest_path, _records = _pattern_retry_fixture(
+        tmp_path / "acquisition-r13b-20260924T010000Z"
+    )
+    original = manifest_path.parent / "tasks" / "GS-T003" / "completed.json"
+    original_digest = hashlib.sha256(original.read_bytes()).digest()
+    lineage = _PatternRetryLineage()
+    calls: dict[str, object] = {"abstract": 0, "embed": 0, "update": 0}
+
+    class FakeMemory:
+        def __init__(self, _factory: object) -> None:
+            pass
+
+        def verify_connectivity(self) -> None:
+            pass
+
+        def get_recovery_evidence(self, failure_id: str) -> _PatternRetryLineage:
+            assert failure_id == "failure-003"
+            return lineage
+
+        def get_recovery_pattern(self, _pattern_id: str) -> object:
+            raise r13.EntityNotFoundError("not found")
+
+        def update_recovery_pattern_embedding(
+            self,
+            pattern_id: str,
+            embedding: list[float],
+        ) -> None:
+            assert pattern_id == "pattern-003"
+            assert embedding == [0.1, 0.2]
+            calls["update"] = cast(int, calls["update"]) + 1
+
+        def close(self) -> None:
+            pass
+
+    def fake_settings(**_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            openrouter_abstraction_model=acquisition.R13B_EXPECTED_ABSTRACTION_MODEL,
+            neo4j_uri="neo4j://unused",
+            neo4j_username="unused",
+            neo4j_password="unused",
+            neo4j_database="neo4j",
+        )
+
+    def fake_evidence(_lineage: object) -> object:
+        return SimpleNamespace(source_failure_id="failure-003")
+
+    def fake_pattern_id(_evidence: object) -> str:
+        return "pattern-003"
+
+    def fake_abstract(*args: object) -> object:
+        assert args[0] is lineage
+        calls["abstract"] = cast(int, calls["abstract"]) + 1
+        return SimpleNamespace(id="pattern-003", embedding=None)
+
+    class FakeEmbedder:
+        def embed_pattern(self, pattern: object) -> object:
+            assert cast(Any, pattern).id == "pattern-003"
+            calls["embed"] = cast(int, calls["embed"]) + 1
+            return SimpleNamespace(id="pattern-003", embedding=[0.1, 0.2])
+
+    monkeypatch.setattr(r13, "_settings_for_agent", fake_settings)
+    monkeypatch.setattr(r13, "ShortLivedNeo4jRepository", FakeMemory)
+    monkeypatch.setattr(r13, "build_recovery_evidence_package", fake_evidence)
+    monkeypatch.setattr(r13, "deterministic_recovery_pattern_id", fake_pattern_id)
+    monkeypatch.setattr(r13, "abstract_and_persist_recovery_pattern", fake_abstract)
+    monkeypatch.setattr(r13, "RecoveryPatternEmbedder", FakeEmbedder)
+
+    status, artifact_root = r13.run_gate_a1_pattern_retry_r13b(
+        tmp_path,
+        resume_root=manifest_path.parent,
+        task_id="GS-T003",
+        _configuration=configuration,
+    )
+
+    assert status == "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION"
+    assert artifact_root == manifest_path.parent
+    assert hashlib.sha256(original.read_bytes()).digest() == original_digest
+    retry_root = artifact_root / "tasks" / "GS-T003" / "pattern-retries" / "attempt-001"
+    started = json.loads((retry_root / "started.json").read_text(encoding="utf-8"))
+    completed = json.loads((retry_root / "completed.json").read_text(encoding="utf-8"))
+    assert started["coding_agent_rerun"] is False
+    assert completed["original_run_id"] == "initial-GS-T003"
+    assert completed["recovery_evidence_reused"] is True
+    assert completed["source_failure_id"] == "failure-003"
+    assert completed["trusted_recovery_action_id"] == "action-003"
+    assert completed["abstraction_model"] == acquisition.R13B_EXPECTED_ABSTRACTION_MODEL
+    assert completed["acquisition_success_after_pattern_retry"] is True
+    assert completed["selected_task_record"]["acquisition_success"] is True
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["pattern_retry"]["policy"] == "single_explicit_pattern_retry_v1"
+    assert manifest["pattern_retry"]["selected_attempt"] == 1
+    assert manifest["eligible_acquisition_tasks"] == 3
+    assert calls == {"abstract": 1, "embed": 1, "update": 1}
+
+
+@pytest.mark.parametrize("failure_stage", ["abstraction", "embedding"])
+def test_r13b_pattern_retry_failure_keeps_logical_corpus_at_two(
+    failure_stage: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configuration = load_experiment_configuration(
+        ROOT / acquisition.R13B_CONFIG,
+        project_root=ROOT,
+    )
+    manifest_path, _records = _pattern_retry_fixture(
+        tmp_path / f"acquisition-r13b-20260924T01{failure_stage}Z"
+    )
+    lineage = _PatternRetryLineage()
+
+    class FakeMemory:
+        def __init__(self, _factory: object) -> None:
+            pass
+
+        def verify_connectivity(self) -> None:
+            pass
+
+        def get_recovery_evidence(self, _failure_id: str) -> _PatternRetryLineage:
+            return lineage
+
+        def get_recovery_pattern(self, _pattern_id: str) -> object:
+            raise r13.EntityNotFoundError("not found")
+
+        def update_recovery_pattern_embedding(
+            self,
+            _pattern_id: str,
+            _embedding: list[float],
+        ) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        r13,
+        "_settings_for_agent",
+        lambda **_kwargs: SimpleNamespace(
+            openrouter_abstraction_model=acquisition.R13B_EXPECTED_ABSTRACTION_MODEL,
+            neo4j_uri="neo4j://unused",
+            neo4j_username="unused",
+            neo4j_password="unused",
+            neo4j_database="neo4j",
+        ),
+    )
+    monkeypatch.setattr(r13, "ShortLivedNeo4jRepository", FakeMemory)
+    monkeypatch.setattr(
+        r13,
+        "build_recovery_evidence_package",
+        lambda _lineage: SimpleNamespace(source_failure_id="failure-003"),
+    )
+    monkeypatch.setattr(
+        r13,
+        "deterministic_recovery_pattern_id",
+        lambda _evidence: "pattern-003",
+    )
+    if failure_stage == "abstraction":
+        monkeypatch.setattr(
+            r13,
+            "abstract_and_persist_recovery_pattern",
+            lambda *_args: (_ for _ in ()).throw(RuntimeError("structured output")),
+        )
+    else:
+        monkeypatch.setattr(
+            r13,
+            "abstract_and_persist_recovery_pattern",
+            lambda *_args: SimpleNamespace(id="pattern-003", embedding=None),
+        )
+        class FailingEmbedder:
+            def embed_pattern(self, _pattern: object) -> object:
+                raise RuntimeError("embedding")
+
+        monkeypatch.setattr(r13, "RecoveryPatternEmbedder", FailingEmbedder)
+
+    status, _artifact_root = r13.run_gate_a1_pattern_retry_r13b(
+        tmp_path,
+        resume_root=manifest_path.parent,
+        task_id="GS-T003",
+        _configuration=configuration,
+    )
+
+    assert status == "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["eligible_acquisition_tasks"] == 2
+    completed = json.loads(
+        (
+            manifest_path.parent
+            / "tasks"
+            / "GS-T003"
+            / "pattern-retries"
+            / "attempt-001"
+            / "completed.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert completed["acquisition_success_after_pattern_retry"] is False
+    assert completed["persistence_error"] is not None
+
+
+def test_r13b_pattern_retry_reuses_fully_persisted_pattern_without_duplicate_work(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configuration = load_experiment_configuration(
+        ROOT / acquisition.R13B_CONFIG,
+        project_root=ROOT,
+    )
+    manifest_path, _records = _pattern_retry_fixture(
+        tmp_path / "acquisition-r13b-20260924T010003Z"
+    )
+    lineage = _PatternRetryLineage()
+
+    class FakeMemory:
+        def __init__(self, _factory: object) -> None:
+            pass
+
+        def verify_connectivity(self) -> None:
+            pass
+
+        def get_recovery_evidence(self, _failure_id: str) -> _PatternRetryLineage:
+            return lineage
+
+        def get_recovery_pattern(self, _pattern_id: str) -> object:
+            return SimpleNamespace(
+                pattern=SimpleNamespace(id="pattern-003", embedding=[0.1, 0.2])
+            )
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        r13,
+        "_settings_for_agent",
+        lambda **_kwargs: SimpleNamespace(
+            openrouter_abstraction_model=acquisition.R13B_EXPECTED_ABSTRACTION_MODEL,
+            neo4j_uri="neo4j://unused",
+            neo4j_username="unused",
+            neo4j_password="unused",
+            neo4j_database="neo4j",
+        ),
+    )
+    monkeypatch.setattr(r13, "ShortLivedNeo4jRepository", FakeMemory)
+    monkeypatch.setattr(r13, "build_recovery_evidence_package", lambda _lineage: object())
+    monkeypatch.setattr(r13, "deterministic_recovery_pattern_id", lambda _evidence: "pattern-003")
+    monkeypatch.setattr(
+        r13,
+        "abstract_and_persist_recovery_pattern",
+        lambda *_args: pytest.fail("existing pattern must not be recreated"),
+    )
+    monkeypatch.setattr(
+        r13,
+        "RecoveryPatternEmbedder",
+        lambda: pytest.fail("existing embedding must not be regenerated"),
+    )
+
+    status, _artifact_root = r13.run_gate_a1_pattern_retry_r13b(
+        tmp_path,
+        resume_root=manifest_path.parent,
+        task_id="GS-T003",
+        _configuration=configuration,
+    )
+
+    assert status == "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["eligible_acquisition_tasks"] == 3
+
+
+def test_r13b_pattern_retry_cli_rejects_invalid_combinations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    for argv in (
+        ["gate_a1", "--retry-r13b-pattern", "GS-T003"],
+        [
+            "gate_a1",
+            "--resume-acquisition-r13b",
+            "run-root",
+            "--retry-r13b-pattern",
+            "GS-T003",
+            "--max-new-tasks",
+            "1",
+        ],
+        [
+            "gate_a1",
+            "--resume-acquisition-r13b",
+            "run-root",
+            "--retry-r13b-pattern",
+            "GS-T003",
+            "--retry-r13b-task",
+            "GS-T003",
+        ],
+        ["gate_a1", "--acquire-r13b", "--retry-r13b-pattern", "GS-T003"],
+    ):
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit):
+            gate_a1.main()

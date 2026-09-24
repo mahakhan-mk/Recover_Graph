@@ -1049,6 +1049,11 @@ def main() -> int:
         help="perform the one explicit controlled retry for a failed R13b task",
     )
     parser.add_argument(
+        "--retry-r13b-pattern",
+        metavar="TASK_ID",
+        help="retry only recovery-pattern processing for a completed R13b task",
+    )
+    parser.add_argument(
         "--max-new-tasks",
         type=int,
         metavar="COUNT",
@@ -1092,6 +1097,12 @@ def main() -> int:
         parser.error("--retry-r13b-task requires --resume-acquisition-r13b")
     if args.retry_r13b_task is not None and args.max_new_tasks is not None:
         parser.error("--retry-r13b-task cannot be combined with --max-new-tasks")
+    if args.retry_r13b_pattern is not None and args.resume_acquisition_r13b is None:
+        parser.error("--retry-r13b-pattern requires --resume-acquisition-r13b")
+    if args.retry_r13b_pattern is not None and args.max_new_tasks is not None:
+        parser.error("--retry-r13b-pattern cannot be combined with --max-new-tasks")
+    if args.retry_r13b_pattern is not None and args.retry_r13b_task is not None:
+        parser.error("--retry-r13b-pattern cannot be combined with --retry-r13b-task")
     if args.prepare_environments:
         print(prepare_gate_a1_environments(project_root))
         return 0
@@ -1269,6 +1280,22 @@ def main() -> int:
             "READY_TO_RESUME_GATE_A1_ACQUISITION_R13",
         } else 2
     if args.acquire_r13b or args.resume_acquisition_r13b is not None:
+        if args.retry_r13b_pattern is not None:
+            from graph_swarm.research.gate_a1_acquisition import (
+                run_gate_a1_pattern_retry_r13b,
+            )
+
+            status, artifact_root = run_gate_a1_pattern_retry_r13b(
+                project_root,
+                resume_root=args.resume_acquisition_r13b,
+                task_id=args.retry_r13b_pattern,
+            )
+            print(f"{status} {artifact_root}")
+            return 0 if status in {
+                "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION",
+                "READY_TO_RESUME_GATE_A1_ACQUISITION_R13B",
+                "BLOCKED_GATE_A1_ACQUISITION_R13B_NON_EVALUABLE",
+            } else 2
         from graph_swarm.research.gate_a1_acquisition import (
             run_gate_a1_acquisition_r13b,
         )

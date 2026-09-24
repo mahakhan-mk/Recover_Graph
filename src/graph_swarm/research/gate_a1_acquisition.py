@@ -2343,6 +2343,36 @@ def run_gate_a1_acquisition_r13b(
     )
 
 
+def run_gate_a1_pattern_retry_r13b(
+    project_root: Path,
+    *,
+    resume_root: Path,
+    task_id: str,
+) -> tuple[str, Path]:
+    """Retry only downstream recovery-pattern processing for one R13b task."""
+    configuration = load_experiment_configuration(
+        project_root / R13B_CONFIG,
+        project_root=project_root,
+    )
+    _validate_r13b_harness_configuration(configuration)
+    from experiments.sprint3 import _configured_runtime
+    from graph_swarm.research.gate_a1_r13 import (
+        run_gate_a1_pattern_retry_r13b as _run_gate_a1_pattern_retry_r13b,
+    )
+
+    configured = _configured_runtime(
+        configuration,
+        project_root / "benchmark/workspaces",
+        project_root / "research/evidence/workspaces",
+    )
+    return _run_gate_a1_pattern_retry_r13b(
+        project_root,
+        resume_root=resume_root,
+        task_id=task_id,
+        _configuration=configured,
+    )
+
+
 def run_gate_a1_acquisition(project_root: Path) -> tuple[str, Path]:
     """Run exactly T001-T005 acquisition and return final status plus artifact root."""
     project_root = project_root.expanduser().resolve()
@@ -2457,4 +2487,5 @@ __all__ = [
     "run_gate_a1_acquisition_r12",
     "run_gate_a1_acquisition_r13",
     "run_gate_a1_acquisition_r13b",
+    "run_gate_a1_pattern_retry_r13b",
 ]
