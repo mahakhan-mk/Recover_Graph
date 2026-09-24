@@ -1,0 +1,22 @@
+experiment_id: GS-E003
+rollout: track_a_gate_a1_acquisition_r7
+config_version: gate-a1-r7-v1
+revision_reason: objective_coverage_compatibility_after_r6_preflight
+model_visible_tool_output_chars: 16000
+objective_coverage_policy: no_cov
+objective_coverage_policy_selection_version: pytest_help_option_discovery_v1
+workspace_line_ending_policy: git_aware_line_endings_v1
+development: true
+pilot: true
+model_config: configs/models/openrouter_coding.yaml
+task_manifest: benchmark/manifests/pilot.jsonl
+task_problems: benchmark/annotations/recurrence_validation.csv
+artifact_root: research/evidence/results
+workspace_baseline_root: benchmark/workspaces
+workspace_execution_root: research/evidence/workspaces
+conditions:
+  - B0
+limits:
+  max_actions: 40
+  max_requests: 48
+  timeout_seconds: 600
