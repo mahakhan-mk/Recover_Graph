@@ -378,6 +378,9 @@ def test_r13b_controlled_retry_preserves_initial_attempt_and_uses_runtime_overri
     assert cast(str, calls[0]["run_id"]) != "initial-run"
     assert cast(float, calls[0]["agent_timeout_seconds"]) == 3600
     assert cast(float, calls[0]["objective_timeout_seconds"]) == 900
+    guard = cast(Any, calls[0]["pre_mutation_guard"])
+    assert guard.config.effective_nudge_seconds == 1200
+    assert guard.config.effective_abort_seconds == 1800
     retry_root = root / "tasks" / "GS-T002" / "retries" / "attempt-001"
     assert (retry_root / "started.json").is_file()
     assert (retry_root / "completed.json").is_file()

@@ -15,6 +15,8 @@ from pydantic_ai.models import Model, ModelRequestParameters, StreamedResponse
 from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 
+from graph_swarm.agent.stagnation import PreMutationStagnationGuard
+
 MIN_PROVIDER_REQUEST_INTERVAL_SECONDS = 5.0
 MAX_NOMINAL_PROVIDER_REQUESTS_PER_MINUTE = 12.0
 
@@ -82,10 +84,20 @@ class ProviderRequestPacing:
 class ProviderPacingModel(WrapperModel):
     """Apply pacing immediately before every non-streaming or streaming request."""
 
-    def __init__(self, wrapped: Model, pacing: ProviderRequestPacing, run_id: str) -> None:
+    def __init__(
+        self,
+        wrapped: Model,
+        pacing: ProviderRequestPacing,
+        run_id: str,
+        *,
+        pre_mutation_guard: PreMutationStagnationGuard | None = None,
+        dependencies: Any | None = None,
+    ) -> None:
         super().__init__(wrapped)
         self.pacing = pacing
         self.run_id = run_id
+        self.pre_mutation_guard = pre_mutation_guard
+        self.dependencies = dependencies
 
     async def request(
         self,
@@ -94,6 +106,11 @@ class ProviderPacingModel(WrapperModel):
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
         await self.pacing.wait_for_request(self.run_id)
+        if self.pre_mutation_guard is not None and self.dependencies is not None:
+            messages = self.pre_mutation_guard.before_model_request(
+                messages,
+                self.dependencies,
+            )
         return await self.wrapped.request(messages, model_settings, model_request_parameters)
 
     @asynccontextmanager
@@ -105,6 +122,11 @@ class ProviderPacingModel(WrapperModel):
         run_context: RunContext[Any] | None = None,
     ) -> AsyncGenerator[StreamedResponse, None]:
         await self.pacing.wait_for_request(self.run_id)
+        if self.pre_mutation_guard is not None and self.dependencies is not None:
+            messages = self.pre_mutation_guard.before_model_request(
+                messages,
+                self.dependencies,
+            )
         async with self.wrapped.request_stream(
             messages,
             model_settings,
@@ -118,6 +140,9 @@ def attach_provider_request_pacing(
     agent: Any,
     pacing: ProviderRequestPacing,
     run_id: str,
+    *,
+    pre_mutation_guard: PreMutationStagnationGuard | None = None,
+    dependencies: Any | None = None,
 ) -> None:
     """Wrap an agent's selected model at the PydanticAI request boundary."""
     model = agent.model
@@ -126,9 +151,17 @@ def attach_provider_request_pacing(
     if isinstance(model, ProviderPacingModel):
         if model.pacing is pacing:
             model.run_id = run_id
+            model.pre_mutation_guard = pre_mutation_guard
+            model.dependencies = dependencies
             return
         model = model.wrapped
-    agent.model = ProviderPacingModel(cast(Model[Any], model), pacing, run_id)
+    agent.model = ProviderPacingModel(
+        cast(Model[Any], model),
+        pacing,
+        run_id,
+        pre_mutation_guard=pre_mutation_guard,
+        dependencies=dependencies,
+    )
 
 
 __all__ = [

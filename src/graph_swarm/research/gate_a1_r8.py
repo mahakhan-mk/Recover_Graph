@@ -23,6 +23,7 @@ from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
 
 from graph_swarm.agent.coding_agent import AgentWallClockTimeoutError
 from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.stagnation import PreMutationStagnationGuard
 from graph_swarm.detection.failure_detector import detect_failure
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.events import AgentEvent
@@ -322,6 +323,7 @@ class R8ObjectiveController:
         repository: ShortLivedNeo4jRepository | None = None,
         run: Any | None = None,
         environment: Any | None = None,
+        pre_mutation_guard: PreMutationStagnationGuard | None = None,
     ) -> None:
         self.task = task
         self.workspace = workspace
@@ -330,6 +332,7 @@ class R8ObjectiveController:
         self.repository = repository
         self.run = run
         self.environment = environment
+        self.pre_mutation_guard = pre_mutation_guard
         self._before: dict[str, str] = {}
         self.objective_checks = 0
         self.objective_result = False
@@ -367,8 +370,12 @@ class R8ObjectiveController:
                         after_fingerprint=cast(str, after),
                     )
                 )
+                if self.pre_mutation_guard is not None:
+                    self.pre_mutation_guard.observe_dependencies(self.dependencies)
             self._persist_event(event)
             self.check_objective(event)
+        if self.pre_mutation_guard is not None:
+            self.pre_mutation_guard.after_tool_event(self.dependencies)
         if self.objective_success_pending_evidence and self._trusted_recovery_complete():
             self._persist_event(event)
             self.termination_reason = "objective_satisfied_with_trusted_recovery_evidence"
@@ -670,6 +677,7 @@ def _run_r8_task(
     runtime_timeout_overrides: dict[str, dict[str, object]] | None = None,
     attempt_number: int | None = None,
     attempt_kind: str | None = None,
+    pre_mutation_guard: PreMutationStagnationGuard | None = None,
 ) -> tuple[dict[str, object], Any]:
     import time
     from datetime import UTC, datetime
@@ -733,6 +741,7 @@ def _run_r8_task(
         repository=memory,
         run=run,
         environment=environment_context,
+        pre_mutation_guard=pre_mutation_guard,
     )
     attach_r8_objective_controller(dependencies, controller)
     result: Any = None
@@ -770,6 +779,8 @@ def _run_r8_task(
                 system_prompt=system_prompt,
             )
             agent_started = time.perf_counter()
+            if pre_mutation_guard is not None:
+                pre_mutation_guard.start()
             result = run_coding_agent(
                 agent,
                 settings,
@@ -783,6 +794,7 @@ def _run_r8_task(
                 model_settings=cast(ModelSettings, configuration.model.settings),
                 request_pacing=pacing,
                 disable_request_limit=True,
+                pre_mutation_guard=pre_mutation_guard,
             )
     except ObjectiveSatisfied:
         pass
@@ -941,6 +953,11 @@ def _run_r8_task(
         "acquisition_reason": acquisition_reason,
         "termination_reason": controller.termination_reason
         or (
+            "pre_mutation_stagnation"
+            if runtime_error is not None
+            and getattr(runtime_error, "termination_reason", None)
+            == "pre_mutation_stagnation"
+            else
             "wall_clock_timeout"
             if runtime_error is not None
             and getattr(runtime_error, "timeout_layer", None) == "agent_wall_clock"
@@ -1070,6 +1087,8 @@ def _run_r8_task(
         )
         if runtime_timeout_overrides is not None:
             artifact["runtime_timeout_overrides"] = runtime_timeout_overrides
+        if pre_mutation_guard is not None:
+            artifact.update(pre_mutation_guard.provenance())
         if attempt_number is not None:
             artifact["attempt"] = attempt_number
         if attempt_kind is not None:

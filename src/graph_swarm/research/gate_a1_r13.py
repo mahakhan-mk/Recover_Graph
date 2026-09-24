@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from graph_swarm.agent.stagnation import PreMutationStagnationGuard
 from graph_swarm.graph.neo4j_repository import EntityNotFoundError
 from graph_swarm.memory.recovery_abstraction import (
     OBJECTIVE_ANCHORED_RECOVERY_EVIDENCE_SOURCE,
@@ -43,7 +44,9 @@ from graph_swarm.research.gate_a1_acquisition import (
     _validate_preflight_configuration,
     _validate_r13_harness_configuration,
     _write_json,
+    pre_mutation_stagnation_provenance,
     r13_runtime_timeout_resolutions,
+    r13b_pre_mutation_stagnation_resolution,
     runtime_timeout_provenance,
 )
 from graph_swarm.research.gate_a1_r8 import (
@@ -281,6 +284,9 @@ def run_gate_a1_acquisition_r13(
     else:
         configuration = _configuration
     timeout_resolutions = r13_runtime_timeout_resolutions(configuration)
+    pre_mutation_config = (
+        r13b_pre_mutation_stagnation_resolution() if _revision == "R13b" else None
+    )
     initial_attempt: dict[str, object] | None = None
 
     if resume_root is None:
@@ -391,6 +397,8 @@ def run_gate_a1_acquisition_r13(
                 "revision_reason": configuration.config.revision_reason,
             }
         )
+        if pre_mutation_config is not None:
+            manifest.update(pre_mutation_stagnation_provenance(pre_mutation_config))
     manifest_path = artifact_root / "manifest.json"
     if resume_root is not None:
         existing = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -401,6 +409,8 @@ def run_gate_a1_acquisition_r13(
         if existing.get("configuration_hash") != configuration_hash:
             raise ValueError("R13 resume configuration hash differs")
         manifest = cast(dict[str, object], existing)
+        if pre_mutation_config is not None:
+            manifest.update(pre_mutation_stagnation_provenance(pre_mutation_config))
     else:
         _write_json(manifest_path, manifest)
 
@@ -457,6 +467,11 @@ def run_gate_a1_acquisition_r13(
             runtime_timeout_overrides=runtime_timeout_provenance(timeout_resolutions),
             attempt_number=2,
             attempt_kind="controlled_retry",
+            pre_mutation_guard=(
+                None
+                if pre_mutation_config is None
+                else PreMutationStagnationGuard(pre_mutation_config)
+            ),
         )
         retry_completed = dict(task_artifact)
         retry_completed.update({"attempt": 2, "kind": "controlled_retry"})
@@ -522,6 +537,11 @@ def run_gate_a1_acquisition_r13(
                 agent_timeout_seconds=timeout_resolutions["agent"].effective_seconds,
                 objective_timeout_seconds=timeout_resolutions["objective"].effective_seconds,
                 runtime_timeout_overrides=runtime_timeout_provenance(timeout_resolutions),
+                pre_mutation_guard=(
+                    None
+                    if pre_mutation_config is None
+                    else PreMutationStagnationGuard(pre_mutation_config)
+                ),
             )
             task_records.append(task_artifact)
             _write_json(

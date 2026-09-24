@@ -30,6 +30,7 @@ from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.agent.model_output import model_visible_action_result
 from graph_swarm.agent.pacing import ProviderRequestPacing, attach_provider_request_pacing
 from graph_swarm.agent.prompts import ROLLOUT1_SYSTEM_PROMPT
+from graph_swarm.agent.stagnation import PreMutationStagnationGuard
 from graph_swarm.agent.tools.edit_file import edit_file as controlled_edit_file
 from graph_swarm.agent.tools.read_file import (
     DEFAULT_READ_FILE_LENGTH,
@@ -269,6 +270,7 @@ def run_coding_agent(
     model_settings: ModelSettings | None = None,
     request_pacing: ProviderRequestPacing | None = None,
     disable_request_limit: bool = False,
+    pre_mutation_guard: PreMutationStagnationGuard | None = None,
 ) -> AgentRunResult[str]:
     """Run a constructed agent with isolated identity and optional bounds."""
     if timeout_seconds is not None:
@@ -287,7 +289,21 @@ def run_coding_agent(
             )
         )
     if request_pacing is not None:
-        attach_provider_request_pacing(agent, request_pacing, dependencies.run_id)
+        attach_provider_request_pacing(
+            agent,
+            request_pacing,
+            dependencies.run_id,
+            pre_mutation_guard=pre_mutation_guard,
+            dependencies=dependencies,
+        )
+    elif pre_mutation_guard is not None:
+        attach_provider_request_pacing(
+            agent,
+            ProviderRequestPacing(),
+            dependencies.run_id,
+            pre_mutation_guard=pre_mutation_guard,
+            dependencies=dependencies,
+        )
     try:
         return agent.run_sync(
             user_prompt,
@@ -319,10 +335,25 @@ async def run_coding_agent_async(
     model_settings: ModelSettings | None = None,
     request_pacing: ProviderRequestPacing | None = None,
     disable_request_limit: bool = False,
+    pre_mutation_guard: PreMutationStagnationGuard | None = None,
 ) -> AgentRunResult[str]:
     """Async bounded variant used by the sequential Track B runner."""
     if request_pacing is not None:
-        attach_provider_request_pacing(agent, request_pacing, dependencies.run_id)
+        attach_provider_request_pacing(
+            agent,
+            request_pacing,
+            dependencies.run_id,
+            pre_mutation_guard=pre_mutation_guard,
+            dependencies=dependencies,
+        )
+    elif pre_mutation_guard is not None:
+        attach_provider_request_pacing(
+            agent,
+            ProviderRequestPacing(),
+            dependencies.run_id,
+            pre_mutation_guard=pre_mutation_guard,
+            dependencies=dependencies,
+        )
     try:
         run = agent.run(
             user_prompt,
@@ -338,16 +369,53 @@ async def run_coding_agent_async(
                 disable_request_limit=disable_request_limit,
             ),
         )
-        if timeout_seconds is None:
-            return await run
-        deadline = asyncio.timeout(timeout_seconds)
-        try:
-            async with deadline:
+        if pre_mutation_guard is None:
+            if timeout_seconds is None:
                 return await run
+            deadline = asyncio.timeout(timeout_seconds)
+            try:
+                async with deadline:
+                    return await run
+            except TimeoutError as error:
+                if deadline.expired():
+                    raise AgentWallClockTimeoutError(timeout_seconds) from error
+                raise ModelRequestTimeoutError(MODEL_REQUEST_TIMEOUT_SECONDS) from error
+
+        run_task = asyncio.create_task(run)
+        guard_task = asyncio.create_task(pre_mutation_guard.wait_for_abort())
+        deadline = asyncio.timeout(timeout_seconds) if timeout_seconds is not None else None
+        try:
+            if timeout_seconds is None:
+                done, _ = await asyncio.wait(
+                    {run_task, guard_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            else:
+                assert deadline is not None
+                async with deadline:
+                    done, _ = await asyncio.wait(
+                        {run_task, guard_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+            if guard_task in done:
+                guard_error = guard_task.exception()
+                if guard_error is not None:
+                    run_task.cancel()
+                    await asyncio.gather(run_task, return_exceptions=True)
+                    raise guard_error
+            return await run_task
         except TimeoutError as error:
-            if deadline.expired():
+            if deadline is not None and deadline.expired():
+                assert timeout_seconds is not None
                 raise AgentWallClockTimeoutError(timeout_seconds) from error
             raise ModelRequestTimeoutError(MODEL_REQUEST_TIMEOUT_SECONDS) from error
+        finally:
+            if not guard_task.done():
+                guard_task.cancel()
+                await asyncio.gather(guard_task, return_exceptions=True)
+            if not run_task.done():
+                run_task.cancel()
+                await asyncio.gather(run_task, return_exceptions=True)
     finally:
         finalize_pending_advice(dependencies)
 

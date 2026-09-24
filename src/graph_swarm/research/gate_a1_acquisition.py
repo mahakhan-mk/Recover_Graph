@@ -36,6 +36,7 @@ from experiments.sprint3 import (
 from graph_swarm.agent.coding_agent import create_coding_agent, run_coding_agent
 from graph_swarm.agent.dependencies import AgentDependencies
 from graph_swarm.agent.pacing import ProviderRequestPacing
+from graph_swarm.agent.stagnation import PreMutationStagnationConfig
 from graph_swarm.domain.environment import EnvironmentContext
 from graph_swarm.domain.runs import Run
 from graph_swarm.domain.tasks import Task
@@ -174,6 +175,10 @@ R13B_AGENT_TIMEOUT_SECONDS = 900
 R13B_TIMEOUT_SECONDS = 900
 AGENT_TIMEOUT_ENVIRONMENT_VARIABLE = "GRAPH_SWARM_AGENT_TIMEOUT_SECONDS"
 OBJECTIVE_TIMEOUT_ENVIRONMENT_VARIABLE = "GRAPH_SWARM_OBJECTIVE_TIMEOUT_SECONDS"
+PRE_MUTATION_NUDGE_ENVIRONMENT_VARIABLE = "GRAPH_SWARM_PRE_MUTATION_NUDGE_SECONDS"
+PRE_MUTATION_ABORT_ENVIRONMENT_VARIABLE = "GRAPH_SWARM_PRE_MUTATION_ABORT_SECONDS"
+R13B_PRE_MUTATION_NUDGE_SECONDS = 1200
+R13B_PRE_MUTATION_ABORT_SECONDS = 1800
 
 
 @dataclasses.dataclass(frozen=True)
@@ -268,6 +273,50 @@ def runtime_timeout_provenance(
     resolutions: Mapping[str, RuntimeTimeoutResolution],
 ) -> dict[str, dict[str, object]]:
     return {name: resolution.as_dict() for name, resolution in resolutions.items()}
+
+
+def r13b_pre_mutation_stagnation_resolution(
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> PreMutationStagnationConfig:
+    """Resolve and validate the R13b pre-mutation guard policy."""
+    nudge = resolve_runtime_timeout(
+        R13B_PRE_MUTATION_NUDGE_SECONDS,
+        PRE_MUTATION_NUDGE_ENVIRONMENT_VARIABLE,
+        environ=environ,
+    )
+    abort = resolve_runtime_timeout(
+        R13B_PRE_MUTATION_ABORT_SECONDS,
+        PRE_MUTATION_ABORT_ENVIRONMENT_VARIABLE,
+        environ=environ,
+    )
+    return PreMutationStagnationConfig(
+        configured_nudge_seconds=nudge.configured_seconds,
+        effective_nudge_seconds=nudge.effective_seconds,
+        nudge_env_var=nudge.environment_variable,
+        nudge_override_applied=nudge.override_applied,
+        configured_abort_seconds=abort.configured_seconds,
+        effective_abort_seconds=abort.effective_seconds,
+        abort_env_var=abort.environment_variable,
+        abort_override_applied=abort.override_applied,
+    )
+
+
+def pre_mutation_stagnation_provenance(
+    config: PreMutationStagnationConfig,
+) -> dict[str, object]:
+    """Return static guard configuration provenance for manifests."""
+    return {
+        "pre_mutation_stagnation_policy": config.policy,
+        "configured_nudge_seconds": config.configured_nudge_seconds,
+        "effective_nudge_seconds": config.effective_nudge_seconds,
+        "nudge_env_var": config.nudge_env_var,
+        "nudge_override_applied": config.nudge_override_applied,
+        "configured_abort_seconds": config.configured_abort_seconds,
+        "effective_abort_seconds": config.effective_abort_seconds,
+        "abort_env_var": config.abort_env_var,
+        "abort_override_applied": config.abort_override_applied,
+    }
 
 
 class GateA1AcquisitionPreflightError(RuntimeError):

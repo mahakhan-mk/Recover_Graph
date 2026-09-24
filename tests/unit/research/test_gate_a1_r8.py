@@ -12,6 +12,10 @@ from neo4j.exceptions import SessionExpired
 
 from experiments.sprint3 import _remove_eol_only_worktree_noise
 from graph_swarm.agent.dependencies import AgentDependencies
+from graph_swarm.agent.stagnation import (
+    PreMutationStagnationConfig,
+    PreMutationStagnationGuard,
+)
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
@@ -155,11 +159,26 @@ def test_mutation_controller_checks_only_after_mutation_and_continues_on_failure
 ) -> None:
     dependencies = AgentDependencies(tmp_path, "run-1", "GS-T001")
     checks: list[int] = []
+    guard = PreMutationStagnationGuard(
+        PreMutationStagnationConfig(
+            configured_nudge_seconds=1200,
+            effective_nudge_seconds=1200,
+            nudge_env_var="NUDGE",
+            nudge_override_applied=False,
+            configured_abort_seconds=1800,
+            effective_abort_seconds=1800,
+            abort_env_var="ABORT",
+            abort_override_applied=False,
+        ),
+        monotonic=lambda: 0.0,
+    )
+    guard.start(0.0)
     controller = R8ObjectiveController(
         task=SimpleNamespace(id="GS-T001"),
         workspace=tmp_path,
         objective=lambda task, workspace: checks.append(1) or False,
         dependencies=dependencies,
+        pre_mutation_guard=guard,
     )
     attach_r8_objective_controller(dependencies, controller)
     action = PlannedAction(
@@ -200,6 +219,8 @@ def test_mutation_controller_checks_only_after_mutation_and_continues_on_failure
     controller.after_event(changed_event)
     assert checks == [1]
     assert controller.objective_success is False
+    assert guard.trusted_mutation_observed is True
+    assert guard.first_trusted_mutation_action_id == "action-2"
 
 
 def test_objective_success_persists_action_before_controlled_completion(tmp_path: Path) -> None:
