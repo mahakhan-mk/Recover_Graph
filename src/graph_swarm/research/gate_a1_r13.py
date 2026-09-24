@@ -63,6 +63,9 @@ R13B_RETRY_POLICY = "single_explicit_failed_task_retry_v1"
 R13B_RETRY_REASON = "extended_agent_wall_clock_after_documented_timeout"
 R13B_PATTERN_RETRY_POLICY = "single_explicit_pattern_retry_v1"
 R13B_PATTERN_RETRY_REASON = "retry_recovery_abstraction_after_structured_output_failure"
+R13B_MANIFEST_REFRESH_MARKER = (
+    "READY_TO_REFRESH_R13B_MANIFEST_AND_PROCEED_TO_GS_T005"
+)
 
 
 def _r13b_retry_root(artifact_root: Path, task_id: str) -> Path:
@@ -133,20 +136,79 @@ def _r13b_selected_task_record(
                 selected = raw.get("selected_task_record")
                 if isinstance(selected, dict):
                     return cast(dict[str, object], selected)
-    retry = manifest.get("retry")
-    if isinstance(retry, dict) and retry.get("task_id") == task_id:
-        retry_root = _r13b_retry_root(artifact_root, task_id)
-        completed_path = retry_root / "completed.json"
-        if completed_path.is_file():
-            raw: object = json.loads(completed_path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                return cast(dict[str, object], raw)
+    retry_root = _r13b_retry_root(artifact_root, task_id)
+    completed_path = retry_root / "completed.json"
+    if completed_path.is_file():
+        raw = json.loads(completed_path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            retry = cast(dict[str, object], raw)
+            if (
+                retry.get("task_id") == task_id
+                and retry.get("attempt") == 2
+                and retry.get("kind") == "controlled_retry"
+            ):
+                return retry
     completed_path = _r2_task_marker(artifact_root, task_id, "completed.json")
     if completed_path.is_file():
         raw = json.loads(completed_path.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
             return cast(dict[str, object], raw)
     return None
+
+
+def _r13b_effective_task_records(
+    artifact_root: Path,
+    manifest: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Return one selected completed record for each frozen logical task ID."""
+    return [
+        selected
+        for task_id in ACQUISITION_TASK_IDS
+        if (selected := _r13b_selected_task_record(artifact_root, task_id, manifest))
+        is not None
+    ]
+
+
+def refresh_r13b_manifest(artifact_root: Path) -> tuple[str, Path]:
+    """Refresh R13b bookkeeping from stored artifacts only.
+
+    This path deliberately does not load experiment configuration or construct
+    agent, provider, abstraction, embedding, workspace, or Neo4j components.
+    """
+    artifact_root = artifact_root.expanduser().resolve()
+    if not artifact_root.name.startswith("acquisition-r13b-"):
+        raise ValueError("R13b manifest refresh requires an acquisition-r13b-* root")
+    manifest_path = artifact_root / "manifest.json"
+    if not manifest_path.is_file():
+        raise ValueError("R13b manifest refresh root is missing manifest.json")
+    raw_manifest: object = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(raw_manifest, dict):
+        raise ValueError("R13b manifest is not an object")
+    manifest = cast(dict[str, object], raw_manifest)
+    if manifest.get("run_revision") != "R13b":
+        raise ValueError("R13b manifest refresh requires a R13b root")
+    if manifest.get("config_version") != "gate-a1-r13b-v2":
+        raise ValueError("R13b manifest refresh requires config_version=gate-a1-r13b-v2")
+
+    task_records = _r13b_effective_task_records(artifact_root, manifest)
+    completed_task_ids = tuple(
+        task_id
+        for task_id in ACQUISITION_TASK_IDS
+        if _r2_task_marker(artifact_root, task_id, "completed.json").is_file()
+    )
+    status, corpus_ready, eligible_acquisition_tasks = r8_acquisition_readiness(
+        task_records,
+        completed_task_ids,
+        ACQUISITION_TASK_IDS,
+    )
+    manifest["tasks"] = task_records
+    manifest["completed_tasks"] = len(completed_task_ids)
+    manifest["completed_task_ids"] = list(completed_task_ids)
+    manifest["eligible_acquisition_tasks"] = eligible_acquisition_tasks
+    manifest["acquisition_corpus_ready"] = corpus_ready
+    manifest["status"] = status.replace("_R8", "_R13B")
+    _write_json(manifest_path, manifest)
+    return R13B_MANIFEST_REFRESH_MARKER, artifact_root
 
 
 def _r13b_pattern_retry_root(artifact_root: Path, task_id: str) -> Path:
@@ -490,12 +552,7 @@ def run_gate_a1_acquisition_r13(
                 _r13b_attempt_summary(retry_completed, attempt=2, kind="controlled_retry"),
             ],
         }
-        task_records = [
-            selected
-            for case in cases
-            if (selected := _r13b_selected_task_record(artifact_root, case.task.id, manifest))
-            is not None
-        ]
+        task_records = _r13b_effective_task_records(artifact_root, manifest)
     else:
         for case in cases:
             task_id = case.task.id
@@ -552,6 +609,7 @@ def run_gate_a1_acquisition_r13(
             manifest["tasks"] = task_records
             _write_json(manifest_path, manifest)
 
+    task_records = _r13b_effective_task_records(artifact_root, manifest)
     manifest["tasks"] = task_records
     completed_task_ids = tuple(
         task_id
@@ -769,12 +827,7 @@ def run_gate_a1_pattern_retry_r13b(
         ],
         "selected_attempt": 1,
     }
-    task_records = [
-        record
-        for candidate in ACQUISITION_TASK_IDS
-        if (record := _r13b_selected_task_record(artifact_root, candidate, manifest))
-        is not None
-    ]
+    task_records = _r13b_effective_task_records(artifact_root, manifest)
     completed_task_ids = tuple(
         candidate
         for candidate in ACQUISITION_TASK_IDS
@@ -801,4 +854,6 @@ __all__ = [
     "R13ObjectiveController",
     "run_gate_a1_acquisition_r13",
     "run_gate_a1_pattern_retry_r13b",
+    "refresh_r13b_manifest",
+    "R13B_MANIFEST_REFRESH_MARKER",
 ]

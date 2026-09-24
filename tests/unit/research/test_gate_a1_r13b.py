@@ -269,6 +269,187 @@ def test_r13b_retry_readiness_uses_selected_logical_attempt() -> None:
     assert r13.r8_acquisition_readiness(initial_records, task_ids[:2], task_ids)[2] == 1
     assert r13.r8_acquisition_readiness(retry_success, task_ids[:2], task_ids)[2] == 2
     assert r13.r8_acquisition_readiness(retry_failure, task_ids[:2], task_ids)[2] == 1
+    assert r13.r8_acquisition_readiness(
+        retry_success + [{"task_id": "GS-T002", "acquisition_success": True}],
+        task_ids[:2],
+        task_ids,
+    )[2] == 2
+
+
+def test_r13b_effective_records_select_each_task_local_retry_once(tmp_path: Path) -> None:
+    root = tmp_path / "acquisition-r13b-20260924T020000Z"
+    manifest: dict[str, object] = {
+        "run_revision": "R13b",
+        "config_version": "gate-a1-r13b-v2",
+        "retry": {
+            "task_id": "GS-T004",
+            "selected_attempt": 2,
+        },
+        "pattern_retry": {
+            "task_id": "GS-T003",
+            "selected_attempt": 1,
+        },
+    }
+
+    def write(path: Path, record: dict[str, object]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    for task_id in ("GS-T001", "GS-T002", "GS-T003", "GS-T004"):
+        write(
+            root / "tasks" / task_id / "completed.json",
+            {"task_id": task_id, "acquisition_success": task_id == "GS-T001"},
+        )
+    write(
+        root / "tasks" / "GS-T002" / "retries" / "attempt-001" / "completed.json",
+        {
+            "task_id": "GS-T002",
+            "attempt": 2,
+            "kind": "controlled_retry",
+            "acquisition_success": True,
+        },
+    )
+    write(
+        root / "tasks" / "GS-T003" / "pattern-retries" / "attempt-001" / "completed.json",
+        {
+            "selected_task_record": {
+                "task_id": "GS-T003",
+                "acquisition_success": True,
+            }
+        },
+    )
+    write(
+        root / "tasks" / "GS-T004" / "retries" / "attempt-001" / "completed.json",
+        {
+            "task_id": "GS-T004",
+            "attempt": 2,
+            "kind": "controlled_retry",
+            "acquisition_success": True,
+        },
+    )
+
+    records = r13._r13b_effective_task_records(root, manifest)  # pyright: ignore[reportPrivateUsage]
+
+    assert [record["task_id"] for record in records] == [
+        "GS-T001",
+        "GS-T002",
+        "GS-T003",
+        "GS-T004",
+    ]
+    assert all(record["acquisition_success"] is True for record in records)
+    assert r13.r8_acquisition_readiness(
+        records,
+        ("GS-T001", "GS-T002", "GS-T003", "GS-T004"),
+        acquisition.ACQUISITION_TASK_IDS,
+    ) == ("READY_TO_RESUME_GATE_A1_ACQUISITION_R8", False, 4)
+
+
+def test_r13b_manifest_refresh_is_bookkeeping_only_and_preserves_task_artifacts(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "acquisition-r13b-20260924T030000Z"
+    manifest: dict[str, object] = {
+        "run_revision": "R13b",
+        "config_version": "gate-a1-r13b-v2",
+        "tasks": [],
+        "completed_tasks": 3,
+        "eligible_acquisition_tasks": 3,
+        "acquisition_corpus_ready": False,
+        "pattern_retry": {"task_id": "GS-T003", "selected_attempt": 1},
+    }
+    root.mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    def write_task(task_id: str, record: dict[str, object]) -> Path:
+        completed = root / "tasks" / task_id / "completed.json"
+        completed.parent.mkdir(parents=True, exist_ok=True)
+        completed.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+        return completed
+
+    task_files = [
+        write_task(
+            task_id,
+            {"task_id": task_id, "acquisition_success": task_id == "GS-T001"},
+        )
+        for task_id in ("GS-T001", "GS-T002", "GS-T003", "GS-T004")
+    ]
+    retry = root / "tasks" / "GS-T002" / "retries" / "attempt-001" / "completed.json"
+    retry.parent.mkdir(parents=True, exist_ok=True)
+    retry.write_text(
+        json.dumps(
+            {
+                "task_id": "GS-T002",
+                "attempt": 2,
+                "kind": "controlled_retry",
+                "acquisition_success": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    pattern_retry = (
+        root
+        / "tasks"
+        / "GS-T003"
+        / "pattern-retries"
+        / "attempt-001"
+        / "completed.json"
+    )
+    pattern_retry.parent.mkdir(parents=True, exist_ok=True)
+    pattern_retry.write_text(
+        json.dumps(
+            {
+                "selected_task_record": {
+                    "task_id": "GS-T003",
+                    "acquisition_success": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    controlled_retry = (
+        root / "tasks" / "GS-T004" / "retries" / "attempt-001" / "completed.json"
+    )
+    controlled_retry.parent.mkdir(parents=True, exist_ok=True)
+    controlled_retry.write_text(
+        json.dumps(
+            {
+                "task_id": "GS-T004",
+                "attempt": 2,
+                "kind": "controlled_retry",
+                "acquisition_success": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    before = {path: hashlib.sha256(path.read_bytes()).digest() for path in task_files}
+
+    marker, refreshed_root = r13.refresh_r13b_manifest(root)
+
+    refreshed = json.loads((refreshed_root / "manifest.json").read_text(encoding="utf-8"))
+    assert marker == r13.R13B_MANIFEST_REFRESH_MARKER
+    assert refreshed["completed_tasks"] == 4
+    assert refreshed["completed_task_ids"] == [
+        "GS-T001",
+        "GS-T002",
+        "GS-T003",
+        "GS-T004",
+    ]
+    assert refreshed["eligible_acquisition_tasks"] == 4
+    assert refreshed["acquisition_corpus_ready"] is False
+    assert refreshed["status"] == "READY_TO_RESUME_GATE_A1_ACQUISITION_R13B"
+    assert {
+        record["task_id"]: record["acquisition_success"]
+        for record in refreshed["tasks"]
+    } == {
+        "GS-T001": True,
+        "GS-T002": True,
+        "GS-T003": True,
+        "GS-T004": True,
+    }
+    assert all(
+        hashlib.sha256(path.read_bytes()).digest() == digest
+        for path, digest in before.items()
+    )
 
 
 def test_r13b_controlled_retry_preserves_initial_attempt_and_uses_runtime_overrides(

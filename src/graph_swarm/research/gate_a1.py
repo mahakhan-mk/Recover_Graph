@@ -1043,6 +1043,12 @@ def main() -> int:
         metavar="RUN_ROOT",
         help="resume Gate A1 Acquisition R13b without rerunning started tasks",
     )
+    modes.add_argument(
+        "--refresh-r13b-manifest",
+        type=Path,
+        metavar="RUN_ROOT",
+        help="refresh only R13b manifest bookkeeping from stored task artifacts",
+    )
     parser.add_argument(
         "--retry-r13b-task",
         metavar="TASK_ID",
@@ -1103,6 +1109,16 @@ def main() -> int:
         parser.error("--retry-r13b-pattern cannot be combined with --max-new-tasks")
     if args.retry_r13b_pattern is not None and args.retry_r13b_task is not None:
         parser.error("--retry-r13b-pattern cannot be combined with --retry-r13b-task")
+    if args.refresh_r13b_manifest is not None and (
+        args.retry_r13b_task is not None or args.retry_r13b_pattern is not None
+    ):
+        parser.error("--refresh-r13b-manifest cannot be combined with an R13b retry")
+    if args.refresh_r13b_manifest is not None:
+        from graph_swarm.research.gate_a1_r13 import refresh_r13b_manifest
+
+        marker, _artifact_root = refresh_r13b_manifest(args.refresh_r13b_manifest)
+        print(marker)
+        return 0
     if args.prepare_environments:
         print(prepare_gate_a1_environments(project_root))
         return 0

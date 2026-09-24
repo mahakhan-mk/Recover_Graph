@@ -147,7 +147,14 @@ def r8_acquisition_readiness(
     task_ids: tuple[str, ...],
 ) -> tuple[str, bool, int]:
     """Return readiness using completed markers and eligible corpus state."""
-    eligible_tasks = sum(bool(record.get("acquisition_success")) for record in task_records)
+    eligible_task_ids = {
+        record.get("task_id")
+        for record in task_records
+        if isinstance(record.get("task_id"), str)
+        and record.get("task_id") in task_ids
+        and bool(record.get("acquisition_success"))
+    }
+    eligible_tasks = sum(task_id in eligible_task_ids for task_id in task_ids)
     all_completed = completed_task_ids == task_ids
     if all_completed and eligible_tasks > 0:
         return "READY_FOR_GATE_A1_RETRIEVAL_EVALUATION", True, eligible_tasks
