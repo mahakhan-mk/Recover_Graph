@@ -902,7 +902,7 @@ def test_r7_pytest_cov_help_selects_no_cov_for_the_objective(
     ]
 
 
-def test_r7_coverage_enforcement_without_no_cov_fails_closed(
+def test_r7_coverage_enforcement_without_no_cov_clears_addopts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -917,13 +917,71 @@ def test_r7_coverage_enforcement_without_no_cov_fails_closed(
         coverage_policy_selection_version=sprint3.OBJECTIVE_COVERAGE_POLICY_SELECTION_VERSION,
     )
 
-    def fake_run(*_args: object, **_kwargs: object) -> object:
-        return type("Completed", (), {"returncode": 0, "stdout": "-q", "stderr": ""})()
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(command: tuple[str, ...], **_kwargs: object) -> object:
+        commands.append(command)
+        if len(commands) == 1:
+            return type(
+                "Completed",
+                (),
+                {"returncode": 0, "stdout": "pytest help", "stderr": ""},
+            )()
+        return type(
+            "Completed",
+            (),
+            {"returncode": 1, "stdout": "FAILED test_target.py", "stderr": ""},
+        )()
 
     monkeypatch.setattr(sprint3.subprocess, "run", fake_run)
 
-    with pytest.raises(BenchmarkPreflightError, match="active coverage enforcement"):
-        objective.preflight(_case(2).task, tmp_path)
+    observation = objective.preflight(_case(2).task, tmp_path)
+
+    assert observation.status == "test_failure"
+    assert objective.effective_coverage_policy("GS-T006") == "no_cov_addopts"
+    assert commands == [
+        ("venv-python", "-m", "pytest", "--help"),
+        ("venv-python", "-m", "pytest", "-o", "addopts=", "test_target.py", "-q"),
+    ]
+
+
+def test_r7_zero_exit_unrecognized_no_cov_help_cannot_select_no_cov(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    objective = FrozenSWEsmithObjective(
+        {"GS-T006": FrozenSWEsmithCase("example", ("test_target.py",), "")},
+        {"GS-T006": IsolatedTaskEnvironment("GS-T006", Path("venv-python"))},
+        objective_coverage_policy="no_cov",
+        coverage_policy_selection_version=sprint3.OBJECTIVE_COVERAGE_POLICY_SELECTION_VERSION,
+    )
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(command: tuple[str, ...], **_kwargs: object) -> object:
+        commands.append(command)
+        if len(commands) == 1:
+            return type(
+                "Completed",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": "pytest: error: unrecognized arguments: --no-cov",
+                    "stderr": "",
+                },
+            )()
+        return type(
+            "Completed",
+            (),
+            {"returncode": 1, "stdout": "FAILED test_target.py", "stderr": ""},
+        )()
+
+    monkeypatch.setattr(sprint3.subprocess, "run", fake_run)
+
+    objective.preflight(_case(2).task, tmp_path)
+
+    assert objective.effective_coverage_policy("GS-T006") == "plain_pytest"
+    assert "--no-cov" not in commands[1]
+    assert "addopts=" not in commands[1]
 
 
 def test_git_worktree_materialization_preserves_attributes_mutation_binary_and_modes(

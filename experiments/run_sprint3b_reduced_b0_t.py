@@ -863,7 +863,14 @@ def execute_frozen_primary_runs(
         benchmark_manifest_path=context.config.task_manifest_path,
         mode="preflight",
     )
-    objective = sprint3.FrozenSWEsmithObjective(frozen_cases, environments)
+    objective = sprint3.FrozenSWEsmithObjective(
+        frozen_cases,
+        environments,
+        objective_coverage_policy="no_cov",
+        coverage_policy_selection_version=(
+            sprint3.OBJECTIVE_COVERAGE_POLICY_SELECTION_VERSION
+        ),
+    )
     recurrence = sprint3.make_recurrence_matcher(frozen_cases)
     artifact_store = ExperimentRunArtifactStore(context.artifact_root)
     runners: dict[ExperimentCondition, ExperimentRunner] = {}

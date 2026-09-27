@@ -443,10 +443,8 @@ class FrozenSWEsmithObjective:
                 f"return_code={completed.returncode}\n{help_output[-4000:]}"
             )
         if _repository_coverage_enforcement(workspace):
-            raise BenchmarkPreflightError(
-                f"R7 cannot neutralize active coverage enforcement for {task_id} "
-                "without changing unrelated pytest semantics"
-            )
+            self._coverage_policy_by_task[task_id] = "no_cov_addopts"
+            return
         self._coverage_policy_by_task[task_id] = "plain_pytest"
 
 
@@ -2392,11 +2390,11 @@ def run_preflight(
     objective = FrozenSWEsmithObjective(
         frozen_cases,
         environments,
-        objective_coverage_policy=getattr(
-            b0_config.config,
-            "objective_coverage_policy",
-            None,
-        ),
+        # Sprint 3B must resolve coverage compatibility from the prepared
+        # task environment.  The historical R6 default of ``no_cov`` is not
+        # safe when pytest-cov is absent.
+        objective_coverage_policy="no_cov",
+        coverage_policy_selection_version=OBJECTIVE_COVERAGE_POLICY_SELECTION_VERSION,
     )
     observations: list[dict[str, Any]] = []
     for case in cases:
