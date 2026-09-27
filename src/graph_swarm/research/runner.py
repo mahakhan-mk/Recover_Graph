@@ -1,7 +1,8 @@
-"""Track B experiment configuration, task loading, and B0 execution.
+"""Track B experiment configuration, task loading, and execution.
 
-This module is deliberately limited to the no-persistent-memory control.  It
-does not construct an advisory service or read the operational memory graph.
+The runner keeps condition selection explicit: B0 has no advisory service,
+O1 uses the frozen Oracle adapter, and T accepts an injected persistent
+advisory service without constructing or connecting to one itself.
 """
 
 from __future__ import annotations
@@ -426,6 +427,19 @@ class OracleAdviceResolver(Protocol):
         ...
 
 
+class TreatmentAdvisoryService(Protocol):
+    """Minimal injectable boundary for the persistent treatment advisory."""
+
+    def evaluate_action(
+        self,
+        task: Task,
+        planned_action: PlannedAction,
+        environment: EnvironmentContext,
+    ) -> AdviceResult:
+        """Evaluate the current action using only current runtime inputs."""
+        ...
+
+
 @dataclass
 class ObjectiveBenchmarkEvaluator(
     Evaluator[BenchmarkEvaluationInput, BenchmarkEvaluationOutput, None]
@@ -596,6 +610,32 @@ class ExperimentRunArtifactStore:
                     ],
                 }
             )
+        elif artifact.condition is ExperimentCondition.T:
+            evidence.update(
+                {
+                    "condition": "T",
+                    "advice_source": "T",
+                    "advice_fired": artifact.advice_count > 0,
+                    "advice_payload": (
+                        None
+                        if artifact.advice_received is None
+                        else artifact.advice_received.model_dump(mode="json")
+                    ),
+                    "retrieved_incident_id": artifact.retrieved_incident_id,
+                    "retrieval_score": artifact.retrieval_score,
+                    "advisory_retrieval_evidence": [
+                        dataclasses.asdict(item)
+                        for item in dependencies.advisory_retrieval_evidence
+                    ],
+                    "advisory_errors": list(dependencies.advisory_errors),
+                    "advice_events": [
+                        event.model_dump(mode="json") for event in dependencies.advice_events
+                    ],
+                    "behavior_evidence": [
+                        item.model_dump(mode="json") for item in dependencies.behavior_evidence
+                    ],
+                }
+            )
         path = run_dir / "raw_evidence.json"
         serialized = json.dumps(evidence, sort_keys=True, separators=(",", ":"), default=str)
         with path.open("x", encoding="utf-8", newline="\n") as handle:
@@ -627,7 +667,7 @@ class ExperimentExecution:
 
 
 class ExperimentRunner:
-    """Sequential B0/O1 runner with isolated PydanticAI executions."""
+    """Sequential Track B runner with isolated PydanticAI executions."""
 
     def __init__(
         self,
@@ -643,6 +683,7 @@ class ExperimentRunner:
         evaluator: LegacyTestEvaluator | None = None,
         recurrence_evaluator: RecurrenceEvaluator | None = None,
         oracle_resolver: OracleAdviceResolver | None = None,
+        advisory_service: TreatmentAdvisoryService | None = None,
         condition: ExperimentCondition | None = None,
         artifact_store: ExperimentRunArtifactStore | None = None,
         request_pacing: ProviderRequestPacing | None = None,
@@ -664,12 +705,11 @@ class ExperimentRunner:
                 "condition "
                 f"{selected_condition.value} is not enabled in the experiment configuration"
             )
-        if selected_condition is ExperimentCondition.T:
-            raise ExperimentConfigurationError("Track B Sprint 2A does not implement T")
         if selected_condition not in (ExperimentCondition.B0, ExperimentCondition.O1):
-            raise ExperimentConfigurationError(
-                f"unsupported Track B condition: {selected_condition.value}"
-            )
+            if selected_condition is not ExperimentCondition.T:
+                raise ExperimentConfigurationError(
+                    f"unsupported Track B condition: {selected_condition.value}"
+                )
         if selected_condition is ExperimentCondition.O1 and oracle_resolver is None:
             raise OracleEvidenceRequired("O1 requires a validated Oracle resolver")
         if selected_condition is ExperimentCondition.O1 and not callable(
@@ -677,6 +717,16 @@ class ExperimentRunner:
         ):
             raise OracleEvidenceRequired(
                 "O1 requires an Oracle resolver with a guidance-only renderer"
+            )
+        if selected_condition is ExperimentCondition.T and advisory_service is None:
+            raise ExperimentConfigurationError(
+                "T requires an injected persistent advisory service"
+            )
+        if selected_condition is ExperimentCondition.T and not callable(
+            getattr(advisory_service, "evaluate_action", None)
+        ):
+            raise ExperimentConfigurationError(
+                "T requires an advisory service with evaluate_action"
             )
         self.configuration = configuration
         self.condition = selected_condition
@@ -696,6 +746,11 @@ class ExperimentRunner:
         self.objective_evaluator = objective_evaluator
         self.recurrence_evaluator = recurrence_evaluator or benchmark_recurrence_determination
         self.oracle_resolver = oracle_resolver
+        # A supplied service is intentionally ignored outside T.  In
+        # particular, a B0 caller cannot accidentally enable persistent memory.
+        self.advisory_service = (
+            advisory_service if selected_condition is ExperimentCondition.T else None
+        )
         self.artifact_store = artifact_store or ExperimentRunArtifactStore(
             configuration.artifact_root_path
         )
@@ -724,7 +779,7 @@ class ExperimentRunner:
         return self.run_case(BenchmarkTaskCase(task=task, occurrence_index=1))
 
     def run_case(self, case: BenchmarkTaskCase) -> ExperimentExecution:
-        """Run one configured B0/O1 case with benchmark evaluation."""
+        """Run one configured Track B case with benchmark evaluation."""
         task = case.task
         condition = self.condition
         run_id = self._new_run_id(condition, task)
@@ -767,7 +822,9 @@ class ExperimentRunner:
                 f"{local_executable}"
             )
         environment = (
-            _environment_for(task, run_id) if condition is ExperimentCondition.O1 else None
+            _environment_for(task, run_id)
+            if condition in (ExperimentCondition.O1, ExperimentCondition.T)
+            else None
         )
         dependencies = AgentDependencies(
             workspace,
@@ -775,14 +832,21 @@ class ExperimentRunner:
             task.id,
             task=task,
             advisory_service=(
-                cast(Any, self.oracle_resolver) if condition is ExperimentCondition.O1 else None
+                (
+                    cast(Any, self.oracle_resolver)
+                    if condition is ExperimentCondition.O1
+                    else cast(Any, self.advisory_service)
+                )
+                if condition in (ExperimentCondition.O1, ExperimentCondition.T)
+                else None
             ),
+            capture_advisory_retrieval=condition is ExperimentCondition.T,
             environment=environment,
             python_executable=python_executable,
             execution_runtime=execution_runtime,
             artifact_writer=(
                 JsonlResearchArtifactWriter(run_dir / "advisory_evidence.jsonl")
-                if condition is ExperimentCondition.O1
+                if condition in (ExperimentCondition.O1, ExperimentCondition.T)
                 else None
             ),
         )
@@ -806,7 +870,13 @@ class ExperimentRunner:
                 },
             )
             agent = self._build_agent(settings, step_persistence)
-            task_start_guidance = prepare_task_start_guidance(dependencies)
+            # T deliberately uses the same pre-tool path as B0.  Task-start
+            # guidance is an O1-only frozen intervention boundary.
+            task_start_guidance = (
+                prepare_task_start_guidance(dependencies)
+                if condition is ExperimentCondition.O1
+                else None
+            )
             result = run_coding_agent(
                 agent,
                 settings,
@@ -855,6 +925,7 @@ class ExperimentRunner:
             task_success=task_success,
             known_failure_repeated=known_failure_repeated,
             advice_received=_advice_received(dependencies),
+            retrieval_score=_first_retrieval_score(dependencies),
             task_start_guidance=task_start_guidance,
             termination=_budget_termination(error, self.configuration.config.limits),
         )
@@ -951,6 +1022,7 @@ class ExperimentRunner:
         task_success: bool,
         known_failure_repeated: bool,
         advice_received: AdviceResult | None,
+        retrieval_score: float | None,
         task_start_guidance: str | None,
         termination: BoundedTermination | None,
     ) -> ExperimentRunArtifact:
@@ -1012,13 +1084,28 @@ class ExperimentRunner:
             advice_received=advice_received,
             advice_count=len(dependencies.advice_events),
             advice_intervention_boundary=(
-                "task_start" if task_start_guidance is not None else None
+                "task_start"
+                if task_start_guidance is not None
+                else (
+                    "pre_tool"
+                    if condition is ExperimentCondition.T and advice_received is not None
+                    else None
+                )
             ),
+            # T advice is issued by the existing tool interception hook; the
+            # selected tool has not executed at the point of intervention.
+            # Keep O1's frozen task-start timing unchanged.
             advice_delivery_timing=(
-                "pre_first_model_request" if task_start_guidance is not None else None
+                "pre_first_model_request"
+                if task_start_guidance is not None
+                else (
+                    "before_tool_execution"
+                    if condition is ExperimentCondition.T and advice_received is not None
+                    else None
+                )
             ),
             advice_review_id=self._advice_review_id(condition, task),
-            advice_accepted=False,
+            advice_accepted=_advice_accepted(condition, dependencies),
             failure_type=failure_type,
             task_success=task_success,
             known_failure_repeated=known_failure_repeated,
@@ -1027,8 +1114,16 @@ class ExperimentRunner:
             input_tokens=None if usage is None else usage.input_tokens,
             output_tokens=None if usage is None else usage.output_tokens,
             latency_ms=latency_ms,
-            retrieved_incident_id=None,
-            retrieval_score=None,
+            retrieved_incident_id=(
+                (
+                    None
+                    if advice_received is None
+                    else advice_received.matched_failure_episode_id
+                )
+                if condition is ExperimentCondition.T
+                else None
+            ),
+            retrieval_score=retrieval_score if condition is ExperimentCondition.T else None,
             timeout_contract=_timeout_contract(
                 self.configuration.config.limits.timeout_seconds,
                 settings,
@@ -1129,6 +1224,23 @@ def _advice_received(dependencies: AgentDependencies) -> AdviceResult | None:
     if not dependencies.advice_events:
         return None
     return AdviceResult(advice=dependencies.advice_events[0].advice)
+
+
+def _advice_accepted(
+    condition: ExperimentCondition,
+    dependencies: AgentDependencies,
+) -> bool:
+    """Aggregate T's existing behavior-change evidence into the artifact scalar."""
+    if condition is not ExperimentCondition.T:
+        return False
+    return any(item.behavior_changed is True for item in dependencies.behavior_evidence)
+
+
+def _first_retrieval_score(dependencies: AgentDependencies) -> float | None:
+    """Project the first captured T retrieval score into the legacy scalar field."""
+    if not dependencies.advisory_retrieval_evidence:
+        return None
+    return dependencies.advisory_retrieval_evidence[0].vector_score
 
 
 def _timeout_contract(
@@ -1248,6 +1360,7 @@ __all__ = [
     "OracleEvidenceRequired",
     "RecurrenceEvaluationRequired",
     "RecurrenceEvaluator",
+    "TreatmentAdvisoryService",
     "WorkspaceResolver",
     "PythonExecutableResolver",
     "WorkspaceIsolationError",

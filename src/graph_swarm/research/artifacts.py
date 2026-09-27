@@ -23,6 +23,19 @@ class AdviceArtifact(BaseModel):
     event: AdviceEvent
 
 
+class RetrievalArtifact(BaseModel):
+    record_type: Literal["advisory_retrieval"] = "advisory_retrieval"
+    run_id: str
+    task_id: str
+    action_id: str
+    advice_event_id: str
+    pattern_id: str | None
+    vector_score: float | None
+    matched_failure_episode_id: str
+    matched_resolution_id: str
+    retrieval: dict[str, object] | None = None
+
+
 class BehaviorArtifact(BaseModel):
     record_type: Literal["behavior_change_evidence"] = "behavior_change_evidence"
     run_id: str
@@ -76,6 +89,33 @@ class JsonlResearchArtifactWriter:
                 advice_event_id=evidence.advice_event_id,
                 timestamp=evidence.observed_at,
                 evidence=evidence,
+            )
+        )
+
+    def write_retrieval_evidence(
+        self,
+        *,
+        run_id: str,
+        task_id: str,
+        action_id: str,
+        advice_event_id: str,
+        pattern_id: str | None,
+        vector_score: float | None,
+        matched_failure_episode_id: str,
+        matched_resolution_id: str,
+        retrieval: dict[str, object] | None,
+    ) -> None:
+        self._append(
+            RetrievalArtifact(
+                run_id=run_id,
+                task_id=task_id,
+                action_id=action_id,
+                advice_event_id=advice_event_id,
+                pattern_id=pattern_id,
+                vector_score=vector_score,
+                matched_failure_episode_id=matched_failure_episode_id,
+                matched_resolution_id=matched_resolution_id,
+                retrieval=retrieval,
             )
         )
 

@@ -25,6 +25,19 @@ class WorkspacePathError(ValueError):
 
 
 @dataclass(frozen=True)
+class AdvisoryRetrievalEvidence:
+    """Retrieval metadata captured for one emitted advice event."""
+
+    action_id: str
+    advice_event_id: str
+    pattern_id: str | None
+    vector_score: float | None
+    matched_failure_episode_id: str
+    matched_resolution_id: str
+    retrieval: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
 class ExecutionRuntime:
     """Process runtime used by agent tools.
 
@@ -72,10 +85,14 @@ class AgentDependencies:
     task: Task | None = None
     environment: EnvironmentContext | None = None
     advisory_service: AdvisoryService | None = None
+    capture_advisory_retrieval: bool = False
     artifact_writer: JsonlResearchArtifactWriter | None = None
     python_executable: Path | None = None
     execution_runtime: ExecutionRuntime | None = None
     advice_events: list[AdviceEvent] = field(default_factory=lambda: list[AdviceEvent]())
+    advisory_retrieval_evidence: list[AdvisoryRetrievalEvidence] = field(
+        default_factory=lambda: list[AdvisoryRetrievalEvidence]()
+    )
     behavior_evidence: list[BehaviorChangeEvidence] = field(
         default_factory=lambda: list[BehaviorChangeEvidence]()
     )
@@ -167,6 +184,41 @@ class AgentDependencies:
                 self.artifact_writer.write_advice_event(event)
             except Exception as error:  # noqa: BLE001 - retain in-memory evidence
                 self.artifact_errors.append(f"advice artifact failed: {error}")
+
+    def record_advisory_retrieval_evidence(
+        self,
+        event: AdviceEvent,
+        *,
+        pattern_id: str | None,
+        vector_score: float | None,
+        retrieval: dict[str, object] | None,
+    ) -> None:
+        """Associate the retrieval snapshot with its exact advice event."""
+        evidence = AdvisoryRetrievalEvidence(
+            action_id=event.planned_action.id,
+            advice_event_id=event.event_id,
+            pattern_id=pattern_id,
+            vector_score=vector_score,
+            matched_failure_episode_id=event.advice.provenance.failure_episode_id,
+            matched_resolution_id=event.advice.provenance.resolution_id,
+            retrieval=retrieval,
+        )
+        self.advisory_retrieval_evidence.append(evidence)
+        if self.artifact_writer is not None:
+            try:
+                self.artifact_writer.write_retrieval_evidence(
+                    run_id=event.run_id,
+                    task_id=event.task_id,
+                    action_id=evidence.action_id,
+                    advice_event_id=evidence.advice_event_id,
+                    pattern_id=evidence.pattern_id,
+                    vector_score=evidence.vector_score,
+                    matched_failure_episode_id=evidence.matched_failure_episode_id,
+                    matched_resolution_id=evidence.matched_resolution_id,
+                    retrieval=evidence.retrieval,
+                )
+            except Exception as error:  # noqa: BLE001 - retain in-memory evidence
+                self.artifact_errors.append(f"retrieval artifact failed: {error}")
 
     def record_behavior_evidence(
         self,

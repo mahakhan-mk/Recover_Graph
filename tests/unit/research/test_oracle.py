@@ -214,6 +214,7 @@ def test_o1_injects_guidance_before_action_and_records_o1_evidence(tmp_path: Pat
     assert execution.artifact.condition is ExperimentCondition.O1
     assert execution.artifact.advice_received is not None
     assert execution.artifact.advice_received.recovery_summary == PATTERN
+    assert execution.artifact.advice_accepted is False
     assert len(execution.dependencies.advice_events) == 1
     assert execution.artifact.advice_intervention_boundary == "task_start"
     assert execution.artifact.advice_delivery_timing == "pre_first_model_request"

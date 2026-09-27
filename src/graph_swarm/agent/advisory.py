@@ -75,6 +75,14 @@ def prepare_tool_action(
         if dependencies.has_advised_action(key):
             return action
         event = emit_advice_event(dependencies, action, advice, rendered)
+        if dependencies.capture_advisory_retrieval:
+            pattern_id, vector_score, retrieval = _retrieval_snapshot(service)
+            dependencies.record_advisory_retrieval_evidence(
+                event,
+                pattern_id=pattern_id,
+                vector_score=vector_score,
+                retrieval=retrieval,
+            )
     except Exception as error:  # noqa: BLE001 - preserve normal tool execution
         dependencies.advisory_errors.append(f"formatting failed for {tool}: {error}")
         return action
@@ -198,3 +206,25 @@ def _recovery_key(action: PlannedAction, advice: AdviceResult) -> str:
 
 def _action_structure(action: PlannedAction) -> tuple[str, str, str]:
     return action.tool, action.operation, _action_key(action)
+
+
+def _retrieval_snapshot(
+    service: object,
+) -> tuple[str | None, float | None, dict[str, object] | None]:
+    """Copy the service's current retrieval result before the next lookup."""
+    result = getattr(service, "last_retrieval_result", None)
+    pattern = getattr(getattr(result, "selected_pattern", None), "id", None)
+    pattern_id = pattern if isinstance(pattern, str) and pattern.strip() else None
+    score = getattr(result, "selected_vector_score", None)
+    vector_score = (
+        score if isinstance(score, (int, float)) and not isinstance(score, bool) else None
+    )
+    dump = getattr(result, "model_dump", None)
+    retrieval: dict[str, object] | None = None
+    try:
+        dumped = dump(mode="json") if callable(dump) else None
+        if isinstance(dumped, dict):
+            retrieval = cast(dict[str, object], dumped)
+    except Exception:  # noqa: BLE001 - retrieval evidence must not alter execution
+        pass
+    return pattern_id, vector_score, retrieval
