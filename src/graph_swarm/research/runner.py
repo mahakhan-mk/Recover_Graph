@@ -650,6 +650,7 @@ AgentFactory = Callable[
 WorkspaceResolver = Callable[[Task], Path]
 PythonExecutableResolver = Callable[[Task, Path], Path]
 ExecutionRuntimeResolver = Callable[[Task, Path], ExecutionRuntime]
+EnvironmentResolver = Callable[[Task, str], EnvironmentContext]
 
 
 @dataclass(frozen=True)
@@ -679,6 +680,7 @@ class ExperimentRunner:
         workspace_resolver: WorkspaceResolver | None = None,
         python_executable_resolver: PythonExecutableResolver | None = None,
         execution_runtime_resolver: ExecutionRuntimeResolver | None = None,
+        environment_resolver: EnvironmentResolver | None = None,
         objective_evaluator: ObjectiveTaskEvaluator | None = None,
         evaluator: LegacyTestEvaluator | None = None,
         recurrence_evaluator: RecurrenceEvaluator | None = None,
@@ -736,6 +738,7 @@ class ExperimentRunner:
         self.workspace_resolver = workspace_resolver
         self.python_executable_resolver = python_executable_resolver
         self.execution_runtime_resolver = execution_runtime_resolver
+        self.environment_resolver = environment_resolver
         if objective_evaluator is None and evaluator is not None:
             legacy_evaluator = evaluator
 
@@ -822,7 +825,11 @@ class ExperimentRunner:
                 f"{local_executable}"
             )
         environment = (
-            _environment_for(task, run_id)
+            (
+                self.environment_resolver(task, run_id)
+                if condition is ExperimentCondition.T and self.environment_resolver is not None
+                else _environment_for(task, run_id)
+            )
             if condition in (ExperimentCondition.O1, ExperimentCondition.T)
             else None
         )

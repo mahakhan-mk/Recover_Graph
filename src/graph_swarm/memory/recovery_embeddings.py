@@ -21,7 +21,7 @@ RECOVERY_PATTERN_EMBEDDING_NORMALIZED = True
 
 
 class RecoveryEmbeddingError(RuntimeError):
-    """Base error for local RecoveryPattern embedding infrastructure."""
+    """Base error for frozen Hugging Face RecoveryPattern embedding infrastructure."""
 
 
 class EmbeddingModelUnavailableError(RecoveryEmbeddingError):
