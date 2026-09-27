@@ -1,0 +1,397 @@
+{
+  "abstraction_model": {
+    "name": "cohere/north-mini-code:free",
+    "phase": "acquisition_only",
+    "provider": "openrouter",
+    "resolution_variable": "OPENROUTER_ABSTRACTION_MODEL",
+    "used_during_transfer_execution": false
+  },
+  "artifact_destination": {
+    "freeze_artifact": "research\\evidence\\results\\GS-E003\\sprint3a_reduced_b0_t\\freeze.json",
+    "run_artifact_root": "research/evidence/results/GS-E003/sprint3a_reduced_b0_t/runs"
+  },
+  "base_repository_sha": "169cf089b84f7a2df2e513ff393dbc629d77523b",
+  "conditions": [
+    "B0",
+    "T"
+  ],
+  "config_path": "configs\\experiments\\sprint3a_reduced_b0_t_v1.yaml",
+  "config_sha256": "cea28241e5131b67180f2688f950cdbfb3207ddba2b00fece2914ea005525122",
+  "execution_order": "paired_task_major",
+  "execution_plan": [
+    [
+      "GS-T006",
+      "B0"
+    ],
+    [
+      "GS-T006",
+      "T"
+    ],
+    [
+      "GS-T007",
+      "B0"
+    ],
+    [
+      "GS-T007",
+      "T"
+    ],
+    [
+      "GS-T008",
+      "B0"
+    ],
+    [
+      "GS-T008",
+      "T"
+    ],
+    [
+      "GS-T009",
+      "B0"
+    ],
+    [
+      "GS-T009",
+      "T"
+    ],
+    [
+      "GS-T010",
+      "B0"
+    ],
+    [
+      "GS-T010",
+      "T"
+    ],
+    [
+      "GS-T011",
+      "B0"
+    ],
+    [
+      "GS-T011",
+      "T"
+    ],
+    [
+      "GS-T012",
+      "B0"
+    ],
+    [
+      "GS-T012",
+      "T"
+    ],
+    [
+      "GS-T013",
+      "B0"
+    ],
+    [
+      "GS-T013",
+      "T"
+    ],
+    [
+      "GS-T014",
+      "B0"
+    ],
+    [
+      "GS-T014",
+      "T"
+    ],
+    [
+      "GS-T015",
+      "B0"
+    ],
+    [
+      "GS-T015",
+      "T"
+    ]
+  ],
+  "existing_configuration_snapshot": {
+    "gate_b1.yaml": {
+      "conditions": [
+        "B0",
+        "O1"
+      ],
+      "expected_runs": 20,
+      "experiment_id": "GS-E003",
+      "gate": "B1",
+      "limits": {
+        "agent_timeout_seconds": 300,
+        "max_actions": 20,
+        "max_requests": 24,
+        "model_request_timeout_seconds": 300,
+        "tool_retries": 3
+      },
+      "model": "runtime-selected-from-OPENROUTER_MODEL",
+      "model_config": "configs/models/openrouter.yaml",
+      "objective_evaluator": "frozen_swesmith_fail_to_pass",
+      "oracle": {
+        "delivery": "pre_first_model_request",
+        "intervention_boundary": "task_start"
+      },
+      "pacing": {
+        "min_request_start_interval_seconds": 5.0,
+        "nominal_requests_per_minute": 12
+      },
+      "prompt_version": "v1",
+      "provider": "openrouter",
+      "repetition_count": 1,
+      "runtime_environment_manifest": "configs/research/gate_b1_environments.json",
+      "t_enabled": false,
+      "task_ids": [
+        "GS-T006",
+        "GS-T007",
+        "GS-T008",
+        "GS-T009",
+        "GS-T010",
+        "GS-T011",
+        "GS-T012",
+        "GS-T013",
+        "GS-T014",
+        "GS-T015"
+      ],
+      "temperature": 0
+    },
+    "openrouter.yaml": {
+      "model": "runtime-selected-from-OPENROUTER_MODEL",
+      "prompt_version": "v1",
+      "provider": "openrouter",
+      "settings": {
+        "temperature": 0
+      }
+    },
+    "rollout_3a_pilot.yaml": {
+      "artifact_root": "research/evidence/results",
+      "conditions": [
+        "B0"
+      ],
+      "config_version": "v1",
+      "development": true,
+      "experiment_id": "GS-E003",
+      "limits": {
+        "max_actions": 20,
+        "max_requests": 24,
+        "timeout_seconds": 300
+      },
+      "model_config": "configs/models/openrouter.yaml",
+      "pilot": true,
+      "rollout": "track_b_development_pilot",
+      "task_manifest": "benchmark/manifests/pilot.jsonl",
+      "task_problems": "benchmark/annotations/recurrence_validation.csv"
+    }
+  },
+  "experiment_id": "GS-E003",
+  "freeze_input_hashes": {
+    "benchmark/annotations/recurrence_validation.csv": "df598fffafe583f9bd6b4678f5959b62adaaf4f43c5c87b17d7e7316380cade1",
+    "benchmark/manifests/pilot.jsonl": "a697f9db5ea2febd6caf07432ae96b12066aaeee046719dfe6e5b832d5b8d3d4",
+    "configs/experiments/sprint3a_reduced_b0_t_v1.yaml": "cea28241e5131b67180f2688f950cdbfb3207ddba2b00fece2914ea005525122",
+    "configs/models/openrouter.yaml": "32639c449ef64682f5ecf14623bb83d5cff9baddcaa7bca50c0cfc84a2fdea3c",
+    "configs/models/openrouter_coding_r13b.yaml": "f65ddb7726d21b6a994c4ce56723f855a729570745c65896a1b234dd40dc7370",
+    "configs/research/gate_b1_environments.json": "402063ee40a006a26c6ef22c8f80c3399b1c9593b263bb68fed71cb320de9e2e",
+    "experiments/sprint3a.py": "87633f95c4860a3d3d2b6de53e3d57cb42f8d0d314f8726ebfad4e8bd55df26b",
+    "src/graph_swarm/agent/prompts.py": "d007c818827f9da254fd1002b9936ad2c3abb28b6d7c6d075b7a81d531ba9b8a"
+  },
+  "freeze_inputs_sha256": "efad4ef8ade9e3299df5b127c17deb8bd6bbb2001a86d1c7fc7d7656dfc10e20",
+  "freeze_type": "protocol_only_no_experimental_results",
+  "integration_point_1_sha": "169cf089b84f7a2df2e513ff393dbc629d77523b",
+  "leakage_safeguards": {
+    "allowed_retrieval_inputs": [
+      "Task.problem_statement",
+      "PlannedAction.current_action_data",
+      "EnvironmentContext",
+      "chronological_index_for_historical_filtering_only"
+    ],
+    "evaluation_metadata_timing": "post_execution_only",
+    "forbidden_retrieval_or_model_inputs": [
+      "family_id",
+      "family_label",
+      "mutation_family",
+      "expected_recovery",
+      "gold_patch",
+      "benchmark_labels",
+      "expected_solution",
+      "recurrence_ground_truth",
+      "future_task_metadata",
+      "evaluator_annotations"
+    ]
+  },
+  "limits": {
+    "max_actions": 20,
+    "max_requests": 24,
+    "model_request_timeout_seconds": 300,
+    "task_timeout_seconds": 300,
+    "timeout_seconds": 300,
+    "tool_retries": 3,
+    "tool_timeout_seconds": {
+      "run_command": 30,
+      "run_tests": 120
+    }
+  },
+  "metrics": {
+    "mandatory_safety": {
+      "calculation_status": "frozen_definition_only",
+      "denominator": "total_advice_events",
+      "name": "false_advice_rate",
+      "numerator": "incorrect_or_inapplicable_advice_events"
+    },
+    "primary": {
+      "calculation_status": "frozen_definition_only",
+      "denominator": "opportunities_to_repeat_known_failures",
+      "name": "repeated_failure_rate",
+      "numerator": "known_recurring_failures_repeated"
+    },
+    "secondary": [
+      "task_success",
+      "advice_coverage",
+      "advice_accepted_behavior_changed",
+      "recovery_reuse_success",
+      "retries",
+      "tool_calls",
+      "token_usage_when_available",
+      "latency",
+      "retrieval_score",
+      "selected_pattern",
+      "precision_at_1_diagnostic"
+    ]
+  },
+  "model": {
+    "model_config_path": "configs\\models\\openrouter_coding_r13b.yaml",
+    "model_config_sha256": "f65ddb7726d21b6a994c4ce56723f855a729570745c65896a1b234dd40dc7370",
+    "name": "nex-agi/nex-n2.5-pro:free",
+    "prompt_version": "v1",
+    "provider": "openrouter",
+    "resolution_variable": "OPENROUTER_CODING_MODEL",
+    "resolved_model": "nex-agi/nex-n2.5-pro:free",
+    "settings": {
+      "reasoning": null,
+      "temperature": 0
+    },
+    "source": "current role-specific coding-agent runtime contract",
+    "source_evidence": [
+      "configs/models/openrouter_coding_r13b.yaml",
+      "src/graph_swarm/agent/coding_agent.py",
+      "src/graph_swarm/settings.py"
+    ],
+    "system_prompt": "ROLLOUT1_SYSTEM_PROMPT",
+    "system_prompt_source": "src/graph_swarm/agent/prompts.py",
+    "system_prompt_source_sha256": "d007c818827f9da254fd1002b9936ad2c3abb28b6d7c6d075b7a81d531ba9b8a",
+    "validation": "exact_match_required_before_execution"
+  },
+  "neo4j_write_policy": "forbidden",
+  "network_policy": {
+    "external_runtime_network": {
+      "huggingface_inference": "required",
+      "openrouter": "required"
+    },
+    "task_workspace_network": "disabled"
+  },
+  "objective_evaluator": {
+    "name": "frozen_swesmith_fail_to_pass",
+    "version": "frozen_swesmith_objective_v1"
+  },
+  "pacing": {
+    "min_request_start_interval_seconds": 5.0,
+    "nominal_requests_per_minute": 12
+  },
+  "planned_primary_runs": 20,
+  "preflight_checks": {
+    "abstraction_execution": "NOT CALLED",
+    "b0_memory_free": "PASS",
+    "benchmark_execution": "NOT CALLED",
+    "coding_model_exact_match": "PASS",
+    "common_comparison_settings": "PASS",
+    "conditions": "PASS",
+    "config_parses": "PASS",
+    "external_runtime_network_explicit": "PASS",
+    "five_pattern_allowlist": "PASS",
+    "memory_writes_disabled": "PASS",
+    "neo4j_read_only": "PASS",
+    "new_artifact_paths": "PASS",
+    "provider_calls": "NOT CALLED",
+    "retrieval_leakage": "PASS",
+    "t_r13b_repository": "PASS",
+    "task_workspace_network_disabled": "PASS",
+    "tasks_and_order": "PASS"
+  },
+  "protocol_revision": "sprint3a-reduced-b0-t-v1",
+  "r13b_freeze_sha": "857bd073de420d0129435e3bb47e96db3741ad4f",
+  "recurrence_evaluator": {
+    "ground_truth_visibility": "post_execution_evaluation_only",
+    "name": "frozen_fail_to_pass_recurrence_matcher",
+    "version": "frozen_recurrence_matcher_v1"
+  },
+  "rerun_policy": {
+    "allowed_only_for": "documented_invalid_infrastructure_or_provider_failure",
+    "document_reason_required": true,
+    "new_run_id_required": true,
+    "planned_primary_runs_per_task_condition": 1,
+    "preserve_invalid_artifact": true,
+    "replace_history": "forbidden",
+    "selective_reruns": "forbidden"
+  },
+  "retrieval_embedding": {
+    "backend": "huggingface_hub.InferenceClient(provider=hf-inference)",
+    "dimension": 384,
+    "model": "sentence-transformers/all-MiniLM-L6-v2",
+    "normalized": true
+  },
+  "runtime_environment_manifest": {
+    "path": "configs\\research\\gate_b1_environments.json",
+    "sha256": "402063ee40a006a26c6ef22c8f80c3399b1c9593b263bb68fed71cb320de9e2e"
+  },
+  "status": "READY",
+  "task_ids": [
+    "GS-T006",
+    "GS-T007",
+    "GS-T008",
+    "GS-T009",
+    "GS-T010",
+    "GS-T011",
+    "GS-T012",
+    "GS-T013",
+    "GS-T014",
+    "GS-T015"
+  ],
+  "task_manifest_path": "benchmark\\manifests\\pilot.jsonl",
+  "task_manifest_sha256": "a697f9db5ea2febd6caf07432ae96b12066aaeee046719dfe6e5b832d5b8d3d4",
+  "task_order": [
+    "GS-T006",
+    "GS-T007",
+    "GS-T008",
+    "GS-T009",
+    "GS-T010",
+    "GS-T011",
+    "GS-T012",
+    "GS-T013",
+    "GS-T014",
+    "GS-T015"
+  ],
+  "task_order_hash": "09756c498a01e0b5c5c678163dd769f7646b97d2d813567645a59b018bd3004b",
+  "tool_permissions": {
+    "edit_file": "workspace_write",
+    "read_file": "workspace_read_only",
+    "run_command": "controlled_workspace_process",
+    "run_tests": "controlled_workspace_process",
+    "write_file": "workspace_write"
+  },
+  "tools": [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "run_tests",
+    "run_command"
+  ],
+  "treatment_memory": {
+    "embedding": {
+      "backend": "huggingface_hub.InferenceClient(provider=hf-inference)",
+      "dimension": 384,
+      "model": "sentence-transformers/all-MiniLM-L6-v2",
+      "normalized": true
+    },
+    "memory_writes": "forbidden",
+    "online_learning": false,
+    "pattern_ids": [
+      "recovery-pattern-ad07a6a45718b848a30ad377",
+      "recovery-pattern-f490f62ab931191c6eac6db1",
+      "recovery-pattern-162e3999c4a2c66a1ff647ed",
+      "recovery-pattern-fd7b65022b22dc5f2a42816f",
+      "recovery-pattern-99a54266f940e1d4648f4698"
+    ],
+    "policy": "fixed frozen acquisition corpus / read-only treatment memory",
+    "repository": "R13bTreatmentRepository"
+  }
+}
