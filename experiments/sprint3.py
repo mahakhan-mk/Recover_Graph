@@ -1700,6 +1700,13 @@ def _materialize_workspace(
     destination = execution_root / "GS-E003" / condition / task.id / uuid.uuid4().hex / "workspace"
     destination.parent.mkdir(parents=True, exist_ok=False)
     shutil.copytree(source, destination, dirs_exist_ok=False)
+    materialized = _materialize_git_worktree(destination)
+    if materialized.returncode != 0:
+        raise RuntimeError(
+            f"could not materialize benchmark Git worktree for {task.id}: "
+            f"stdout: {materialized.stdout.strip()!r}; "
+            f"stderr: {materialized.stderr.strip()!r}"
+        )
     reset = subprocess.run(
         ["git", "-C", str(destination), "reset", "--hard", "HEAD"],
         check=False,
@@ -1710,13 +1717,6 @@ def _materialize_workspace(
         raise RuntimeError(
             f"could not canonicalize copied benchmark Git worktree for {task.id}: "
             f"stdout: {reset.stdout.strip()!r}; stderr: {reset.stderr.strip()!r}"
-        )
-    materialized = _materialize_git_worktree(destination)
-    if materialized.returncode != 0:
-        raise RuntimeError(
-            f"could not materialize benchmark Git worktree for {task.id}: "
-            f"stdout: {materialized.stdout.strip()!r}; "
-            f"stderr: {materialized.stderr.strip()!r}"
         )
     baseline_status = subprocess.run(
         ["git", "-C", str(destination), "status", "--porcelain"],

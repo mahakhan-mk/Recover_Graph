@@ -3,7 +3,6 @@ from __future__ import annotations
 import stat
 import subprocess
 import sys
-from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -750,33 +749,6 @@ def test_materialize_workspace_restores_copied_tracked_bytes_before_patch(
         text=True,
     ).stdout == ""
 
-    original_copytree = sprint3.shutil.copytree
-
-    def corrupt_copy(
-        source: str | Path,
-        destination: str | Path,
-        symlinks: bool = False,
-        ignore: Callable[[str, list[str]], Iterable[str]] | None = None,
-        copy_function: Callable[[str, str], object] = sprint3.shutil.copy2,
-        ignore_dangling_symlinks: bool = False,
-        dirs_exist_ok: bool = False,
-    ) -> Path:
-        monkeypatch.setattr(sprint3.shutil, "copytree", original_copytree)
-        try:
-            copied = original_copytree(
-                source,
-                destination,
-                symlinks,
-                ignore,
-                copy_function,
-                ignore_dangling_symlinks,
-                dirs_exist_ok,
-            )
-        finally:
-            monkeypatch.setattr(sprint3.shutil, "copytree", corrupt_copy)
-        (Path(destination) / "tracked.txt").write_bytes(b"corrupted during copy\n")
-        return Path(copied)
-
     original_apply_patch = sprint3._apply_patch  # pyright: ignore[reportPrivateUsage]
 
     def assert_clean_then_apply(
@@ -794,7 +766,14 @@ def test_materialize_workspace_restores_copied_tracked_bytes_before_patch(
         assert status.stdout == ""
         return original_apply_patch(workspace, patch_text, check_only=check_only)
 
-    monkeypatch.setattr(sprint3.shutil, "copytree", corrupt_copy)
+    original_materialize = sprint3._materialize_git_worktree  # pyright: ignore[reportPrivateUsage]
+
+    def corrupt_materialize(workspace: Path) -> subprocess.CompletedProcess[str]:
+        materialized = original_materialize(workspace)
+        (workspace / "tracked.txt").write_bytes(b"corrupted during materialization\n")
+        return materialized
+
+    monkeypatch.setattr(sprint3, "_materialize_git_worktree", corrupt_materialize)
     monkeypatch.setattr(sprint3, "_apply_patch", assert_clean_then_apply)
 
     task = Task(
