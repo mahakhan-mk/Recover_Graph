@@ -968,8 +968,8 @@ class ExperimentRunner:
                 "model_provider": "openrouter",
                 "openrouter_api_key": os.environ.get("OPENROUTER_API_KEY")
                 or base.openrouter_api_key,
-                "openrouter_model": os.environ.get("OPENROUTER_MODEL")
-                or base.openrouter_model,
+                "openrouter_coding_model": os.environ.get("OPENROUTER_CODING_MODEL")
+                or base.openrouter_coding_model,
             }
         )
 
@@ -1154,8 +1154,8 @@ class ExperimentRunner:
             )
         base = self.settings or get_settings()
         return (
-            os.environ.get("OPENROUTER_MODEL")
-            or base.openrouter_model
+            os.environ.get("OPENROUTER_CODING_MODEL")
+            or base.openrouter_coding_model
             or self.configuration.model.model
         )
 
