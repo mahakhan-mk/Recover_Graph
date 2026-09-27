@@ -1700,21 +1700,40 @@ def _materialize_workspace(
     destination = execution_root / "GS-E003" / condition / task.id / uuid.uuid4().hex / "workspace"
     destination.parent.mkdir(parents=True, exist_ok=False)
     shutil.copytree(source, destination, dirs_exist_ok=False)
-    materialized = _materialize_git_worktree(destination)
-    if materialized.returncode != 0:
-        raise RuntimeError(
-            f"could not materialize benchmark Git worktree for {task.id}: "
-            f"{materialized.stderr.strip()}"
-        )
-    refreshed = subprocess.run(
-        ["git", "-C", str(destination), "update-index", "--refresh"],
+    reset = subprocess.run(
+        ["git", "-C", str(destination), "reset", "--hard", "HEAD"],
         check=False,
         capture_output=True,
         text=True,
     )
-    if refreshed.returncode != 0:
+    if reset.returncode != 0:
         raise RuntimeError(
-            f"could not refresh benchmark workspace index for {task.id}: {refreshed.stderr.strip()}"
+            f"could not canonicalize copied benchmark Git worktree for {task.id}: "
+            f"stdout: {reset.stdout.strip()!r}; stderr: {reset.stderr.strip()!r}"
+        )
+    materialized = _materialize_git_worktree(destination)
+    if materialized.returncode != 0:
+        raise RuntimeError(
+            f"could not materialize benchmark Git worktree for {task.id}: "
+            f"stdout: {materialized.stdout.strip()!r}; "
+            f"stderr: {materialized.stderr.strip()!r}"
+        )
+    baseline_status = subprocess.run(
+        ["git", "-C", str(destination), "status", "--porcelain"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if baseline_status.returncode != 0:
+        raise RuntimeError(
+            f"could not verify canonical benchmark baseline for {task.id}: "
+            f"stdout: {baseline_status.stdout.strip()!r}; "
+            f"stderr: {baseline_status.stderr.strip()!r}"
+        )
+    if baseline_status.stdout:
+        raise RuntimeError(
+            f"copied benchmark baseline is dirty for {task.id}: "
+            f"paths: {baseline_status.stdout.strip()!r}"
         )
     applied = _apply_patch(destination, frozen.patch)
     if applied.returncode != 0:

@@ -3,8 +3,10 @@ from __future__ import annotations
 import stat
 import subprocess
 import sys
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -709,6 +711,174 @@ def test_materialize_workspace_applies_patch_without_ambient_eol_noise(
     assert (workspace / "arrow" / "locales.py").read_bytes().replace(
         b"\r\n", b"\n"
     ) == b"base\nintentional mutation\nsecond\nthird\n"
+
+
+def test_materialize_workspace_restores_copied_tracked_bytes_before_patch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    repository = source_root / "repo"
+    repository.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(repository), "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.name", "Materialization Test"],
+        check=True,
+    )
+    target = repository / "tracked.txt"
+    baseline = b"canonical baseline\n"
+    mutation = b"canonical mutation\n"
+    target.write_bytes(baseline)
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "baseline"], check=True)
+    target.write_bytes(mutation)
+    patch = subprocess.run(
+        ["git", "-C", str(repository), "diff", "--", "tracked.txt"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    target.write_bytes(baseline)
+    assert subprocess.run(
+        ["git", "-C", str(repository), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+
+    original_copytree = sprint3.shutil.copytree
+
+    def corrupt_copy(
+        source: str | Path,
+        destination: str | Path,
+        symlinks: bool = False,
+        ignore: Callable[[str, list[str]], Iterable[str]] | None = None,
+        copy_function: Callable[[str, str], object] = sprint3.shutil.copy2,
+        ignore_dangling_symlinks: bool = False,
+        dirs_exist_ok: bool = False,
+    ) -> Path:
+        monkeypatch.setattr(sprint3.shutil, "copytree", original_copytree)
+        try:
+            copied = original_copytree(
+                source,
+                destination,
+                symlinks,
+                ignore,
+                copy_function,
+                ignore_dangling_symlinks,
+                dirs_exist_ok,
+            )
+        finally:
+            monkeypatch.setattr(sprint3.shutil, "copytree", corrupt_copy)
+        (Path(destination) / "tracked.txt").write_bytes(b"corrupted during copy\n")
+        return Path(copied)
+
+    original_apply_patch = sprint3._apply_patch  # pyright: ignore[reportPrivateUsage]
+
+    def assert_clean_then_apply(
+        workspace: Path,
+        patch_text: str,
+        *,
+        check_only: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        status = subprocess.run(
+            ["git", "-C", str(workspace), "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert status.stdout == ""
+        return original_apply_patch(workspace, patch_text, check_only=check_only)
+
+    monkeypatch.setattr(sprint3.shutil, "copytree", corrupt_copy)
+    monkeypatch.setattr(sprint3, "_apply_patch", assert_clean_then_apply)
+
+    task = Task(
+        id="GS-T001",
+        problem_statement="materialize",
+        family_id="family",
+        repository="repo",
+        chronological_index=1,
+    )
+    workspace = sprint3._materialize_workspace(  # pyright: ignore[reportPrivateUsage]
+        source_root=source_root,
+        execution_root=tmp_path / "execution",
+        frozen_cases={"GS-T001": FrozenSWEsmithCase("instance", (), patch)},
+        condition="canonicalization-test",
+        task=task,
+    )
+
+    assert (workspace / "tracked.txt").read_bytes() == mutation
+    assert subprocess.run(
+        ["git", "-C", str(workspace), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip() == "M  tracked.txt"
+
+
+def test_materialize_workspace_reset_failure_reports_stdout_and_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    repository = source_root / "repo"
+    repository.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(repository), "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.name", "Materialization Test"],
+        check=True,
+    )
+    (repository / "tracked.txt").write_text("canonical baseline\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "baseline"], check=True)
+    assert subprocess.run(
+        ["git", "-C", str(repository), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+
+    original_run: Any = sprint3.subprocess.run
+
+    def fail_reset(command: list[str], **kwargs: Any) -> Any:
+        if command[-3:] == ["reset", "--hard", "HEAD"]:
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stdout="reset stdout\n",
+                stderr="reset stderr\n",
+            )
+        return original_run(command, **kwargs)
+
+    monkeypatch.setattr(sprint3.subprocess, "run", fail_reset)
+    task = Task(
+        id="GS-T001",
+        problem_statement="materialize",
+        family_id="family",
+        repository="repo",
+        chronological_index=1,
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        sprint3._materialize_workspace(  # pyright: ignore[reportPrivateUsage]
+            source_root=source_root,
+            execution_root=tmp_path / "execution",
+            frozen_cases={"GS-T001": FrozenSWEsmithCase("instance", (), "")},
+            condition="reset-failure-test",
+            task=task,
+        )
+
+    assert "reset stdout" in str(raised.value)
+    assert "reset stderr" in str(raised.value)
 
 
 def test_container_agent_runtime_separates_docker_cli_and_python() -> None:
