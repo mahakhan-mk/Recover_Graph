@@ -9,13 +9,17 @@ from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from graph_swarm.agent import coding_agent as coding_agent_module
 from graph_swarm.agent.coding_agent import (
+    KILO_BASE_URL,
     MODEL_REQUEST_TIMEOUT_SECONDS,
     AgentConfigurationError,
+    KiloPreflightError,
     create_coding_agent,
+    preflight_kilo_provider,
     run_coding_agent,
     run_coding_agent_async,
 )
@@ -202,6 +206,62 @@ def test_openrouter_factory_uses_dedicated_model_and_preserves_configuration() -
     assert model.model_name == "qwen/test"
     assert isinstance(model, OpenRouterModel)
     assert isinstance(model._provider, OpenRouterProvider)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_kilo_factory_requires_kilo_key_only_when_selected() -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={"model_provider": "kilo", "kilo_coding_model": "nex-agi/nex-n2.5-pro"}
+    )
+    with pytest.raises(AgentConfigurationError, match="KILO_API_KEY"):
+        create_coding_agent(settings)
+
+
+def test_kilo_factory_uses_exact_model_and_gateway() -> None:
+    settings = make_settings(load_env_file=False).model_copy(
+        update={
+            "model_provider": "kilo",
+            "kilo_coding_model": "nex-agi/nex-n2.5-pro",
+            "kilo_api_key": "offline-key",
+        }
+    )
+    agent = create_coding_agent(settings)
+    model = cast(OpenAIChatModel, agent.model)
+    assert model.model_name == "nex-agi/nex-n2.5-pro"
+    assert isinstance(model._provider, OpenAIProvider)  # pyright: ignore[reportPrivateUsage]
+    assert model._provider.base_url.rstrip("/") == KILO_BASE_URL  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.parametrize("response", ["READY", "not ready"])
+def test_kilo_preflight_validates_one_tool_free_request(
+    monkeypatch: pytest.MonkeyPatch,
+    response: str,
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeProbe:
+        def __init__(self, _model: object, *, output_type: object, retries: int) -> None:
+            assert output_type is str
+            assert retries == 0
+
+        def run_sync(self, prompt: str, **kwargs: object) -> object:
+            calls.append((prompt, kwargs))
+            return type("Result", (), {"output": response})()
+
+    monkeypatch.setattr(coding_agent_module, "Agent", FakeProbe)
+    settings = make_settings(load_env_file=False).model_copy(
+        update={
+            "kilo_coding_model": "nex-agi/nex-n2.5-pro",
+            "kilo_api_key": "offline-key",
+        }
+    )
+    if response == "READY":
+        assert preflight_kilo_provider(settings) == "READY"
+    else:
+        with pytest.raises(KiloPreflightError, match="did not return READY"):
+            preflight_kilo_provider(settings)
+    assert len(calls) == 1
+    assert calls[0][0] == "Reply only with READY"
+    assert calls[0][1]["model_settings"] == {"temperature": 0, "max_tokens": 8}
 
 
 def test_coding_agent_freezes_tool_retries_at_three() -> None:

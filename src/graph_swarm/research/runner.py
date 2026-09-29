@@ -696,10 +696,10 @@ class ExperimentRunner:
             raise ExperimentConfigurationError(
                 "GS-E003 must be explicitly marked development/pilot"
             )
-        if configuration.model.provider != "openrouter":
+        if configuration.model.provider not in {"openrouter", "kilo"}:
             raise ExperimentConfigurationError(
                 "unsupported Track B model provider: "
-                f"{configuration.model.provider}; the supported provider is openrouter"
+                f"{configuration.model.provider}; supported providers are openrouter and kilo"
             )
         selected_condition = condition or _configured_condition(configuration)
         if selected_condition not in configuration.config.conditions:
@@ -956,13 +956,20 @@ class ExperimentRunner:
 
     def _settings_for_model(self) -> Settings:
         base = self.settings or get_settings()
-        if self.configuration.model.provider != "openrouter":
+        provider = self.configuration.model.provider
+        if provider not in {"openrouter", "kilo"}:
             raise ExperimentConfigurationError(
                 "unsupported Track B model provider: "
-                f"{self.configuration.model.provider}; the supported provider is openrouter"
+                f"{provider}; supported providers are openrouter and kilo"
             )
-        import os
-
+        if provider == "kilo":
+            return base.model_copy(
+                update={
+                    "model_provider": "kilo",
+                    "kilo_api_key": os.environ.get("KILO_API_KEY") or base.kilo_api_key,
+                    "kilo_coding_model": base.kilo_coding_model or self.configuration.model.model,
+                }
+            )
         return base.model_copy(
             update={
                 "model_provider": "openrouter",
@@ -1147,12 +1154,17 @@ class ExperimentRunner:
         )
 
     def _artifact_model_name(self) -> str:
-        if self.configuration.model.provider != "openrouter":
+        provider = self.configuration.model.provider
+        if provider not in {"openrouter", "kilo"}:
             raise ExperimentConfigurationError(
                 "unsupported Track B model provider: "
-                f"{self.configuration.model.provider}; the supported provider is openrouter"
+                f"{provider}; supported providers are openrouter and kilo"
             )
         base = self.settings or get_settings()
+        if provider == "kilo":
+            return (
+                base.kilo_coding_model or self.configuration.model.model
+            )
         return (
             os.environ.get("OPENROUTER_CODING_MODEL")
             or base.openrouter_coding_model

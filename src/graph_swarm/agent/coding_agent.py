@@ -18,7 +18,9 @@ from pydantic_ai import (
     UsageLimits,
 )
 from pydantic_ai.models import Model
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.openrouter import OpenRouterModel
+from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from graph_swarm.agent.advisory import (
@@ -54,9 +56,22 @@ class AgentConfigurationError(ValueError):
     """Raised when live coding-agent provider configuration is incomplete."""
 
 
+class KiloPreflightError(RuntimeError):
+    """Raised when the single Kilo provider preflight request fails."""
+
+
 CODING_AGENT_TOOL_RETRIES = 3
 _CODING_AGENT_TOOL_RETRIES = CODING_AGENT_TOOL_RETRIES
 MODEL_REQUEST_TIMEOUT_SECONDS = 300
+KILO_BASE_URL = "https://api.kilo.ai/api/gateway"
+
+
+def _required_setting(value: str | None, setting_name: str, env_name: str) -> str:
+    if not value or not value.strip():
+        raise AgentConfigurationError(
+            f"{setting_name} must be supplied through Settings or {env_name}"
+        )
+    return value
 
 
 class AgentWallClockTimeoutError(TimeoutError):
@@ -80,19 +95,64 @@ class ModelRequestTimeoutError(TimeoutError):
 
 
 def _build_openrouter_model(settings: Settings) -> OpenRouterModel:
-    if not settings.openrouter_coding_model or not settings.openrouter_coding_model.strip():
-        raise AgentConfigurationError(
-            "openrouter_coding_model must be supplied through Settings or "
-            "OPENROUTER_CODING_MODEL"
-        )
-    if not settings.openrouter_api_key or not settings.openrouter_api_key.strip():
-        raise AgentConfigurationError(
-            "openrouter_api_key must be supplied through Settings or OPENROUTER_API_KEY"
-        )
-    return OpenRouterModel(
+    model = _required_setting(
         settings.openrouter_coding_model,
-        provider=OpenRouterProvider(api_key=settings.openrouter_api_key),
+        "openrouter_coding_model",
+        "OPENROUTER_CODING_MODEL",
     )
+    api_key = _required_setting(
+        settings.openrouter_api_key,
+        "openrouter_api_key",
+        "OPENROUTER_API_KEY",
+    )
+    return OpenRouterModel(
+        model,
+        provider=OpenRouterProvider(api_key=api_key),
+    )
+
+
+def _build_kilo_model(settings: Settings) -> OpenAIChatModel:
+    model = _required_setting(
+        settings.kilo_coding_model,
+        "kilo_coding_model",
+        "KILO_CODING_MODEL",
+    )
+    api_key = _required_setting(settings.kilo_api_key, "kilo_api_key", "KILO_API_KEY")
+    return OpenAIChatModel(
+        model,
+        provider=OpenAIProvider(base_url=KILO_BASE_URL, api_key=api_key),
+    )
+
+
+def _redact_kilo_error(error: BaseException, api_key: str) -> str:
+    message = str(error).replace(api_key, "[redacted]")
+    status_code = getattr(error, "status_code", None)
+    if status_code is not None:
+        return f"HTTP {status_code}: {message}"
+    return message or type(error).__name__
+
+
+def preflight_kilo_provider(settings: Settings) -> str:
+    """Make one tiny, tool-free Kilo request for provider readiness."""
+    api_key = _required_setting(settings.kilo_api_key, "kilo_api_key", "KILO_API_KEY")
+    model = _build_kilo_model(settings)
+    try:
+        probe = Agent(model, output_type=str, retries=0)
+        result = probe.run_sync(
+            "Reply only with READY",
+            model_settings={"temperature": 0, "max_tokens": 8},
+            usage_limits=UsageLimits(request_limit=1),
+        )
+        output = str(result.output).strip()
+        if output != "READY":
+            raise KiloPreflightError("Kilo provider preflight did not return READY")
+    except Exception as error:
+        if isinstance(error, KiloPreflightError):
+            raise
+        raise KiloPreflightError(
+            f"Kilo provider preflight failed: {_redact_kilo_error(error, api_key)}"
+        ) from error
+    return "READY"
 
 
 def create_coding_agent(
@@ -110,11 +170,14 @@ def create_coding_agent(
     if model is not None:
         selected_model = model
     else:
-        if settings.model_provider != "openrouter":
+        if settings.model_provider == "openrouter":
+            selected_model = _build_openrouter_model(settings)
+        elif settings.model_provider == "kilo":
+            selected_model = _build_kilo_model(settings)
+        else:
             raise AgentConfigurationError(
-                "unsupported model_provider; the supported live provider is openrouter"
+                "unsupported model_provider; the supported live provider is openrouter or kilo"
             )
-        selected_model = _build_openrouter_model(settings)
     agent: Agent[AgentDependencies, str] = Agent(
         selected_model,
         deps_type=AgentDependencies,

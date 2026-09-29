@@ -1,0 +1,61 @@
+{
+  "status": "READY",
+  "freeze_type": "protocol_only_no_experimental_results",
+  "experiment_id": "GS-E003",
+  "protocol_revision": "sprint3b-kilo-reduced-b0-t-v1",
+  "config_path": "configs/experiments/sprint3b_kilo.yaml",
+  "config_sha256": "da35ab00c3d6052b0868fd922884fdeba63c317d25f0f477ef59c3b4ce5e83a9",
+  "freeze_input_hashes": {
+    "configs/experiments/sprint3b_kilo.yaml": "da35ab00c3d6052b0868fd922884fdeba63c317d25f0f477ef59c3b4ce5e83a9",
+    "configs/models/kilo_coding.yaml": "01c7be7c463b375ea28adc54c53d681940692e39f9678e6023b940300f7f5696",
+    "experiments/run_sprint3b_reduced_b0_t.py": "adf248eb0116803a1aaef3b2222e8d8cdef8bdca70cb3d864eefc67eec5b7186",
+    "benchmark/manifests/pilot.jsonl": "a697f9db5ea2febd6caf07432ae96b12066aaeee046719dfe6e5b832d5b8d3d4",
+    "benchmark/annotations/recurrence_validation.csv": "df598fffafe583f9bd6b4678f5959b62adaaf4f43c5c87b17d7e7316380cade1",
+    "src/graph_swarm/agent/coding_agent.py": "2132421915f5f76dc399ec3b163fd2e69040c4d3ce4658e05b2f1e5e80896ae2",
+    "src/graph_swarm/agent/prompts.py": "d007c818827f9da254fd1002b9936ad2c3abb28b6d7c6d075b7a81d531ba9b8a",
+    "src/graph_swarm/settings.py": "3477847bd33d5c402fd80885f2c3487105792bf2c34dca9b3f7f3bbe779ded08",
+    "configs/research/gate_b1_environments.json": "402063ee40a006a26c6ef22c8f80c3399b1c9593b263bb68fed71cb320de9e2e"
+  },
+  "freeze_inputs_sha256": "4d989ee408abc1cffc54404f048064b5ef1b9c7ff64f2e27ef34dbefa9d9b640",
+  "task_ids": ["GS-T006", "GS-T007", "GS-T008", "GS-T009", "GS-T010", "GS-T011", "GS-T012", "GS-T013", "GS-T014", "GS-T015"],
+  "task_order": ["GS-T006", "GS-T007", "GS-T008", "GS-T009", "GS-T010", "GS-T011", "GS-T012", "GS-T013", "GS-T014", "GS-T015"],
+  "conditions": ["B0", "T"],
+  "execution_plan": [
+    ["GS-T006", "B0"], ["GS-T006", "T"], ["GS-T007", "B0"], ["GS-T007", "T"],
+    ["GS-T008", "B0"], ["GS-T008", "T"], ["GS-T009", "B0"], ["GS-T009", "T"],
+    ["GS-T010", "B0"], ["GS-T010", "T"], ["GS-T011", "B0"], ["GS-T011", "T"],
+    ["GS-T012", "B0"], ["GS-T012", "T"], ["GS-T013", "B0"], ["GS-T013", "T"],
+    ["GS-T014", "B0"], ["GS-T014", "T"], ["GS-T015", "B0"], ["GS-T015", "T"]
+  ],
+  "planned_primary_runs": 20,
+  "model": {
+    "provider": "kilo",
+    "name": "nex-agi/nex-n2.5-pro",
+    "resolved_model": "nex-agi/nex-n2.5-pro",
+    "model_config_path": "configs/models/kilo_coding.yaml",
+    "resolution_variable": "KILO_CODING_MODEL",
+    "settings": {"temperature": 0},
+    "prompt_version": "v1",
+    "base_url": "https://api.kilo.ai/api/gateway"
+  },
+  "limits": {
+    "max_actions": 20,
+    "max_requests": 24,
+    "timeout_seconds": 300,
+    "task_timeout_seconds": 300,
+    "model_request_timeout_seconds": 300,
+    "tool_retries": 3,
+    "tool_timeout_seconds": {"run_command": 30, "run_tests": 120}
+  },
+  "artifact_destination": {
+    "run_artifact_root": "research/evidence/results/GS-E003/sprint3b_kilo/runs",
+    "freeze_artifact": "research/evidence/results/GS-E003/sprint3b_kilo/freeze.json"
+  },
+  "network_policy": {
+    "task_workspace_network": "disabled",
+    "external_runtime_network": {"kilo": "required", "huggingface_inference": "required"}
+  },
+  "treatment_pattern_count": 5,
+  "neo4j_write_policy": "forbidden",
+  "memory_writes": "forbidden"
+}

@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from experiments import sprint3, sprint3a
+from graph_swarm.agent.coding_agent import preflight_kilo_provider
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.tasks import Task
@@ -52,9 +53,13 @@ from graph_swarm.research.runner import (
 from graph_swarm.settings import Settings, get_settings
 
 EXPERIMENT_ID = "GS-E003"
-PROTOCOL_REVISION = "sprint3a-reduced-b0-t-v1"
-EXPECTED_CODING_MODEL = "nex-agi/nex-n2.5-pro:free"
-EXPECTED_PROVIDER = "openrouter"
+PROTOCOL_REVISION = "sprint3b-kilo-reduced-b0-t-v1"
+EXPECTED_CODING_MODEL = "nex-agi/nex-n2.5-pro"
+EXPECTED_PROVIDER = "kilo"
+KILO_BASE_URL = "https://api.kilo.ai/api/gateway"
+LEGACY_PROTOCOL_REVISION = sprint3a.SPRINT3A_PROTOCOL_REVISION
+LEGACY_CODING_MODEL = sprint3a.EXPECTED_CODING_MODEL
+LEGACY_PROVIDER = "openrouter"
 EXPECTED_TASK_IDS: tuple[str, ...] = tuple(f"GS-T{i:03d}" for i in range(6, 16))
 EXPECTED_CONDITIONS: tuple[ExperimentCondition, ...] = (
     ExperimentCondition.B0,
@@ -66,8 +71,21 @@ EXPECTED_MAX_REQUESTS = 24
 EXPECTED_TIMEOUT_SECONDS = 300.0
 EXPECTED_TOOL_RETRIES = 3
 EXPECTED_PATTERN_IDS = frozenset(sprint3a.SPRINT3A_PATTERN_IDS)
-DEFAULT_CONFIG = Path("configs/experiments/sprint3a_reduced_b0_t_v1.yaml")
-DEFAULT_FREEZE = Path("research/evidence/results/GS-E003/sprint3a_reduced_b0_t/freeze.json")
+DEFAULT_CONFIG = Path("configs/experiments/sprint3b_kilo.yaml")
+DEFAULT_FREEZE = Path("research/evidence/results/GS-E003/sprint3b_kilo/freeze.json")
+LEGACY_CONFIG = Path("configs/experiments/sprint3a_reduced_b0_t_v1.yaml")
+LEGACY_FREEZE = Path("research/evidence/results/GS-E003/sprint3a_reduced_b0_t/freeze.json")
+KILO_FREEZE_INPUT_PATHS: tuple[str, ...] = (
+    "configs/experiments/sprint3b_kilo.yaml",
+    "configs/models/kilo_coding.yaml",
+    "experiments/run_sprint3b_reduced_b0_t.py",
+    "benchmark/manifests/pilot.jsonl",
+    "benchmark/annotations/recurrence_validation.csv",
+    "src/graph_swarm/agent/coding_agent.py",
+    "src/graph_swarm/agent/prompts.py",
+    "src/graph_swarm/settings.py",
+    "configs/research/gate_b1_environments.json",
+)
 
 
 class Sprint3BExecutionError(ValueError):
@@ -190,6 +208,23 @@ def _dotenv_value(root: Path, variable: str) -> str | None:
     return None
 
 
+def _is_legacy_protocol(protocol: Mapping[str, Any]) -> bool:
+    return protocol.get("protocol_revision") == LEGACY_PROTOCOL_REVISION
+
+
+def _profile(protocol: Mapping[str, Any]) -> tuple[str, str, str]:
+    if _is_legacy_protocol(protocol):
+        return LEGACY_PROVIDER, LEGACY_CODING_MODEL, "OPENROUTER_CODING_MODEL"
+    return EXPECTED_PROVIDER, EXPECTED_CODING_MODEL, "KILO_CODING_MODEL"
+
+
+def _kilo_freeze_input_hashes(root: Path) -> dict[str, str]:
+    return {
+        relative_path: _sha256(root / relative_path)
+        for relative_path in KILO_FREEZE_INPUT_PATHS
+    }
+
+
 def _require_equal(actual: object, expected: object, label: str) -> None:
     if actual != expected:
         raise FreezeValidationError(f"{label} differs from the frozen protocol: {actual!r}")
@@ -206,7 +241,10 @@ def load_frozen_execution_context(
     """Load and validate the frozen protocol without provider/Neo4j calls."""
     root = project_root.expanduser().resolve()
     resolved_config = _project_path(config_path, root)
-    resolved_freeze = _project_path(freeze_path, root)
+    selected_freeze = freeze_path
+    if freeze_path == DEFAULT_FREEZE and resolved_config.name == LEGACY_CONFIG.name:
+        selected_freeze = LEGACY_FREEZE
+    resolved_freeze = _project_path(selected_freeze, root)
     try:
         protocol = sprint3a.load_protocol(resolved_config)
         freeze = json.loads(resolved_freeze.read_text(encoding="utf-8"))
@@ -215,11 +253,20 @@ def load_frozen_execution_context(
     if not isinstance(freeze, dict):
         raise FreezeValidationError("freeze artifact must be a JSON object")
 
+    expected_provider, expected_model, model_variable = _profile(protocol)
+    expected_revision = (
+        LEGACY_PROTOCOL_REVISION if expected_provider == LEGACY_PROVIDER else PROTOCOL_REVISION
+    )
+
     _require_equal(freeze.get("status"), "READY", "freeze status")
     _require_equal(freeze.get("experiment_id"), EXPERIMENT_ID, "experiment ID")
-    _require_equal(freeze.get("protocol_revision"), PROTOCOL_REVISION, "protocol revision")
+    _require_equal(freeze.get("protocol_revision"), expected_revision, "protocol revision")
     _require_equal(_sha256(resolved_config), freeze.get("config_sha256"), "config hash")
-    current_hashes = sprint3a.freeze_input_hashes(root)
+    current_hashes = (
+        sprint3a.freeze_input_hashes(root)
+        if expected_provider == LEGACY_PROVIDER
+        else _kilo_freeze_input_hashes(root)
+    )
     _require_equal(current_hashes, freeze.get("freeze_input_hashes"), "freeze-input hashes")
     _require_equal(
         sprint3a.freeze_inputs_hash(current_hashes),
@@ -243,11 +290,11 @@ def load_frozen_execution_context(
     _require_equal(
         freeze.get("planned_primary_runs"), EXPECTED_PRIMARY_RUNS, "freeze planned primary runs"
     )
-    _require_equal(protocol.get("provider"), EXPECTED_PROVIDER, "provider")
-    _require_equal(protocol.get("model"), EXPECTED_CODING_MODEL, "coding model")
+    _require_equal(protocol.get("provider"), expected_provider, "provider")
+    _require_equal(protocol.get("model"), expected_model, "coding model")
     _require_equal(
         protocol.get("model_resolution_variable"),
-        "OPENROUTER_CODING_MODEL",
+        model_variable,
         "model resolution variable",
     )
     _require_equal(protocol.get("model_settings", {}).get("temperature"), 0, "temperature")
@@ -289,7 +336,7 @@ def load_frozen_execution_context(
 
     configuration = load_experiment_configuration(resolved_config, project_root=root)
     if (
-        configuration.model.provider != EXPECTED_PROVIDER
+        configuration.model.provider != expected_provider
         or configuration.model.settings.get("temperature") != 0
     ):
         raise FreezeValidationError(
@@ -300,20 +347,23 @@ def load_frozen_execution_context(
     # the existing ROLLOUT1_SYSTEM_PROMPT in create_coding_agent.
     frozen_model = configuration.model.model_copy(
         update={
-            "model": EXPECTED_CODING_MODEL,
+            "model": expected_model,
             "prompt_version": str(protocol.get("prompt_version", "")),
             "settings": {"temperature": 0},
         }
     )
     configuration = replace(configuration, model=frozen_model)
 
-    if _dotenv_value(root, "OPENROUTER_CODING_MODEL") != EXPECTED_CODING_MODEL:
+    if (
+        expected_provider == LEGACY_PROVIDER
+        and _dotenv_value(root, model_variable) != expected_model
+    ):
         raise FreezeValidationError(
-            "OPENROUTER_CODING_MODEL must exactly match the frozen coding model"
+            f"{model_variable} must exactly match the frozen coding model"
         )
     if require_credentials:
         required = (
-            "OPENROUTER_API_KEY",
+            "OPENROUTER_API_KEY" if expected_provider == LEGACY_PROVIDER else "KILO_API_KEY",
             "HF_TOKEN",
             "NEO4J_URI",
             "NEO4J_USERNAME",
@@ -454,12 +504,25 @@ def inspect_primary_slots(
     return tuple(observations)
 
 
-def _settings_for_frozen_model(settings: Settings | None) -> Settings:
+def _settings_for_frozen_model(
+    settings: Settings | None,
+    configuration: LoadedExperimentConfiguration | None = None,
+) -> Settings:
     base = settings or get_settings()
+    provider = base.model_provider if configuration is None else configuration.model.provider
+    if provider == EXPECTED_PROVIDER:
+        return base.model_copy(
+            update={
+                "model_provider": EXPECTED_PROVIDER,
+                "kilo_coding_model": EXPECTED_CODING_MODEL,
+                "kilo_api_key": _dotenv_value(Path.cwd(), "KILO_API_KEY")
+                or base.kilo_api_key,
+            }
+        )
     return base.model_copy(
         update={
-            "model_provider": EXPECTED_PROVIDER,
-            "openrouter_coding_model": EXPECTED_CODING_MODEL,
+            "model_provider": LEGACY_PROVIDER,
+            "openrouter_coding_model": LEGACY_CODING_MODEL,
             "openrouter_api_key": _dotenv_value(Path.cwd(), "OPENROUTER_API_KEY")
             or base.openrouter_api_key,
         }
@@ -495,7 +558,7 @@ def build_condition_runner(
         raise Sprint3BExecutionError(f"unsupported Sprint 3B condition: {condition}")
     return ExperimentRunner(
         configuration,
-        settings=_settings_for_frozen_model(settings),
+        settings=_settings_for_frozen_model(settings, configuration),
         objective_evaluator=objective_evaluator,
         recurrence_evaluator=recurrence_evaluator,
         workspace_resolver=workspace_resolver,
@@ -530,6 +593,8 @@ def _metadata_for_execution(
     validity: RunValidity,
 ) -> dict[str, object]:
     artifact = execution.artifact
+    provider = str(context.protocol.get("provider", EXPECTED_PROVIDER))
+    coding_model = str(context.protocol.get("model", EXPECTED_CODING_MODEL))
     completed_at = datetime.now(UTC)
     started_at = artifact.executed_action.started_at
     usage = (
@@ -541,7 +606,7 @@ def _metadata_for_execution(
     selected = retrieval[0] if retrieval else None
     return {
         "experiment_id": EXPERIMENT_ID,
-        "protocol_revision": PROTOCOL_REVISION,
+        "protocol_revision": context.protocol.get("protocol_revision", PROTOCOL_REVISION),
         "sprint3a_freeze_hash": context.freeze_hash,
         "execution_commit_sha": context.execution_commit_sha,
         "task_id": slot.task_id,
@@ -550,8 +615,8 @@ def _metadata_for_execution(
         "plan_index": slot.index,
         "started_at": started_at.isoformat(),
         "completed_at": completed_at.isoformat(),
-        "coding_model": EXPECTED_CODING_MODEL,
-        "provider": EXPECTED_PROVIDER,
+        "coding_model": coding_model,
+        "provider": provider,
         "prompt_config_identity": {
             "config_sha256": context.freeze.get("config_sha256"),
             "prompt_version": artifact.prompt_version,
@@ -609,6 +674,8 @@ def _write_invalid_attempt(
     error: BaseException,
     store: ExperimentRunArtifactStore,
 ) -> SlotObservation:
+    provider = str(context.protocol.get("provider", EXPECTED_PROVIDER))
+    coding_model = str(context.protocol.get("model", EXPECTED_CODING_MODEL))
     run_id = f"{EXPERIMENT_ID}-{slot.condition.value}-{case.task.id}-{uuid.uuid4().hex}"
     run_dir = store.prepare_run_directory(EXPERIMENT_ID, slot.condition, case.task.id, run_id)
     now = datetime.now(UTC)
@@ -637,7 +704,7 @@ def _write_invalid_attempt(
         task_id=case.task.id,
         family_id=case.task.family_id,
         chronological_index=case.task.chronological_index,
-        model=EXPECTED_CODING_MODEL,
+        model=coding_model,
         model_settings={"temperature": 0},
         prompt_version=str(context.protocol.get("prompt_version", "v1")),
         planned_action=action,
@@ -663,7 +730,7 @@ def _write_invalid_attempt(
         run_dir / "run_metadata.json",
         {
             "experiment_id": EXPERIMENT_ID,
-            "protocol_revision": PROTOCOL_REVISION,
+            "protocol_revision": context.protocol.get("protocol_revision", PROTOCOL_REVISION),
             "sprint3a_freeze_hash": context.freeze_hash,
             "execution_commit_sha": context.execution_commit_sha,
             "task_id": case.task.id,
@@ -671,8 +738,8 @@ def _write_invalid_attempt(
             "run_id": run_id,
             "started_at": now.isoformat(),
             "completed_at": now.isoformat(),
-            "coding_model": EXPECTED_CODING_MODEL,
-            "provider": EXPECTED_PROVIDER,
+            "coding_model": coding_model,
+            "provider": provider,
             "objective_evaluator": {"result": False},
             "recurrence_evaluator": {"result": False},
             "tool_action_events": [],
@@ -823,6 +890,14 @@ def validate_live_preflight(context: FrozenExecutionContext) -> None:
     inspect_primary_slots(context.artifact_root, context.plan)
 
 
+def validate_kilo_provider_preflight(context: FrozenExecutionContext) -> str:
+    """Run the sole provider request used by ``--preflight-only``."""
+    if context.protocol.get("provider") != EXPECTED_PROVIDER:
+        raise FreezeValidationError("Kilo provider preflight requires the Kilo protocol")
+    settings = _settings_for_frozen_model(get_settings(), context.config)
+    return preflight_kilo_provider(settings)
+
+
 def execute_frozen_primary_runs(
     *,
     project_root: Path,
@@ -838,7 +913,7 @@ def execute_frozen_primary_runs(
         allow_existing_artifacts=True,
     )
     validate_live_preflight(context)
-    settings = _settings_for_frozen_model(get_settings())
+    settings = _settings_for_frozen_model(get_settings(), context.config)
     all_cases = list(context.cases)
     instance_ids = sprint3._manifest_instance_ids(
         context.config.task_manifest_path, EXPECTED_TASK_IDS
@@ -944,6 +1019,7 @@ def main() -> None:
         allow_existing_artifacts=True,
     )
     if args.preflight_only:
+        validate_kilo_provider_preflight(context)
         validate_live_preflight(context)
         print(json.dumps({"status": "READY", "planned_slots": len(context.plan)}, sort_keys=True))
         return
@@ -966,6 +1042,8 @@ __all__ = [
     "EXPECTED_CONDITIONS",
     "EXPECTED_PATTERN_IDS",
     "EXPECTED_PRIMARY_RUNS",
+    "EXPECTED_PROVIDER",
+    "KILO_BASE_URL",
     "EXPECTED_TASK_IDS",
     "ExecutionReport",
     "ExecutionSlot",
@@ -983,4 +1061,5 @@ __all__ = [
     "inspect_primary_slots",
     "load_frozen_execution_context",
     "validate_live_preflight",
+    "validate_kilo_provider_preflight",
 ]
