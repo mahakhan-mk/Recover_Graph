@@ -201,7 +201,9 @@ def test_v2_uses_fresh_artifact_root_and_v1_files_are_unchanged() -> None:
     context = v2.load_frozen_execution_context(project_root=ROOT)
     assert context.artifact_root == ROOT / "research/evidence/results/GS-E003/sprint3b_kilo_v2/runs"
     assert context.artifact_root != ROOT / "research/evidence/results/GS-E003/sprint3b_kilo/runs"
-    assert not context.artifact_root.exists()
+    assert context.artifact_root.exists()
+    with pytest.raises(v2.FreezeValidationError, match="already exists"):
+        v2.load_frozen_execution_context(project_root=ROOT, allow_existing_artifacts=False)
 
     v1_paths = (
         ROOT / "configs/experiments/sprint3b_kilo.yaml",
