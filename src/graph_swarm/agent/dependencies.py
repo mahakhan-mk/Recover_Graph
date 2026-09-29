@@ -86,6 +86,7 @@ class AgentDependencies:
     environment: EnvironmentContext | None = None
     advisory_service: AdvisoryService | None = None
     capture_advisory_retrieval: bool = False
+    fail_closed_advisory: bool = False
     artifact_writer: JsonlResearchArtifactWriter | None = None
     python_executable: Path | None = None
     execution_runtime: ExecutionRuntime | None = None

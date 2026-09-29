@@ -36,10 +36,12 @@ class AdvisoryService:
         repository: OperationalMemoryRepository,
         applicability: ApplicabilityService | None = None,
         retrieval_service: RecoveryPatternRetrievalService | None = None,
+        fail_closed: bool = False,
     ) -> None:
         self._repository = repository
         self._applicability = applicability or ApplicabilityService()
         self._retrieval_service = retrieval_service
+        self._fail_closed = fail_closed
         self._v2_repository = (
             repository if _supports_v2(repository) else None
         )
@@ -144,7 +146,11 @@ class AdvisoryService:
         try:
             lineage = self._repository.get_recovery_pattern(result.selected_pattern.id)
             _validate_pattern_lineage(result.selected_pattern.id, lineage)
-        except Exception:  # noqa: BLE001 - missing provenance fails closed
+        except Exception as error:  # noqa: BLE001 - missing provenance fails closed
+            if self._fail_closed:
+                raise RuntimeError(
+                    "treatment RecoveryPattern source lineage is unavailable"
+                ) from error
             return AdviceResult.no_advice(
                 "selected RecoveryPattern source lineage is unavailable",
                 considered_candidates=len(result.candidates),

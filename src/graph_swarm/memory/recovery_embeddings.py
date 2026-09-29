@@ -12,7 +12,7 @@ from graph_swarm.domain.recovery_patterns import (
     RecoveryPattern,
     RecoveryPatternStatus,
 )
-from graph_swarm.settings import get_settings
+from graph_swarm.settings import Settings, get_settings
 
 RECOVERY_PATTERN_EMBEDDING_TEXT_VERSION = "v1"
 RECOVERY_PATTERN_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -121,18 +121,22 @@ class RecoveryPatternEmbedder:
     dimension = RECOVERY_PATTERN_EMBEDDING_DIMENSION
     normalize_embeddings = RECOVERY_PATTERN_EMBEDDING_NORMALIZED
 
-    def __init__(self, encoder: EmbeddingEncoder | None = None) -> None:
+    def __init__(
+        self,
+        encoder: EmbeddingEncoder | None = None,
+        settings: Settings | None = None,
+    ) -> None:
         if encoder is not None:
             self._encoder = encoder
             return
 
-        settings = get_settings()
-        token = settings.hf_token
+        selected_settings = settings or get_settings()
+        token = selected_settings.hf_token
         if token is None:
             raise EmbeddingModelUnavailableError(
                 "HF_TOKEN is required for RecoveryPattern embeddings"
             )
-        self.model_name = settings.hf_embedding_model
+        self.model_name = selected_settings.hf_embedding_model
         self._encoder = _load_huggingface_encoder(
             token=token,
             model_name=self.model_name,

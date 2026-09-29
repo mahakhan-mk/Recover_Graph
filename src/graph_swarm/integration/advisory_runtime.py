@@ -126,6 +126,8 @@ class Neo4jAdvisoryRuntime:
 
 def create_neo4j_advisory_runtime(
     settings: Settings | None = None,
+    *,
+    fail_closed_advisory: bool = False,
 ) -> Neo4jAdvisoryRuntime:
     """Build the production Neo4j -> V2 retrieval -> advisory stack.
 
@@ -148,7 +150,8 @@ def create_neo4j_advisory_runtime(
         repository=repository,
         treatment_repository=treatment_repository,
         advisory_service=AdvisoryService(
-            cast(OperationalMemoryRepository, treatment_repository)
+            cast(OperationalMemoryRepository, treatment_repository),
+            fail_closed=fail_closed_advisory,
         ),
     )
 

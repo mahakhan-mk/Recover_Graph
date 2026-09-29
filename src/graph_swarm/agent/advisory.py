@@ -19,6 +19,10 @@ from graph_swarm.domain.events import AgentEvent
 from graph_swarm.domain.tasks import Task
 
 
+class TreatmentAdvisoryInfrastructureError(RuntimeError):
+    """Raised when a fail-closed treatment lookup cannot complete."""
+
+
 def prepare_tool_action(
     dependencies: AgentDependencies,
     tool: str,
@@ -57,6 +61,10 @@ def prepare_tool_action(
         advice = service.evaluate_action(task, action, environment)
     except Exception as error:  # noqa: BLE001 - advisory failure must not mutate execution
         dependencies.advisory_errors.append(f"lookup failed for {tool}: {error}")
+        if dependencies.fail_closed_advisory:
+            raise TreatmentAdvisoryInfrastructureError(
+                f"treatment advisory lookup failed for {tool}: {error}"
+            ) from error
         return action
 
     if not advice.has_advice:
@@ -85,6 +93,10 @@ def prepare_tool_action(
             )
     except Exception as error:  # noqa: BLE001 - preserve normal tool execution
         dependencies.advisory_errors.append(f"formatting failed for {tool}: {error}")
+        if dependencies.fail_closed_advisory:
+            raise TreatmentAdvisoryInfrastructureError(
+                f"treatment advisory rendering failed for {tool}: {error}"
+            ) from error
         return action
 
     dependencies.remember_advised_action(key)

@@ -686,6 +686,7 @@ class ExperimentRunner:
         recurrence_evaluator: RecurrenceEvaluator | None = None,
         oracle_resolver: OracleAdviceResolver | None = None,
         advisory_service: TreatmentAdvisoryService | None = None,
+        fail_closed_advisory: bool = False,
         condition: ExperimentCondition | None = None,
         artifact_store: ExperimentRunArtifactStore | None = None,
         request_pacing: ProviderRequestPacing | None = None,
@@ -754,6 +755,7 @@ class ExperimentRunner:
         self.advisory_service = (
             advisory_service if selected_condition is ExperimentCondition.T else None
         )
+        self.fail_closed_advisory = fail_closed_advisory
         self.artifact_store = artifact_store or ExperimentRunArtifactStore(
             configuration.artifact_root_path
         )
@@ -848,6 +850,9 @@ class ExperimentRunner:
                 else None
             ),
             capture_advisory_retrieval=condition is ExperimentCondition.T,
+            fail_closed_advisory=(
+                self.fail_closed_advisory and condition is ExperimentCondition.T
+            ),
             environment=environment,
             python_executable=python_executable,
             execution_runtime=execution_runtime,
