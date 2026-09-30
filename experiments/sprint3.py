@@ -34,6 +34,7 @@ from graph_swarm.agent.tools.run_command import run_command, workspace_process_e
 from graph_swarm.agent.tools.run_tests import run_tests
 from graph_swarm.domain.events import AgentEvent
 from graph_swarm.domain.tasks import Task
+from graph_swarm.memory.recovery_evidence import is_test_execution
 from graph_swarm.research.benchmark_environments import (
     BenchmarkEnvironmentConfigurationError,
     BenchmarkEnvironmentPolicy,
@@ -54,6 +55,7 @@ from graph_swarm.research.runner import (
     LoadedExperimentConfiguration,
     RecurrenceEvaluationRequired,
     RecurrenceEvaluator,
+    RecurrenceEventStream,
     load_experiment_configuration,
     load_task_cases,
 )
@@ -534,7 +536,17 @@ def make_recurrence_matcher(
             raise RecurrenceEvaluationRequired(f"no frozen recurrence matcher for {case.task.id}")
         for event in events:
             result = event.result
-            if result.tool_name != "run_tests" or result.success:
+            if result.success:
+                continue
+            is_test_event = result.tool_name == "run_tests"
+            if result.tool_name == "run_command" and isinstance(
+                events, RecurrenceEventStream
+            ):
+                planned_action = events.planned_action_for(event.action_id)
+                is_test_event = (
+                    planned_action is not None and is_test_execution(planned_action)
+                )
+            if not is_test_event:
                 continue
             observed = "\n".join(value for value in (result.output, result.error) if value)
             if any(

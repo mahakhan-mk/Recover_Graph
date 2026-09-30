@@ -13,11 +13,11 @@ import json
 import os
 import shutil
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, cast, overload
 from uuid import uuid4
 
 import yaml
@@ -382,6 +382,36 @@ class BenchmarkEvaluationOutput:
     events: tuple[AgentEvent, ...]
     agent_result: AgentRunResult[str] | None
     error: Exception | None
+
+
+@dataclass(frozen=True)
+class RecurrenceEventStream(Sequence[AgentEvent]):
+    """Completed events plus trusted planned-action context for recurrence checks.
+
+    The public recurrence callback still iterates over ``AgentEvent`` values.
+    The side-channel keeps structured planned arguments available to evaluators
+    without changing the persisted event schema or exposing benchmark data to
+    the agent runtime.
+    """
+
+    events: tuple[AgentEvent, ...]
+    planned_actions: Mapping[str, PlannedAction]
+
+    @overload
+    def __getitem__(self, index: int) -> AgentEvent: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> tuple[AgentEvent, ...]: ...
+
+    def __getitem__(self, index: int | slice) -> AgentEvent | tuple[AgentEvent, ...]:
+        return self.events[index]
+
+    def __len__(self) -> int:
+        return len(self.events)
+
+    def planned_action_for(self, action_id: str) -> PlannedAction | None:
+        """Return the trusted planned action paired with one completed event."""
+        return self.planned_actions.get(action_id)
 
 
 ObjectiveTaskEvaluator = Callable[[Task, Path], bool]
@@ -916,7 +946,10 @@ class ExperimentRunner:
         )
         known_failure_repeated = self.recurrence_evaluator(
             case,
-            tuple(dependencies.events),
+            RecurrenceEventStream(
+                tuple(dependencies.events),
+                dependencies.planned_actions,
+            ),
             result,
             workspace,
         )
@@ -1382,6 +1415,7 @@ __all__ = [
     "ObjectiveTaskEvaluator",
     "OracleAdviceResolver",
     "OracleEvidenceRequired",
+    "RecurrenceEventStream",
     "RecurrenceEvaluationRequired",
     "RecurrenceEvaluator",
     "TreatmentAdvisoryService",

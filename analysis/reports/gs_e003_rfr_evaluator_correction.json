@@ -1,0 +1,276 @@
+{
+  "report_version": "gs_e003_rfr_evaluator_correction_v1",
+  "scope": "retained GS-E003 Sprint3B v3 primary artifacts only",
+  "read_only": true,
+  "model_called": false,
+  "neo4j_written": false,
+  "historical_artifacts_modified": false,
+  "artifact_root": "research/evidence/results/GS-E003/sprint3b_kilo_v3/runs/GS-E003",
+  "artifact_count": 12,
+  "old_recurrence_numerator": 0,
+  "corrected_recurrence_numerator": 5,
+  "changed_false_to_true": [
+    "B0/GS-T007",
+    "B0/GS-T009",
+    "B0/GS-T011",
+    "T/GS-T008",
+    "T/GS-T011"
+  ],
+  "non_recurrence_unmatched_failed_pytest_commands": [],
+  "notes": [
+    "Old behavior considers only failed run_tests events.",
+    "Corrected behavior preserves run_tests and additionally accepts failed run_command actions only when trusted structured argv is pytest, python -m pytest, or python3 -m pytest (including executable paths by basename).",
+    "Recurrence still requires a frozen FAIL_TO_PASS target/signature match.",
+    "The one failed run_tests event in B0/GS-T006 had unrelated collection errors and no frozen target match, so it remains non-recurrence.",
+    "Seven failed pytest executions through run_command are recognized by the corrected evaluator; all seven match a frozen target."
+  ],
+  "records": [
+    {
+      "task": "GS-T006",
+      "condition": "B0",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": [
+        "test_csv (tornado.test.locale_test.TranslationLoaderTest)",
+        "test_csv_bom (tornado.test.locale_test.TranslationLoaderTest)"
+      ],
+      "old_failed_test_executions": [
+        {
+          "action_sequence": 12,
+          "tool": "run_tests",
+          "command": null,
+          "target_match": false,
+          "matched_signatures": []
+        }
+      ],
+      "corrected_failed_test_executions": [
+        {
+          "action_sequence": 12,
+          "tool": "run_tests",
+          "command": null,
+          "target_match": false,
+          "matched_signatures": []
+        }
+      ],
+      "old_recurrence": false,
+      "corrected_recurrence": false
+    },
+    {
+      "task": "GS-T007",
+      "condition": "B0",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": [
+        "tests/test_idtracking.py::test_complex",
+        "tests/test_idtracking.py::test_if_branching_stores",
+        "tests/test_regression.py::TestBug::test_partial_conditional_assignments"
+      ],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [
+        {
+          "action_sequence": 20,
+          "tool": "run_command",
+          "command": ["python", "-m", "pytest", "tests/test_idtracking.py", "-q"],
+          "target_match": true,
+          "matched_signatures": [
+            "tests/test_idtracking.py::test_complex",
+            "tests/test_idtracking.py::test_if_branching_stores"
+          ]
+        }
+      ],
+      "old_recurrence": false,
+      "corrected_recurrence": true
+    },
+    {
+      "task": "GS-T008",
+      "condition": "B0",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": ["tests/dialects/test_spark.py::TestSpark::test_spark"],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [],
+      "old_recurrence": false,
+      "corrected_recurrence": false
+    },
+    {
+      "task": "GS-T009",
+      "condition": "B0",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": ["patsy/mgcv_cubic_splines.py::test_crs_compat"],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [
+        {
+          "action_sequence": 25,
+          "tool": "run_command",
+          "command": ["python", "-m", "pytest", "-q", "patsy/mgcv_cubic_splines.py"],
+          "target_match": true,
+          "matched_signatures": ["patsy/mgcv_cubic_splines.py::test_crs_compat"]
+        }
+      ],
+      "old_recurrence": false,
+      "corrected_recurrence": true
+    },
+    {
+      "task": "GS-T010",
+      "condition": "B0",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": [
+        "tests/test_optimizer.py::TestOptimizer::test_merge_subqueries",
+        "tests/test_optimizer.py::TestOptimizer::test_qualify_columns",
+        "tests/test_optimizer.py::TestOptimizer::test_tpcds"
+      ],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [],
+      "old_recurrence": false,
+      "corrected_recurrence": false
+    },
+    {
+      "task": "GS-T011",
+      "condition": "B0",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": [
+        "tests/render/test_text.py::test_render_text[True-False-True-expected_output0]",
+        "tests/render/test_text.py::test_render_text[True-True-True-expected_output1]",
+        "tests/render/test_text.py::test_render_text[False-False-True-expected_output2]",
+        "tests/render/test_text.py::test_render_text[False-True-True-expected_output3]",
+        "tests/render/test_text.py::test_render_text_given_depth[True-2-expected_output2]",
+        "tests/render/test_text.py::test_render_text_encoding[2-utf-8-expected_output1]",
+        "tests/render/test_text.py::test_render_text_with_license_info_and_reversed_tree[utf-8-expected_output0]"
+      ],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [
+        {
+          "action_sequence": 20,
+          "tool": "run_command",
+          "command": ["python", "-m", "pytest", "tests/render/test_text.py", "-q"],
+          "target_match": true,
+          "matched_signatures": [
+            "tests/render/test_text.py::test_render_text[True-False-True-expected_output0]",
+            "tests/render/test_text.py::test_render_text[True-True-True-expected_output1]",
+            "tests/render/test_text.py::test_render_text[False-False-True-expected_output2]",
+            "tests/render/test_text.py::test_render_text[False-True-True-expected_output3]",
+            "tests/render/test_text.py::test_render_text_given_depth[True-2-expected_output2]",
+            "tests/render/test_text.py::test_render_text_encoding[2-utf-8-expected_output1]",
+            "tests/render/test_text.py::test_render_text_with_license_info_and_reversed_tree[utf-8-expected_output0]"
+          ]
+        },
+        {
+          "action_sequence": 21,
+          "tool": "run_command",
+          "command": ["python", "-m", "pytest", "tests/render/test_text.py::test_render_text_encoding", "-vv", "-k", "2-utf-8"],
+          "target_match": true,
+          "matched_signatures": ["tests/render/test_text.py::test_render_text_encoding[2-utf-8-expected_output1]"]
+        }
+      ],
+      "old_recurrence": false,
+      "corrected_recurrence": true
+    },
+    {
+      "task": "GS-T006",
+      "condition": "T",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": [
+        "test_csv (tornado.test.locale_test.TranslationLoaderTest)",
+        "test_csv_bom (tornado.test.locale_test.TranslationLoaderTest)"
+      ],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [],
+      "old_recurrence": false,
+      "corrected_recurrence": false
+    },
+    {
+      "task": "GS-T007",
+      "condition": "T",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": [
+        "tests/test_idtracking.py::test_complex",
+        "tests/test_idtracking.py::test_if_branching_stores",
+        "tests/test_regression.py::TestBug::test_partial_conditional_assignments"
+      ],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [],
+      "old_recurrence": false,
+      "corrected_recurrence": false
+    },
+    {
+      "task": "GS-T008",
+      "condition": "T",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": ["tests/dialects/test_spark.py::TestSpark::test_spark"],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [
+        {
+          "action_sequence": 13,
+          "tool": "run_command",
+          "command": ["python", "-m", "pytest", "tests/dialects/test_spark.py::TestSpark", "-q"],
+          "target_match": true,
+          "matched_signatures": ["tests/dialects/test_spark.py::TestSpark::test_spark"]
+        },
+        {
+          "action_sequence": 18,
+          "tool": "run_command",
+          "command": ["python", "-m", "pytest", "tests/dialects/test_spark.py::TestSpark", "-q"],
+          "target_match": true,
+          "matched_signatures": ["tests/dialects/test_spark.py::TestSpark::test_spark"]
+        }
+      ],
+      "old_recurrence": false,
+      "corrected_recurrence": true
+    },
+    {
+      "task": "GS-T009",
+      "condition": "T",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": ["patsy/mgcv_cubic_splines.py::test_crs_compat"],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [],
+      "old_recurrence": false,
+      "corrected_recurrence": false
+    },
+    {
+      "task": "GS-T010",
+      "condition": "T",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": [
+        "tests/test_optimizer.py::TestOptimizer::test_merge_subqueries",
+        "tests/test_optimizer.py::TestOptimizer::test_qualify_columns",
+        "tests/test_optimizer.py::TestOptimizer::test_tpcds"
+      ],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [],
+      "old_recurrence": false,
+      "corrected_recurrence": false
+    },
+    {
+      "task": "GS-T011",
+      "condition": "T",
+      "artifact_known_failure_repeated": false,
+      "frozen_fail_to_pass_targets": [
+        "tests/render/test_text.py::test_render_text[True-False-True-expected_output0]",
+        "tests/render/test_text.py::test_render_text[True-True-True-expected_output1]",
+        "tests/render/test_text.py::test_render_text[False-False-True-expected_output2]",
+        "tests/render/test_text.py::test_render_text[False-True-True-expected_output3]",
+        "tests/render/test_text.py::test_render_text_given_depth[True-2-expected_output2]",
+        "tests/render/test_text.py::test_render_text_encoding[2-utf-8-expected_output1]",
+        "tests/render/test_text.py::test_render_text_with_license_info_and_reversed_tree[utf-8-expected_output0]"
+      ],
+      "old_failed_test_executions": [],
+      "corrected_failed_test_executions": [
+        {
+          "action_sequence": 11,
+          "tool": "run_command",
+          "command": ["pytest", "tests/render/test_text.py", "-q"],
+          "target_match": true,
+          "matched_signatures": [
+            "tests/render/test_text.py::test_render_text[True-False-True-expected_output0]",
+            "tests/render/test_text.py::test_render_text[True-True-True-expected_output1]",
+            "tests/render/test_text.py::test_render_text[False-False-True-expected_output2]",
+            "tests/render/test_text.py::test_render_text[False-True-True-expected_output3]",
+            "tests/render/test_text.py::test_render_text_given_depth[True-2-expected_output2]",
+            "tests/render/test_text.py::test_render_text_encoding[2-utf-8-expected_output1]",
+            "tests/render/test_text.py::test_render_text_with_license_info_and_reversed_tree[utf-8-expected_output0]"
+          ]
+        }
+      ],
+      "old_recurrence": false,
+      "corrected_recurrence": true
+    }
+  ]
+}

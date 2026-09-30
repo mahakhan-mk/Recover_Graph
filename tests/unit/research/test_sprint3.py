@@ -18,6 +18,7 @@ from experiments.sprint3 import (
     make_recurrence_matcher,
 )
 from graph_swarm.domain.action import ActionResult
+from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.events import AgentEvent, AgentEventType
 from graph_swarm.domain.tasks import Task
 from graph_swarm.research.benchmark_environments import (
@@ -29,6 +30,8 @@ from graph_swarm.research.benchmark_environments import (
 from graph_swarm.research.runner import (
     BenchmarkTaskCase,
     RecurrenceEvaluationRequired,
+    RecurrenceEventStream,
+    build_task_prompt,
 )
 
 
@@ -88,6 +91,52 @@ def _test_event(output: str | None, *, success: bool = False) -> AgentEvent:
         event_type=AgentEventType.ACTION_COMPLETED,
         result=result,
         occurred_at=started,
+    )
+
+
+def _run_command_event(
+    command: list[str],
+    output: str | None,
+    *,
+    success: bool = False,
+) -> tuple[AgentEvent, PlannedAction]:
+    started = datetime.now(UTC)
+    action = PlannedAction(
+        id="action-command",
+        run_id="run-1",
+        task_id="GS-T006",
+        tool="run_command",
+        operation="run_command",
+        arguments={"command": command},
+        planned_at=started,
+    )
+    result = ActionResult(
+        action_id=action.id,
+        tool_name="run_command",
+        success=success,
+        exit_code=0 if success else 1,
+        output=output,
+        started_at=started,
+        completed_at=started,
+    )
+    return (
+        AgentEvent(
+            event_id="event-command",
+            run_id=action.run_id,
+            task_id=action.task_id,
+            action_id=action.id,
+            event_type=AgentEventType.ACTION_COMPLETED,
+            result=result,
+            occurred_at=started,
+        ),
+        action,
+    )
+
+
+def _stream(event: AgentEvent, action: PlannedAction | None = None) -> RecurrenceEventStream:
+    return RecurrenceEventStream(
+        (event,),
+        {} if action is None else {action.id: action},
     )
 
 
@@ -448,10 +497,141 @@ def test_benchmark_environment_manifest_validates_frozen_tasks() -> None:
     policy = load_benchmark_environment_policy(
         Path("configs/research/benchmark_environments.toml")
     )
-
     assert policy.task_order == tuple(f"GS-T{i:03d}" for i in range(6, 16))
     assert policy.task("GS-T012").runtime == "manifest_container_required"
     assert all(not task.network_during_execution for task in policy.tasks.values())
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["pytest", "tests/test_recurrence.py::test_historical"],
+        ["python", "-m", "pytest", "tests/test_recurrence.py::test_historical"],
+        ["python3", "-m", "pytest", "tests/test_recurrence.py::test_historical"],
+        ["C:/Python/python3.exe", "-m", "pytest", "tests/test_recurrence.py::test_historical"],
+    ],
+)
+def test_sprint3_recurrence_matches_structured_pytest_run_command(
+    command: list[str],
+) -> None:
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase(
+            "example__repo.abc12345",
+            ("example/test_recurrence.py::test_historical",),
+            "",
+        )
+    }
+    event, action = _run_command_event(
+        command,
+        "FAILED example/test_recurrence.py::test_historical",
+    )
+
+    assert make_recurrence_matcher(frozen)(
+        _case(2),
+        _stream(event, action),
+        None,
+        Path("workspace"),
+    ) is True
+
+
+def test_sprint3_recurrence_preserves_run_tests_matching_behavior() -> None:
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase(
+            "example__repo.abc12345",
+            ("example/test_recurrence.py::test_historical",),
+            "",
+        )
+    }
+    matcher = make_recurrence_matcher(frozen)
+
+    assert matcher(
+        _case(2),
+        [_test_event("FAILED example/test_recurrence.py::test_historical")],
+        None,
+        Path("workspace"),
+    ) is True
+    assert matcher(
+        _case(2),
+        [_test_event("FAILED example/test_recurrence.py::test_unrelated")],
+        None,
+        Path("workspace"),
+    ) is False
+
+
+def test_sprint3_recurrence_rejects_successful_pytest_run_command() -> None:
+    event, action = _run_command_event(
+        ["python3", "-m", "pytest", "tests/test_recurrence.py::test_historical"],
+        "PASSED example/test_recurrence.py::test_historical",
+        success=True,
+    )
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase(
+            "example__repo.abc12345",
+            ("example/test_recurrence.py::test_historical",),
+            "",
+        )
+    }
+
+    assert make_recurrence_matcher(frozen)(
+        _case(2), _stream(event, action), None, Path("workspace")
+    ) is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["git", "status", "--short"],
+        ["python", "-c", "print('pytest failed')"],
+    ],
+)
+def test_sprint3_recurrence_rejects_non_test_run_command(command: list[str]) -> None:
+    event, action = _run_command_event(command, "FAILED test_historical")
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase(
+            "example__repo.abc12345",
+            ("test_historical",),
+            "",
+        )
+    }
+
+    assert make_recurrence_matcher(frozen)(
+        _case(2), _stream(event, action), None, Path("workspace")
+    ) is False
+
+
+def test_sprint3_recurrence_requires_matching_signature_for_pytest_command() -> None:
+    event, action = _run_command_event(
+        ["pytest", "tests/test_recurrence.py::test_unrelated"],
+        "FAILED example/test_recurrence.py::test_unrelated",
+    )
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase(
+            "example__repo.abc12345",
+            ("example/test_recurrence.py::test_historical",),
+            "",
+        )
+    }
+
+    assert make_recurrence_matcher(frozen)(
+        _case(2), _stream(event, action), None, Path("workspace")
+    ) is False
+
+
+def test_sprint3_recurrence_fail_to_pass_data_stays_evaluator_only() -> None:
+    sentinel = "benchmark-only-test-id"
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase(
+            "example__repo.abc12345",
+            (sentinel,),
+            "",
+        )
+    }
+    event, action = _run_command_event(["pytest", "tests/test_recurrence.py"], f"FAILED {sentinel}")
+
+    assert sentinel not in build_task_prompt(_case(2).task)
+    assert make_recurrence_matcher(frozen)(
+        _case(2), _stream(event, action), None, Path("workspace")
+    ) is True
 
 
 def test_benchmark_environment_manifest_rejects_non_repository_python_policy(

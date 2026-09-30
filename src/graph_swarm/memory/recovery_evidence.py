@@ -55,7 +55,14 @@ def is_test_execution(action: PlannedAction) -> bool:
         module = argv[2].lower()
         if module not in {"pytest", "py.test"}:
             return False
-        return executable.startswith("python") or executable in {"py", "py.exe"}
+        if executable.endswith(".exe"):
+            executable = executable[:-4]
+        if executable in {"py", "py.exe", "python", "python3"}:
+            return True
+        if executable.startswith("python3."):
+            version = executable.removeprefix("python3.")
+            return bool(version) and all(part.isdigit() for part in version.split("."))
+        return False
     return False
 
 
