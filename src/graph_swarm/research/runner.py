@@ -39,6 +39,11 @@ from graph_swarm.agent.coding_agent import (
 )
 from graph_swarm.agent.dependencies import AgentDependencies, ExecutionRuntime
 from graph_swarm.agent.pacing import ProviderRequestPacing
+from graph_swarm.agent.prompts import (
+    SystemPromptId,
+    resolve_system_prompt,
+    system_prompt_sha256,
+)
 from graph_swarm.detection.failure_detector import failure_type_for_action
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
@@ -112,6 +117,8 @@ class ExperimentConfiguration(BaseModel):
     model_config_path: str = Field(alias="model_config")
     conditions: tuple[ExperimentCondition, ...]
     limits: ExperimentLimits
+    system_prompt: SystemPromptId = "ROLLOUT1_SYSTEM_PROMPT"
+    system_prompt_sha256: str | None = None
     agent_timeout_seconds: float | None = Field(default=None, gt=0)
     objective_timeout_seconds: float | None = Field(default=None, gt=0)
     command_argv_policy: str | None = None
@@ -136,11 +143,27 @@ class ExperimentConfiguration(BaseModel):
     development: bool = False
     pilot: bool = False
 
+    @property
+    def system_prompt_id(self) -> SystemPromptId:
+        """Expose the YAML prompt selector under the manifest metadata name."""
+        return self.system_prompt
+
     @field_validator("experiment_id", "rollout", "model_config_path", "config_version")
     @classmethod
     def require_non_empty_text(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("experiment configuration text must be non-empty")
+        return value
+
+    @field_validator("system_prompt", mode="before")
+    @classmethod
+    def require_supported_system_prompt(cls, value: object) -> object:
+        supported = ("ROLLOUT1_SYSTEM_PROMPT", "R13B_SYSTEM_PROMPT")
+        if not isinstance(value, str) or value not in supported:
+            raise ValueError(
+                f"unknown system prompt identifier {value!r}; "
+                f"supported identifiers: {', '.join(supported)}"
+            )
         return value
 
     @field_validator(
@@ -165,6 +188,12 @@ class ExperimentConfiguration(BaseModel):
     def require_conditions(self) -> ExperimentConfiguration:
         if not self.conditions:
             raise ValueError("at least one experiment condition is required")
+        expected_sha256 = system_prompt_sha256(self.system_prompt)
+        if self.system_prompt_sha256 is not None and self.system_prompt_sha256 != expected_sha256:
+            raise ValueError(
+                f"system_prompt_sha256 does not match {self.system_prompt!r}: "
+                f"expected {expected_sha256}"
+            )
         return self
 
 
@@ -176,6 +205,18 @@ class LoadedExperimentConfiguration:
     model: ModelConfiguration
     config_path: Path
     project_root: Path
+
+    @property
+    def system_prompt_id(self) -> SystemPromptId:
+        return self.config.system_prompt
+
+    @property
+    def system_prompt_text(self) -> str:
+        return resolve_system_prompt(self.system_prompt_id)
+
+    @property
+    def resolved_system_prompt_sha256(self) -> str:
+        return system_prompt_sha256(self.system_prompt_id)
 
     @property
     def task_manifest_path(self) -> Path:
@@ -602,6 +643,8 @@ class ExperimentRunArtifactStore:
             "execution_manifest_id": artifact.execution_manifest_id,
             "run_id": artifact.run_id,
             "task_id": artifact.task_id,
+            "system_prompt_id": artifact.system_prompt_id,
+            "system_prompt_sha256": artifact.system_prompt_sha256,
             "error": None if error is None else type(error).__name__,
             "error_message": None if error is None else str(error),
             "step_database": str(step_database_path),
@@ -762,6 +805,9 @@ class ExperimentRunner:
                 "T requires an advisory service with evaluate_action"
             )
         self.configuration = configuration
+        self.system_prompt_id = configuration.system_prompt_id
+        self.system_prompt = configuration.system_prompt_text
+        self.system_prompt_sha256 = configuration.resolved_system_prompt_sha256
         self.condition = selected_condition
         self.settings = settings
         self.agent_factory = agent_factory
@@ -1052,6 +1098,7 @@ class ExperimentRunner:
             settings,
             model=self.model,
             capabilities=[step_persistence],
+            system_prompt=self.system_prompt,
         )
 
     def _new_run_id(self, condition: ExperimentCondition, task: Task) -> str:
@@ -1131,6 +1178,8 @@ class ExperimentRunner:
             model=self._artifact_model_name(),
             model_settings=self.configuration.model.settings,
             prompt_version=self.configuration.model.prompt_version,
+            system_prompt_id=self.system_prompt_id,
+            system_prompt_sha256=self.system_prompt_sha256,
             planned_action=planned_action,
             executed_action=executed_action,
             advice_received=advice_received,

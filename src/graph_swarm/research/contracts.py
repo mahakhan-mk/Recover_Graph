@@ -75,6 +75,8 @@ class ExperimentRunArtifact(BaseModel):
     model: str
     model_settings: dict[str, object] = Field(default_factory=dict)
     prompt_version: str
+    system_prompt_id: str | None = None
+    system_prompt_sha256: str | None = None
     planned_action: PlannedAction
     executed_action: ActionResult
     advice_received: AdviceResult | None = None

@@ -1,4 +1,11 @@
-"""Minimal system prompts for the controlled Rollout 1 coding agent."""
+"""System prompts for controlled coding-agent experiments."""
+
+from __future__ import annotations
+
+import hashlib
+from typing import Literal, cast
+
+SystemPromptId = Literal["ROLLOUT1_SYSTEM_PROMPT", "R13B_SYSTEM_PROMPT"]
 
 ROLLOUT1_SYSTEM_PROMPT = """\
 Work only inside the provided workspace. Inspect relevant files before editing them.
@@ -27,9 +34,33 @@ unrelated repository exploration.
 
 R13B_SYSTEM_PROMPT = ROLLOUT1_SYSTEM_PROMPT + "\n" + R13B_RUNTIME_GUIDANCE
 
+_SYSTEM_PROMPTS: dict[SystemPromptId, str] = {
+    "ROLLOUT1_SYSTEM_PROMPT": ROLLOUT1_SYSTEM_PROMPT,
+    "R13B_SYSTEM_PROMPT": R13B_SYSTEM_PROMPT,
+}
+
+
+def resolve_system_prompt(prompt_id: str) -> str:
+    """Resolve one supported experiment prompt identifier to exact text."""
+    try:
+        return _SYSTEM_PROMPTS[cast(SystemPromptId, prompt_id)]
+    except KeyError as error:
+        supported = ", ".join(sorted(_SYSTEM_PROMPTS))
+        raise ValueError(
+            f"unknown system prompt identifier {prompt_id!r}; supported identifiers: {supported}"
+        ) from error
+
+
+def system_prompt_sha256(prompt_id: str) -> str:
+    """Return the SHA256 of the exact UTF-8 text selected by ``prompt_id``."""
+    return hashlib.sha256(resolve_system_prompt(prompt_id).encode("utf-8")).hexdigest()
+
 
 __all__ = [
     "R13B_RUNTIME_GUIDANCE",
     "R13B_SYSTEM_PROMPT",
     "ROLLOUT1_SYSTEM_PROMPT",
+    "SystemPromptId",
+    "resolve_system_prompt",
+    "system_prompt_sha256",
 ]
