@@ -20,6 +20,7 @@ from graph_swarm.domain.recovery_patterns import (
     EnvironmentConstraints,
     RecoveryPattern,
     RecoveryPatternStatus,
+    RecoveryTrigger,
 )
 from graph_swarm.graph.read_models import RecoveryEvidenceLineage
 from graph_swarm.graph.repository import OperationalMemoryRepository
@@ -476,6 +477,18 @@ def construct_recovery_pattern(
         applicability_tool=applicability_tool,
         applicability_operation=applicability_operation,
         source_failure_type=evidence.failure_type,
+        trigger=RecoveryTrigger(
+            failure_type=evidence.failure_type,
+            failure_signature=evidence.failure_signature,
+            failure_context=evidence.failure_symptom,
+            source_task_problem_statement=evidence.source_task_problem_statement,
+            source_tool=evidence.failed_action_tool,
+            source_operation=evidence.failed_action_operation,
+            source_action_arguments=dict(evidence.failed_action_arguments),
+            # Exact equality remains the conservative default.  A later
+            # evidence-backed pattern may explicitly opt out per trigger.
+            version_sensitive=True,
+        ),
         environment_constraints=EnvironmentConstraints(
             runtime=evidence.source_runtime,
             versions=evidence.source_versions,

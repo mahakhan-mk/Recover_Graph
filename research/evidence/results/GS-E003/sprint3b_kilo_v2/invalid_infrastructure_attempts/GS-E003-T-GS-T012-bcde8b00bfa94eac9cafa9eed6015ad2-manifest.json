@@ -1,0 +1,27 @@
+﻿{
+    "archived_at_utc":  "2026-09-29T09:58:15.2861840Z",
+    "original_slot":  "GS-E003/T/GS-T012",
+    "run_id":  "GS-E003-T-GS-T012-bcde8b00bfa94eac9cafa9eed6015ad2",
+    "final_run_validity":  "invalid_infrastructure",
+    "error_type":  "TreatmentAdvisoryInfrastructureError",
+    "error_message":  "treatment advisory lookup failed for read_file: Failed to read from defunct connection IPv4Address((\u0027p-mt-2a41353b6b9a-2-0174.production-orch-0695.neo4j.io\u0027, 7687)) (ResolvedIPv4Address((\u002734.126.161.242\u0027, 7687)))",
+    "rerun_reason":  "Documented invalid infrastructure: Neo4j connection reset",
+    "files":  [
+                  {
+                      "file":  "artifact.json",
+                      "sha256":  "02fc8ac96f6aee336a6681d8c505f6edbd68f23a3252cb297f04379e98463cf6"
+                  },
+                  {
+                      "file":  "raw_evidence.json",
+                      "sha256":  "323663b2fb46a0e77e2c7d9c593203d82f3f7ee403c53a1644dd3dc8183e852e"
+                  },
+                  {
+                      "file":  "run_metadata.json",
+                      "sha256":  "9d0bb5ed7af7517bb3ba343c35393fa9e8ac0ea91fb43e6c181dd409ada07948"
+                  },
+                  {
+                      "file":  "steps.sqlite",
+                      "sha256":  "264ac872676c22a760645030acc2972d53c6d100411bcdaea5330f58d83ccd7e"
+                  }
+              ]
+}

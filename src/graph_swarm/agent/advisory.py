@@ -209,7 +209,6 @@ def _recovery_key(action: PlannedAction, advice: AdviceResult) -> str:
         (
             action.run_id,
             action.task_id,
-            _action_key(action),
             provenance.failure_episode_id,
             provenance.resolution_id,
         )

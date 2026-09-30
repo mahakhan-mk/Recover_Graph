@@ -6,7 +6,9 @@ from graph_swarm.domain.recovery_patterns import (
     EnvironmentConstraints,
     RecoveryPattern,
     RecoveryPatternStatus,
+    RecoveryTrigger,
 )
+from graph_swarm.domain.tasks import Task
 from graph_swarm.retrieval.applicability import RecoveryPatternApplicabilityService
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -65,12 +67,8 @@ def test_objective_anchored_pattern_uses_real_recovery_action_key() -> None:
     )
 
     eligible = service.evaluate(action("edit_file", "edit_file"), ENVIRONMENT, pattern)
-    synthetic = service.evaluate(
-        action("run_command", "run_command"), ENVIRONMENT, pattern
-    )
-    mismatched_operation = service.evaluate(
-        action("edit_file", "write_file"), ENVIRONMENT, pattern
-    )
+    synthetic = service.evaluate(action("run_command", "run_command"), ENVIRONMENT, pattern)
+    mismatched_operation = service.evaluate(action("edit_file", "write_file"), ENVIRONMENT, pattern)
 
     assert eligible.applicable is True
     assert synthetic.applicable is False
@@ -87,3 +85,144 @@ def test_legacy_pattern_falls_back_to_source_key() -> None:
     )
 
     assert decision.applicable is True
+
+
+def triggered_pattern(*, version_sensitive: bool = True) -> RecoveryPattern:
+    pattern = make_pattern(
+        applicability_tool="edit_file",
+        applicability_operation="edit_file",
+    )
+    return pattern.model_copy(
+        update={
+            "environment_constraints": EnvironmentConstraints(
+                runtime="python-3.13", versions={"python": "3.13"}
+            ),
+        }
+    ).model_copy(
+        update={
+            "trigger": RecoveryTrigger(
+                failure_type="test_failure",
+                failure_signature="run_command:exit_code=1",
+                failure_context="DATE_ADD expression referenced before assignment",
+                source_task_problem_statement=(
+                    "DATE_ADD with three arguments raises UnboundLocalError"
+                ),
+                source_tool="run_command",
+                source_operation="run_command",
+                source_action_arguments={
+                    "command": ["python", "-m", "pytest", "tests/test_dateadd.py"]
+                },
+                version_sensitive=version_sensitive,
+            )
+        }
+    )
+
+
+def trigger_task(*, chronological_index: int = 2) -> Task:
+    return Task(
+        id="task-current",
+        problem_statement="DATE_ADD with three arguments raises an UnboundLocalError.",
+        family_id="must-not-be-used",
+        repository="example/repository",
+        chronological_index=chronological_index,
+    )
+
+
+def trigger_action(command: object) -> PlannedAction:
+    result = action("run_command", "run_command")
+    return result.model_copy(update={"arguments": {"command": command}})
+
+
+def test_recovery_action_metadata_does_not_become_failure_trigger() -> None:
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        action("edit_file", "edit_file"),
+        ENVIRONMENT,
+        triggered_pattern(),
+        trigger_task(),
+    )
+
+    assert not decision.applicable
+    assert "trigger_tool_mismatch" in decision.rejection_reasons
+
+
+def test_generic_run_command_does_not_match_every_recovery() -> None:
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        trigger_action(["git", "status"]),
+        ENVIRONMENT,
+        triggered_pattern(),
+        trigger_task(),
+    )
+
+    assert not decision.applicable
+    assert "trigger_intent_missing" in decision.rejection_reasons
+
+
+def test_semantically_relevant_test_trigger_is_eligible() -> None:
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        trigger_action(["python", "-m", "pytest", "tests/test_dateadd.py"]),
+        ENVIRONMENT,
+        triggered_pattern(),
+        trigger_task(),
+    )
+
+    assert decision.applicable
+    assert {
+        "trigger_tool",
+        "trigger_operation",
+        "trigger_intent",
+        "trigger_context",
+    } <= set(decision.matched_fields)
+
+
+def test_unrelated_task_context_is_rejected_without_threshold_tuning() -> None:
+    unrelated = trigger_task().model_copy(
+        update={"problem_statement": "CSV BOM encoding is detected incorrectly."}
+    )
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        trigger_action(["python", "-m", "pytest", "tests/test_encoding.py"]),
+        ENVIRONMENT,
+        triggered_pattern(),
+        unrelated,
+    )
+
+    assert not decision.applicable
+    assert "trigger_context_mismatch" in decision.rejection_reasons
+
+
+def test_generic_variable_overlap_does_not_transfer_recovery_guidance() -> None:
+    jinja_scope_task = trigger_task().model_copy(
+        update={
+            "problem_statement": (
+                "Variable aliasing is broken in conditional assignments. "
+                "Variables should fall back to an outer scope value."
+            )
+        }
+    )
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        trigger_action(["python", "-m", "pytest", "tests/test_scope.py"]),
+        ENVIRONMENT,
+        triggered_pattern(),
+        jinja_scope_task,
+    )
+
+    assert not decision.applicable
+    assert "trigger_context_mismatch" in decision.rejection_reasons
+
+
+def test_version_sensitive_and_explicitly_version_insensitive_triggers() -> None:
+    sensitive = RecoveryPatternApplicabilityService().evaluate(
+        trigger_action(["python", "-m", "pytest"]),
+        ENVIRONMENT.model_copy(update={"versions": {"python": "3.12"}}),
+        triggered_pattern(),
+        trigger_task(),
+    )
+    insensitive = RecoveryPatternApplicabilityService().evaluate(
+        trigger_action(["python", "-m", "pytest"]),
+        ENVIRONMENT.model_copy(update={"versions": {"python": "3.12"}}),
+        triggered_pattern(version_sensitive=False),
+        trigger_task(),
+    )
+
+    assert not sensitive.applicable
+    assert "version_mismatch:python" in sensitive.rejection_reasons
+    assert insensitive.applicable

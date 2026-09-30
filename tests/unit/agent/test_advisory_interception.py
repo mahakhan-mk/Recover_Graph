@@ -233,6 +233,32 @@ def test_same_advised_action_retries_once_then_executes_without_a_loop(
     assert dependencies.behavior_evidence[0].observation == "unchanged"
 
 
+def test_same_recovery_is_not_repeated_for_a_different_generic_action(
+    tmp_path: Path,
+) -> None:
+    task, environment = make_context()
+    dependencies = AgentDependencies(
+        tmp_path,
+        "run-current",
+        task.id,
+        task=task,
+        environment=environment,
+        advisory_service=make_service(make_candidate()),
+    )
+
+    with pytest.raises(ModelRetry):
+        prepare_tool_action(dependencies, "run_tests", "run_tests", {})
+    next_action = prepare_tool_action(
+        dependencies,
+        "run_tests",
+        "run_tests",
+        {"command": ["git", "status"]},
+    )
+
+    assert next_action.tool == "run_tests"
+    assert len(dependencies.advice_events) == 1
+
+
 def test_frozen_one_shot_advice_records_only_the_direct_post_advice_action(
     tmp_path: Path,
 ) -> None:

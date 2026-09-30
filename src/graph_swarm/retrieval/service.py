@@ -23,15 +23,13 @@ from graph_swarm.retrieval.query import (
 class RecoveryPatternVectorRepository(Protocol):
     """Minimal raw-vector repository boundary used by retrieval."""
 
-    def count_recovery_pattern_vectors(self) -> int:
-        ...
+    def count_recovery_pattern_vectors(self) -> int: ...
 
     def query_recovery_pattern_vectors(
         self,
         query_embedding: list[float],
         limit: int,
-    ) -> tuple[RecoveryPatternVectorCandidate, ...]:
-        ...
+    ) -> tuple[RecoveryPatternVectorCandidate, ...]: ...
 
 
 class RecoveryCandidateEvaluation(BaseModel):
@@ -105,9 +103,7 @@ class RecoveryPatternRetrievalService:
             query_embedding,
             limit=pool_size,
         )
-        patterns_by_id = {
-            candidate.pattern.id: candidate.pattern for candidate in raw_candidates
-        }
+        patterns_by_id = {candidate.pattern.id: candidate.pattern for candidate in raw_candidates}
         evaluations = tuple(
             sorted(
                 (
@@ -164,6 +160,7 @@ class RecoveryPatternRetrievalService:
             planned_action,
             environment,
             pattern,
+            task,
         )
         rejection_reasons.extend(applicability.rejection_reasons)
         return RecoveryCandidateEvaluation(

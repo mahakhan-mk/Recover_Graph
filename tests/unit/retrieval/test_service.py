@@ -9,6 +9,7 @@ from graph_swarm.domain.recovery_patterns import (
     EnvironmentConstraints,
     RecoveryPattern,
     RecoveryPatternStatus,
+    RecoveryTrigger,
 )
 from graph_swarm.domain.tasks import Task
 from graph_swarm.graph.read_models import RecoveryPatternVectorCandidate
@@ -143,6 +144,28 @@ def make_candidate(
         ),
         vector_score=score,
     )
+
+
+def make_triggered_candidate(
+    pattern_id: str,
+    score: float,
+    **pattern_options: object,
+) -> RecoveryPatternVectorCandidate:
+    candidate = make_candidate(pattern_id, score, **pattern_options)
+    pattern = candidate.pattern.model_copy(
+        update={
+            "trigger": RecoveryTrigger(
+                failure_type="test_failure",
+                failure_signature="run_tests:exit_code=1",
+                failure_context="test failed while checking branch condition",
+                source_task_problem_statement="Restore the intended branch condition.",
+                source_tool="run_tests",
+                source_operation="pytest",
+                version_sensitive=True,
+            )
+        }
+    )
+    return candidate.model_copy(update={"pattern": pattern})
 
 
 def retrieve(
@@ -321,3 +344,20 @@ def test_no_eligible_candidates_preserves_all_rejection_reasons() -> None:
         "tool_mismatch",
     )
     assert "family_id" not in result.model_dump()
+
+
+@pytest.mark.parametrize(
+    ("pattern_options", "reason"),
+    (
+        ({"chronological_index": 5}, "not_strictly_historical"),
+        ({"status": RecoveryPatternStatus.STALE}, "stale"),
+    ),
+)
+def test_triggered_patterns_preserve_chronology_and_staleness_gates(
+    pattern_options: dict[str, object],
+    reason: str,
+) -> None:
+    _, result = retrieve((make_triggered_candidate("triggered", 0.9, **pattern_options),))
+
+    assert result.selected_pattern is None
+    assert reason in result.candidates[0].rejection_reasons

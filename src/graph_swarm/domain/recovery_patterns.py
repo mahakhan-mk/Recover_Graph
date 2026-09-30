@@ -38,6 +38,39 @@ class EnvironmentConstraints(BaseModel):
         return value
 
 
+class RecoveryTrigger(BaseModel):
+    """Historical failure-trigger facts kept separate from recovery action facts.
+
+    These fields describe the incident that made the historical recovery
+    necessary.  They are not a replacement for ``applicability_tool`` or
+    ``applicability_operation``: those fields retain the observed successful
+    recovery action for provenance and audit purposes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    failure_type: str
+    failure_signature: str
+    failure_context: str
+    source_task_problem_statement: str
+    source_tool: str
+    source_operation: str
+    source_action_arguments: dict[str, object] = Field(default_factory=dict)
+    version_sensitive: bool = True
+
+    @field_validator(
+        "failure_type",
+        "failure_signature",
+        "failure_context",
+        "source_task_problem_statement",
+        "source_tool",
+        "source_operation",
+    )
+    @classmethod
+    def require_non_empty_trigger_text(cls, value: str) -> str:
+        return require_non_empty(value)
+
+
 class RecoveryPattern(BaseModel):
     """Historical operational evidence, not a causal explanation.
 
@@ -64,9 +97,8 @@ class RecoveryPattern(BaseModel):
     applicability_tool: str | None = None
     applicability_operation: str | None = None
     source_failure_type: str
-    environment_constraints: EnvironmentConstraints = Field(
-        default_factory=EnvironmentConstraints
-    )
+    trigger: RecoveryTrigger | None = None
+    environment_constraints: EnvironmentConstraints = Field(default_factory=EnvironmentConstraints)
     verification_status: RecoveryPatternStatus = RecoveryPatternStatus.CANDIDATE
     evidence_count: int
     evidence_summary: str
@@ -100,9 +132,7 @@ class RecoveryPattern(BaseModel):
 
     @model_validator(mode="after")
     def require_applicability_pair(self) -> Self:
-        if (self.applicability_tool is None) != (
-            self.applicability_operation is None
-        ):
+        if (self.applicability_tool is None) != (self.applicability_operation is None):
             raise ValueError(
                 "applicability_tool and applicability_operation must both be set or both be None"
             )
@@ -140,6 +170,7 @@ class RecoveryPattern(BaseModel):
 
 __all__ = [
     "EnvironmentConstraints",
+    "RecoveryTrigger",
     "RecoveryPattern",
     "RecoveryPatternStatus",
 ]

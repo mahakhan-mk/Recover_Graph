@@ -295,7 +295,10 @@ CALL db.index.vector.queryNodes(
     $limit,
     $query_embedding
 ) YIELD node AS pattern, score AS vector_score
-RETURN pattern, vector_score
+OPTIONAL MATCH (pattern)-[:SOURCE_FAILURE]->(failure:FailureEpisode)
+OPTIONAL MATCH (pattern)-[:SOURCE_TASK]->(source_task:Task)
+OPTIONAL MATCH (source_task)-[:HAS_ACTION]->(failed_action:Action)-[:PART_OF_FAILURE]->(failure)
+RETURN pattern, vector_score, failure, source_task, failed_action
 ORDER BY vector_score DESC
 """
 

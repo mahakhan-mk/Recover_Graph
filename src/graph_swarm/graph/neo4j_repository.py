@@ -17,6 +17,7 @@ from graph_swarm.domain.recovery_patterns import (
     EnvironmentConstraints,
     RecoveryPattern,
     RecoveryPatternStatus,
+    RecoveryTrigger,
 )
 from graph_swarm.domain.resolutions import Resolution, ResolutionStatus
 from graph_swarm.domain.runs import Run
@@ -53,15 +54,13 @@ class _GraphDatabaseApi(Protocol):
     """Typed view of the synchronous public driver factory boundary."""
 
     @staticmethod
-    def driver(uri: str, *, auth: tuple[str, str]) -> Driver:
-        ...
+    def driver(uri: str, *, auth: tuple[str, str]) -> Driver: ...
 
 
 class _DriverApi(Protocol):
     """Typed view of the synchronous public driver operations used here."""
 
-    def verify_connectivity(self) -> None:
-        ...
+    def verify_connectivity(self) -> None: ...
 
     def execute_query(
         self,
@@ -69,8 +68,7 @@ class _DriverApi(Protocol):
         *,
         parameters_: dict[str, object],
         database_: str,
-    ) -> EagerResult:
-        ...
+    ) -> EagerResult: ...
 
 
 def _isoformat(value: datetime) -> str:
@@ -85,6 +83,17 @@ def _properties(record: Record, key: str) -> Mapping[str, object]:
     value = record[key]
     if value is None:
         raise ValueError(f"Neo4j record field {key!r} is null")
+    return cast(Mapping[str, object], value)
+
+
+def _optional_properties(record: Record, key: str) -> Mapping[str, object] | None:
+    """Read an optional related node without weakening required-node checks."""
+    try:
+        value = record[key]
+    except (KeyError, IndexError):
+        return None
+    if value is None:
+        return None
     return cast(Mapping[str, object], value)
 
 
@@ -268,6 +277,40 @@ def _read_recovery_pattern(properties: Mapping[str, object]) -> RecoveryPattern:
         embedding=_optional_numeric_list(properties, "embedding"),
         created_at=_datetime(properties, "created_at"),
         invalidated_at=_optional_datetime(properties, "invalidated_at"),
+    )
+
+
+def _attach_historical_trigger(
+    pattern: RecoveryPattern,
+    failure: Mapping[str, object] | None,
+    source_task: Mapping[str, object] | None,
+    failed_action: Mapping[str, object] | None,
+) -> RecoveryPattern:
+    """Enrich old immutable nodes from their existing provenance edges."""
+    if pattern.trigger is not None or failure is None or source_task is None:
+        return pattern
+    if failed_action is None:
+        # The trigger action is required for the narrow intent gate.  A legacy
+        # vector row without its provenance remains safely ineligible on the
+        # corrected path rather than being treated as a generic command.
+        return pattern
+    return pattern.model_copy(
+        update={
+            "trigger": RecoveryTrigger(
+                failure_type=_required_text(failure, "failure_type"),
+                failure_signature=_required_text(failure, "signature"),
+                failure_context=_required_text(failure, "symptom"),
+                source_task_problem_statement=_required_text(source_task, "problem_statement"),
+                source_tool=_required_text(failed_action, "tool"),
+                source_operation=_required_text(failed_action, "operation"),
+                source_action_arguments=(
+                    _json_dict(failed_action, "arguments_json")
+                    if "arguments_json" in failed_action
+                    else cast(dict[str, object], failed_action.get("arguments", {}))
+                ),
+                version_sensitive=True,
+            )
+        }
     )
 
 
@@ -482,24 +525,18 @@ class Neo4jRepository:
             applicability_operation=pattern.applicability_operation,
             source_failure_type=pattern.source_failure_type,
             environment_runtime=pattern.environment_constraints.runtime,
-            environment_versions_json=_json_object(
-                pattern.environment_constraints.versions
-            ),
+            environment_versions_json=_json_object(pattern.environment_constraints.versions),
             environment_dependencies_json=_json_object(
                 pattern.environment_constraints.dependencies
             ),
-            environment_markers_json=_json_object(
-                pattern.environment_constraints.markers
-            ),
+            environment_markers_json=_json_object(pattern.environment_constraints.markers),
             verification_status=pattern.verification_status.value,
             evidence_count=pattern.evidence_count,
             evidence_summary=pattern.evidence_summary,
             embedding=pattern.embedding,
             created_at=_isoformat(pattern.created_at),
             invalidated_at=(
-                _isoformat(pattern.invalidated_at)
-                if pattern.invalidated_at is not None
-                else None
+                _isoformat(pattern.invalidated_at) if pattern.invalidated_at is not None else None
             ),
         )
         if not result.records:
@@ -507,9 +544,7 @@ class Neo4jRepository:
                 "Cannot save RecoveryPattern: required historical provenance was not found"
             )
         if result.records[0].get("provenance_matches") is False:
-            raise ValueError(
-                f"RecoveryPattern {pattern.id!r} has conflicting immutable provenance"
-            )
+            raise ValueError(f"RecoveryPattern {pattern.id!r} has conflicting immutable provenance")
 
     def update_recovery_pattern_embedding(
         self,
@@ -549,7 +584,12 @@ class Neo4jRepository:
         )
         return tuple(
             RecoveryPatternVectorCandidate(
-                pattern=_read_recovery_pattern(_properties(record, "pattern")),
+                pattern=_attach_historical_trigger(
+                    _read_recovery_pattern(_properties(record, "pattern")),
+                    _optional_properties(record, "failure"),
+                    _optional_properties(record, "source_task"),
+                    _optional_properties(record, "failed_action"),
+                ),
                 vector_score=record["vector_score"],
             )
             for record in result.records
@@ -653,12 +693,8 @@ class Neo4jRepository:
             failure_id=failure_id,
         )
         if not environment_result.records:
-            raise EntityNotFoundError(
-                f"FailureEpisode {failure_id!r} has no Environment lineage"
-            )
-        environment = _read_environment(
-            _properties(environment_result.records[0], "environment")
-        )
+            raise EntityNotFoundError(f"FailureEpisode {failure_id!r} has no Environment lineage")
+        environment = _read_environment(_properties(environment_result.records[0], "environment"))
 
         action_result = self.execute_query(
             queries.GET_ACTION_CONTEXT,
@@ -681,14 +717,13 @@ class Neo4jRepository:
             run_by_id[run.id] = run
 
         if len(task_by_id) != 1 or len(run_by_id) != 1:
-            raise ValueError(
-                f"FailureEpisode {failure_id!r} has ambiguous Task or Run lineage"
-            )
+            raise ValueError(f"FailureEpisode {failure_id!r} has ambiguous Task or Run lineage")
 
         tool_result = self.execute_query(queries.GET_TOOLS, failure_id=failure_id)
         tools_by_name = {
-            _required_text(_properties(record, "tool"), "name"):
-            _read_tool(_properties(record, "tool"))
+            _required_text(_properties(record, "tool"), "name"): _read_tool(
+                _properties(record, "tool")
+            )
             for record in tool_result.records
         }
 
@@ -715,12 +750,8 @@ class Neo4jRepository:
             for observed_change_value in observed_change_values:
                 if observed_change_value is None:
                     continue
-                observed_change = _read_action(
-                    cast(Mapping[str, object], observed_change_value)
-                )
-                recovery_actions_by_id[
-                    observed_change.planned_action.id
-                ] = observed_change
+                observed_change = _read_action(cast(Mapping[str, object], observed_change_value))
+                recovery_actions_by_id[observed_change.planned_action.id] = observed_change
 
         return IncidentLineage(
             run=next(iter(run_by_id.values())),
@@ -745,9 +776,7 @@ class Neo4jRepository:
                 f"Recovery evidence for FailureEpisode {failure_id!r} was not found"
             )
         if len(result.records) != 1:
-            raise ValueError(
-                f"Recovery evidence for FailureEpisode {failure_id!r} is ambiguous"
-            )
+            raise ValueError(f"Recovery evidence for FailureEpisode {failure_id!r} is ambiguous")
         record = result.records[0]
         failure = _read_failure(_properties(record, "failure"))
         resolution = _read_resolution(_properties(record, "resolution"))
@@ -770,9 +799,7 @@ class Neo4jRepository:
             or recovery_action.planned_action.task_id != task.id
             or failed_action.planned_action.run_id != recovery_action.planned_action.run_id
         ):
-            raise ValueError(
-                f"Recovery evidence for FailureEpisode {failure_id!r} is inconsistent"
-            )
+            raise ValueError(f"Recovery evidence for FailureEpisode {failure_id!r} is inconsistent")
         return RecoveryEvidenceLineage(
             failure=failure,
             resolution=resolution,
@@ -823,8 +850,12 @@ class Neo4jRepository:
         )
         environment = _read_environment(_properties(record, "environment"))
         failed_action = _read_action(_properties(record, "failed_action"))
-        recovery_action = _read_action(
-            _properties(record, "recovery_action")
+        recovery_action = _read_action(_properties(record, "recovery_action"))
+        pattern = _attach_historical_trigger(
+            pattern,
+            failure.model_dump(mode="json"),
+            _properties(record, "task"),
+            failed_action.planned_action.model_dump(mode="json"),
         )
         if (
             pattern.source_failure_id != failure.id
