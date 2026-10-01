@@ -174,6 +174,142 @@ def test_semantically_relevant_test_trigger_is_eligible() -> None:
     } <= set(decision.matched_fields)
 
 
+def test_command_alone_does_not_satisfy_trigger_context() -> None:
+    command_only = trigger_task().model_copy(
+        update={"problem_statement": "command"}
+    )
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        trigger_action(["command"]),
+        ENVIRONMENT,
+        triggered_pattern(),
+        command_only,
+    )
+
+    assert not decision.applicable
+    assert "trigger_context_mismatch" in decision.rejection_reasons
+
+
+def test_generic_execution_vocabulary_alone_does_not_satisfy_trigger_context() -> None:
+    generic_only = trigger_task().model_copy(
+        update={
+            "problem_statement": (
+                "command run execute execution test testing pytest python "
+                "error failure failed exit code"
+            )
+        }
+    )
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        trigger_action(
+            [
+                "python",
+                "-m",
+                "pytest",
+                "command",
+                "run",
+                "execute",
+                "error",
+                "failure",
+                "exit",
+                "code",
+            ]
+        ),
+        ENVIRONMENT,
+        triggered_pattern(),
+        generic_only,
+    )
+
+    assert not decision.applicable
+    assert "trigger_context_mismatch" in decision.rejection_reasons
+
+
+def test_one_genuine_shared_semantic_anchor_satisfies_trigger_context() -> None:
+    anchored = trigger_task().model_copy(
+        update={"problem_statement": "DATE_ADD parsing fails"}
+    )
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        trigger_action(["python", "-m", "pytest", "tests/test_dateadd.py"]),
+        ENVIRONMENT,
+        triggered_pattern(),
+        anchored,
+    )
+
+    assert decision.applicable
+    assert "trigger_context" in decision.matched_fields
+
+
+def test_generic_defect_report_adverb_does_not_satisfy_trigger_context() -> None:
+    for generic_term in ("incorrectly", "wrong", "wrongly"):
+        generic_only = trigger_task().model_copy(
+            update={"problem_statement": generic_term}
+        )
+        decision = RecoveryPatternApplicabilityService().evaluate(
+            trigger_action([generic_term]),
+            ENVIRONMENT,
+            triggered_pattern(),
+            generic_only,
+        )
+
+        assert not decision.applicable
+        assert "trigger_context_mismatch" in decision.rejection_reasons
+
+
+def test_locale_remains_a_genuine_trigger_context_anchor() -> None:
+    locale_task = trigger_task().model_copy(
+        update={"problem_statement": "Locale formatting fails"}
+    )
+    locale_pattern = triggered_pattern().model_copy(
+        update={
+            "trigger": RecoveryTrigger(
+                failure_type="test_failure",
+                failure_signature="run_command:exit_code=1",
+                failure_context="locale formatting uses the wrong language form",
+                source_task_problem_statement="Locale formatting fails",
+                source_tool="run_command",
+                source_operation="run_command",
+                source_action_arguments={"command": ["python", "-m", "pytest"]},
+                version_sensitive=True,
+            )
+        }
+    )
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        trigger_action(["python", "-m", "pytest", "tests/test_locale.py"]),
+        ENVIRONMENT,
+        locale_pattern,
+        locale_task,
+    )
+
+    assert decision.applicable
+    assert "trigger_context" in decision.matched_fields
+
+
+def test_run_tests_bridge_preserves_trusted_test_intent() -> None:
+    run_tests_trigger = triggered_pattern().model_copy(
+        update={
+            "trigger": RecoveryTrigger(
+                failure_type="test_failure",
+                failure_signature="run_tests:exit_code=1",
+                failure_context="DATE_ADD expression referenced before assignment",
+                source_task_problem_statement=(
+                    "DATE_ADD with three arguments raises an UnboundLocalError"
+                ),
+                source_tool="run_tests",
+                source_operation="run_tests",
+                source_action_arguments={},
+                version_sensitive=True,
+            )
+        }
+    )
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        action("run_tests", "run_tests"),
+        ENVIRONMENT,
+        run_tests_trigger,
+        trigger_task(),
+    )
+
+    assert decision.applicable
+    assert "trigger_intent" in decision.matched_fields
+
+
 def test_unrelated_task_context_is_rejected_without_threshold_tuning() -> None:
     unrelated = trigger_task().model_copy(
         update={"problem_statement": "CSV BOM encoding is detected incorrectly."}

@@ -359,6 +359,7 @@ _TRIGGER_CONTEXT_GENERIC_TERMS = frozenset(
         "import",
         "instead",
         "incorrect",
+        "incorrectly",
         "issue",
         "local",
         "method",
@@ -391,6 +392,38 @@ _TRIGGER_CONTEXT_GENERIC_TERMS = frozenset(
         "working",
         "works",
         "wrong",
+        "wrongly",
+    }
+)
+
+# Execution mechanics identify how a failure was observed, not what failed.
+# They must not establish transfer applicability on their own. Keep the
+# vocabulary explicit so adding a trusted test-intent form does not silently
+# turn its command spelling into a subject-matter anchor.
+_TRIGGER_CONTEXT_EXECUTION_TERMS = frozenset(
+    {
+        "command",
+        "commands",
+        "execute",
+        "executed",
+        "executes",
+        "execution",
+        "exit",
+        "exited",
+        "exits",
+        "exit_code",
+        "fail",
+        "failed",
+        "failing",
+        "failure",
+        "failures",
+        "pytest",
+        "python",
+        "run_command",
+        "run_tests",
+        "test_execution",
+        "test_failure",
+        "testing",
     }
 )
 
@@ -410,7 +443,9 @@ def _semantic_terms(value: str) -> frozenset[str]:
 
 def _trigger_context_terms(value: str) -> frozenset[str]:
     """Return subject-matter anchors suitable for trigger transfer."""
-    return _semantic_terms(value) - _TRIGGER_CONTEXT_GENERIC_TERMS
+    return _semantic_terms(value) - (
+        _TRIGGER_CONTEXT_GENERIC_TERMS | _TRIGGER_CONTEXT_EXECUTION_TERMS
+    )
 
 
 def _problem_summary(value: str) -> str:
