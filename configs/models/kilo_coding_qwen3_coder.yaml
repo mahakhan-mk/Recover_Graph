@@ -1,0 +1,5 @@
+provider: kilo
+model: qwen/qwen3-coder
+settings:
+  temperature: 0
+prompt_version: v1
