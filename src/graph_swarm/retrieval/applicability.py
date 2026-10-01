@@ -152,6 +152,43 @@ class RecoveryPatternApplicabilityService:
             compatible_markers=compatible_markers,
         )
 
+    def _recovery_action_matches(
+        self,
+        planned_action: PlannedAction,
+        pattern: RecoveryPattern,
+        *,
+        pre_mutation: bool,
+    ) -> tuple[bool, bool]:
+        """Compare the live recovery boundary with historical action metadata.
+
+        ``edit_file/edit_file`` and ``write_file/write_file`` are equivalent
+        only while evaluating a real source-mutation boundary.  The second
+        return value records that the equivalence, rather than an exact pair,
+        made the structural check pass; it never changes trigger or
+        environment applicability.
+        """
+        if pattern.applicability_tool is None or pattern.applicability_operation is None:
+            return False, False
+        historical = (pattern.applicability_tool, pattern.applicability_operation)
+        current = (planned_action.tool, planned_action.operation)
+        tool_matches = _normalize_action_value(current[0]) == _normalize_action_value(
+            historical[0]
+        )
+        operation_matches = _normalize_action_value(current[1]) == _normalize_action_value(
+            historical[1]
+        )
+        exact = tool_matches and operation_matches
+        if exact:
+            return True, False
+        equivalent = (
+            pre_mutation
+            and _is_mutation_action_pair(current)
+            and _is_mutation_action_pair(historical)
+        )
+        if equivalent:
+            return True, True
+        return False, False
+
     def _evaluate_trigger(
         self,
         planned_action: PlannedAction,
@@ -170,20 +207,27 @@ class RecoveryPatternApplicabilityService:
             trigger_actions = ((planned_action, ""),)
             prefix_evidence = ""
         else:
-            recovery_tool = pattern.applicability_tool
-            if recovery_tool is None or _normalize_action_value(
-                recovery_tool
-            ) != _normalize_action_value(planned_action.tool):
-                rejected.append("recovery_tool_mismatch")
+            recovery_matches, recovery_equivalent = self._recovery_action_matches(
+                planned_action,
+                pattern,
+                pre_mutation=True,
+            )
+            if not recovery_matches:
+                recovery_tool = pattern.applicability_tool
+                recovery_operation = pattern.applicability_operation
+                if recovery_tool is None or _normalize_action_value(
+                    recovery_tool
+                ) != _normalize_action_value(planned_action.tool):
+                    rejected.append("recovery_tool_mismatch")
+                if recovery_operation is None or _normalize_action_value(
+                    recovery_operation
+                ) != _normalize_action_value(planned_action.operation):
+                    rejected.append("recovery_operation_mismatch")
             else:
                 matched.append("recovery_tool")
-            recovery_operation = pattern.applicability_operation
-            if recovery_operation is None or _normalize_action_value(
-                recovery_operation
-            ) != _normalize_action_value(planned_action.operation):
-                rejected.append("recovery_operation_mismatch")
-            else:
                 matched.append("recovery_operation")
+                if recovery_equivalent:
+                    matched.append("recovery_action_equivalence")
             trigger_actions = _completed_prefix_actions(prefix_context, planned_action)
             if not trigger_actions:
                 rejected.append("completed_prefix_trigger_missing")
@@ -423,6 +467,13 @@ def _compatible_values(
 
 def _normalize_action_value(value: str) -> str:
     return " ".join(value.split())
+
+
+def _is_mutation_action_pair(action: tuple[str, str]) -> bool:
+    return action in {
+        ("edit_file", "edit_file"),
+        ("write_file", "write_file"),
+    }
 
 
 def _normalize_fact(value: str) -> str:

@@ -182,6 +182,62 @@ def test_pre_mutation_uses_real_failed_prefix_and_real_edit_boundary() -> None:
     assert {"recovery_tool", "recovery_operation"} <= set(decision.matched_fields)
 
 
+def test_pre_mutation_treats_edit_and_write_as_equivalent_recovery_boundaries() -> None:
+    prefix = {
+        "completed_prefix": [
+            {
+                "tool": "run_tests",
+                "operation": "run_tests",
+                "arguments": {"command": ["python", "-m", "pytest", "tests/test_dateadd.py"]},
+                "result": {
+                    "success": False,
+                    "output": "DATE_ADD expression referenced before assignment",
+                },
+            }
+        ]
+    }
+
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        action("write_file", "write_file"),
+        ENVIRONMENT,
+        triggered_pattern(),
+        trigger_task(),
+        prefix,
+    )
+
+    assert decision.applicable
+    assert "recovery_action_equivalence" in decision.matched_fields
+
+    reverse = RecoveryPatternApplicabilityService().evaluate(
+        action("edit_file", "edit_file"),
+        ENVIRONMENT,
+        triggered_pattern().model_copy(
+            update={
+                "applicability_tool": "write_file",
+                "applicability_operation": "write_file",
+            }
+        ),
+        trigger_task(),
+        prefix,
+    )
+    assert reverse.applicable
+    assert "recovery_action_equivalence" in reverse.matched_fields
+
+
+def test_normal_boundary_does_not_use_mutation_equivalence() -> None:
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        action("write_file", "write_file"),
+        ENVIRONMENT,
+        triggered_pattern(),
+        trigger_task(),
+    )
+
+    assert not decision.applicable
+    assert "tool_mismatch" not in decision.rejection_reasons
+    assert "trigger_tool_mismatch" in decision.rejection_reasons
+    assert "trigger_operation_mismatch" in decision.rejection_reasons
+
+
 def test_pre_mutation_rejects_without_a_completed_failed_trigger() -> None:
     decision = RecoveryPatternApplicabilityService().evaluate(
         action("edit_file", "edit_file"),
