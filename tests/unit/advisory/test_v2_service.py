@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import cast
 from unittest.mock import Mock
@@ -174,15 +175,19 @@ def make_lineage() -> tuple[RecoveryPattern, RecoveryPatternLineage]:
 class FakeV2Retrieval:
     def __init__(self, result: RecoveryRetrievalResult) -> None:
         self.result = result
-        self.calls: list[tuple[Task, PlannedAction, EnvironmentContext]] = []
+        self.calls: list[
+            tuple[Task, PlannedAction, EnvironmentContext, Mapping[str, object] | None]
+        ] = []
 
     def retrieve(
         self,
         task: Task,
         planned_action: PlannedAction,
         environment: EnvironmentContext,
+        *,
+        prefix_context: Mapping[str, object] | None = None,
     ) -> RecoveryRetrievalResult:
-        self.calls.append((task, planned_action, environment))
+        self.calls.append((task, planned_action, environment, prefix_context))
         return self.result
 
 
@@ -237,8 +242,22 @@ def test_v2_advisory_delegates_and_maps_grounded_lineage_without_repo_equality()
     assert service.last_retrieval_result.selected_pattern is not None
     assert service.last_retrieval_result.selected_pattern.id == pattern.id
     assert service.last_retrieval_result.selected_vector_score == 0.91
-    assert retrieval.calls == [(task, action, environment)]
+    assert retrieval.calls == [(task, action, environment, None)]
     repository.find_historical_recovery_candidates.assert_not_called()
+
+    prefix = {"completed_prefix": [{"tool": "read_file"}]}
+    mutation_result = service.evaluate_pre_mutation(
+        task,
+        action,
+        environment,
+        prefix,
+    )
+
+    assert mutation_result.has_advice
+    assert len(retrieval.calls) == 2
+    mutation_action = retrieval.calls[1][1]
+    assert mutation_action == action
+    assert retrieval.calls[1][3] == prefix
 
 
 def test_v2_advisory_fails_closed_when_source_lineage_is_missing() -> None:

@@ -5,6 +5,7 @@ adapter remains only for older test/reporting doubles that do not implement the
 V2 repository surface; it is never selected for a real V2-capable repository.
 """
 
+from collections.abc import Mapping
 from datetime import datetime
 
 from graph_swarm.domain.actions import PlannedAction
@@ -30,6 +31,10 @@ from graph_swarm.retrieval.service import (
 
 class AdvisoryService:
     """Find and report one applicable historical recovery without intervention."""
+
+    # The agent boundary uses this explicit capability flag so legacy service
+    # doubles and reporting adapters do not receive prefix-aware lookups.
+    pre_mutation_enabled = True
 
     def __init__(
         self,
@@ -113,6 +118,7 @@ class AdvisoryService:
         task: Task,
         planned_action: PlannedAction,
         environment: EnvironmentContext,
+        prefix_context: Mapping[str, object] | None = None,
     ) -> AdviceResult:
         retrieval = self._retrieval_service
         if retrieval is None:
@@ -121,7 +127,12 @@ class AdvisoryService:
             retrieval = RecoveryPatternRetrievalService(self._v2_repository)
             self._retrieval_service = retrieval
 
-        result = retrieval.retrieve(task, planned_action, environment)
+        result = retrieval.retrieve(
+            task,
+            planned_action,
+            environment,
+            prefix_context=prefix_context,
+        )
         self.last_retrieval_result = result
         if result.selected_pattern is None:
             return AdviceResult.no_advice(
@@ -164,6 +175,26 @@ class AdvisoryService:
             selected_evaluation.compatible_markers,
             environment,
         )
+
+    def evaluate_pre_mutation(
+        self,
+        task: Task,
+        planned_action: PlannedAction,
+        environment: EnvironmentContext,
+        prefix_context: Mapping[str, object],
+    ) -> AdviceResult:
+        """Evaluate the same gates at a source-mutation boundary.
+
+        The mutation remains the planned action throughout retrieval and
+        applicability. Completed-prefix actions are supplied as evidence for
+        a historical trigger when the recovery action and trigger action have
+        different tool shapes.
+        """
+        if self._retrieval_service is None and self._v2_repository is None:
+            return AdviceResult.no_advice(
+                "pre-mutation lookup requires the V2 retrieval repository"
+            )
+        return self._evaluate_v2(task, planned_action, environment, prefix_context)
 
 
 def _advice_result(

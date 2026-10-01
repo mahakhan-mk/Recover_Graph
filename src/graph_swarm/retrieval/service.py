@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from math import isfinite
 from typing import Protocol
 
@@ -87,6 +88,7 @@ class RecoveryPatternRetrievalService:
         task: Task,
         planned_action: PlannedAction,
         environment: EnvironmentContext,
+        prefix_context: Mapping[str, object] | None = None,
     ) -> RecoveryRetrievalResult:
         """Run query construction, complete-pool search, gates, and ranking."""
         query_text = recovery_retrieval_query_text(task, planned_action, environment)
@@ -107,7 +109,13 @@ class RecoveryPatternRetrievalService:
         evaluations = tuple(
             sorted(
                 (
-                    self._evaluate_candidate(candidate, task, planned_action, environment)
+                    self._evaluate_candidate(
+                        candidate,
+                        task,
+                        planned_action,
+                        environment,
+                        prefix_context,
+                    )
                     for candidate in raw_candidates
                 ),
                 key=lambda evaluation: (-evaluation.vector_score, evaluation.pattern_id),
@@ -139,6 +147,7 @@ class RecoveryPatternRetrievalService:
         task: Task,
         planned_action: PlannedAction,
         environment: EnvironmentContext,
+        prefix_context: Mapping[str, object] | None,
     ) -> RecoveryCandidateEvaluation:
         pattern = candidate.pattern
         rejection_reasons: list[str] = []
@@ -161,6 +170,7 @@ class RecoveryPatternRetrievalService:
             environment,
             pattern,
             task,
+            prefix_context,
         )
         rejection_reasons.extend(applicability.rejection_reasons)
         return RecoveryCandidateEvaluation(

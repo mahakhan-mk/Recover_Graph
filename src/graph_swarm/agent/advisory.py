@@ -1,7 +1,7 @@
 """The single agent-side boundary for pre-tool advisory evaluation."""
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
@@ -66,6 +66,33 @@ def prepare_tool_action(
                 f"treatment advisory lookup failed for {tool}: {error}"
             ) from error
         return action
+
+    if not advice.has_advice and _is_source_mutation(action):
+        pre_mutation_evaluator = cast(
+            Callable[
+                [Task, PlannedAction, EnvironmentContext, dict[str, object]],
+                AdviceResult,
+            ]
+            | None,
+            getattr(service, "evaluate_pre_mutation", None),
+        )
+        if getattr(service, "pre_mutation_enabled", False) is True and pre_mutation_evaluator:
+            try:
+                advice = pre_mutation_evaluator(
+                    task,
+                    action,
+                    environment,
+                    _pre_mutation_prefix(dependencies, action),
+                )
+            except Exception as error:  # noqa: BLE001 - advisory failure must not mutate execution
+                dependencies.advisory_errors.append(
+                    f"pre-mutation lookup failed for {action.tool}: {error}"
+                )
+                if dependencies.fail_closed_advisory:
+                    raise TreatmentAdvisoryInfrastructureError(
+                        f"pre-mutation advisory lookup failed for {action.tool}: {error}"
+                    ) from error
+                return action
 
     if not advice.has_advice:
         return action
@@ -199,6 +226,67 @@ def _action_key(action: PlannedAction) -> str:
         separators=(",", ":"),
         default=str,
     )
+
+
+def _is_source_mutation(action: PlannedAction) -> bool:
+    return (action.tool, action.operation) in {
+        ("edit_file", "edit_file"),
+        ("write_file", "write_file"),
+    }
+
+
+def _pre_mutation_prefix(
+    dependencies: AgentDependencies,
+    action: PlannedAction,
+) -> dict[str, object]:
+    """Build bounded evidence from the completed prefix only.
+
+    This deliberately excludes task ordering, benchmark labels, expected
+    patterns, final outcomes, and the current edit contents.  The service
+    receives only observations that existed before the mutation boundary.
+    """
+    completed: list[dict[str, object]] = []
+    for event in dependencies.events[-20:]:
+        planned = dependencies.planned_action_for(event.action_id)
+        if planned is None:
+            continue
+        completed.append(
+            {
+                "tool": planned.tool,
+                "operation": planned.operation,
+                "arguments": _bounded_value(planned.arguments),
+                "result": {
+                    "success": event.result.success,
+                    "exit_code": event.result.exit_code,
+                    "output": _bounded_value(event.result.output),
+                    "error": _bounded_value(event.result.error),
+                },
+            }
+        )
+    return {
+        "completed_prefix": completed,
+        "mutation_boundary": {
+            "tool": action.tool,
+            "operation": action.operation,
+        },
+    }
+
+
+def _bounded_value(value: object, *, limit: int = 4000) -> object:
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:limit]
+    if isinstance(value, Mapping):
+        mapping = cast(Mapping[object, object], value)
+        return {
+            str(key): _bounded_value(item, limit=limit)
+            for key, item in list(mapping.items())[:50]
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        sequence = cast(Sequence[object], value)
+        return [_bounded_value(item, limit=limit) for item in sequence[:50]]
+    return str(value)[:limit]
 
 
 def _recovery_key(action: PlannedAction, advice: AdviceResult) -> str:

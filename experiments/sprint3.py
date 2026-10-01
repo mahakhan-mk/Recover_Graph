@@ -560,6 +560,94 @@ def make_recurrence_matcher(
     return determine
 
 
+def make_recurrence_matcher_v3_exact_pytest_outcome(
+    frozen_cases: Mapping[str, FrozenSWEsmithCase],
+) -> RecurrenceEvaluator:
+    """Match only an exact frozen target with a failed pytest outcome.
+
+    The v2 matcher intentionally remains unchanged for historical artifacts.  This
+    matcher does not infer recurrence from a non-zero aggregate command or from a
+    target merely appearing in traceback text: it requires a pytest report line
+    whose outcome is ``FAILED`` or ``ERROR`` for the exact frozen target.
+    """
+
+    def determine(
+        case: BenchmarkTaskCase,
+        events: Sequence[AgentEvent],
+        _result: Any,
+        _workspace: Path,
+    ) -> bool:
+        if case.occurrence_index == 1:
+            return False
+        benchmark = frozen_cases.get(case.task.id)
+        if benchmark is None:
+            raise RecurrenceEvaluationRequired(
+                f"no frozen recurrence matcher for {case.task.id}"
+            )
+        targets = tuple(
+            dict.fromkeys(
+                target
+                for test_id in benchmark.fail_to_pass
+                for target in (test_id, _pytest_target(test_id))
+                if target
+            )
+        )
+        for event in events:
+            result = event.result
+            if result.success:
+                continue
+            is_test_event = result.tool_name == "run_tests"
+            if result.tool_name == "run_command" and isinstance(
+                events, RecurrenceEventStream
+            ):
+                planned_action = events.planned_action_for(event.action_id)
+                is_test_event = (
+                    planned_action is not None and is_test_execution(planned_action)
+                )
+            if not is_test_event:
+                continue
+            observed = "\n".join(
+                value for value in (result.output, result.error) if value
+            )
+            if any(
+                _pytest_target_has_failed_outcome(observed, target)
+                for target in targets
+            ):
+                return True
+        return False
+
+    return determine
+
+
+def _pytest_target_has_failed_outcome(output: str, target: str) -> bool:
+    """Return whether a pytest report line marks ``target`` failed or errored."""
+    clean_target = _strip_ansi(target).strip()
+    if not clean_target:
+        return False
+    for raw_line in output.splitlines():
+        line = _strip_ansi(raw_line).strip()
+        if not line:
+            continue
+        for outcome in ("FAILED", "ERROR"):
+            prefixes = (f"{outcome} ",)
+            suffixes = (f" {outcome}",)
+            if any(line.startswith(prefix) for prefix in prefixes):
+                reported = line[len(outcome) + 1 :].strip()
+                if reported == clean_target or reported.startswith(clean_target + " -"):
+                    return True
+            for suffix in suffixes:
+                if not line.endswith(suffix):
+                    continue
+                reported = line[: -len(suffix)].strip()
+                if reported == clean_target:
+                    return True
+    return False
+
+
+def _strip_ansi(value: str) -> str:
+    return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
+
+
 def _configured_runtime(
     configuration: LoadedExperimentConfiguration,
     baseline_root: Path,

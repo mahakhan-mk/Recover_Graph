@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
-from graph_swarm.domain.recovery_patterns import RecoveryPattern
+from graph_swarm.domain.recovery_patterns import RecoveryPattern, RecoveryTrigger
 from graph_swarm.domain.tasks import Task
 from graph_swarm.retrieval.candidates import HistoricalRecoveryCandidate
 
@@ -97,11 +97,18 @@ class RecoveryPatternApplicabilityService:
         environment: EnvironmentContext,
         pattern: RecoveryPattern,
         task: Task | None = None,
+        prefix_context: Mapping[str, object] | None = None,
     ) -> ApplicabilityDecision:
         """Evaluate one pattern while preserving the legacy three-arg contract."""
         if pattern.trigger is None:
             return self._evaluate_legacy(planned_action, environment, pattern)
-        return self._evaluate_trigger(planned_action, environment, pattern, task)
+        return self._evaluate_trigger(
+            planned_action,
+            environment,
+            pattern,
+            task,
+            prefix_context,
+        )
 
     def _evaluate_legacy(
         self,
@@ -151,10 +158,87 @@ class RecoveryPatternApplicabilityService:
         environment: EnvironmentContext,
         pattern: RecoveryPattern,
         task: Task | None,
+        prefix_context: Mapping[str, object] | None = None,
     ) -> ApplicabilityDecision:
         trigger = pattern.trigger
         if trigger is None:  # pragma: no cover - guarded by evaluate
-            raise AssertionError("triggerred evaluation requires a trigger")
+            raise AssertionError("triggered evaluation requires a trigger")
+        matched: list[str] = []
+        rejected: list[str] = []
+
+        if prefix_context is None:
+            trigger_actions = ((planned_action, ""),)
+            prefix_evidence = ""
+        else:
+            recovery_tool = pattern.applicability_tool
+            if recovery_tool is None or _normalize_action_value(
+                recovery_tool
+            ) != _normalize_action_value(planned_action.tool):
+                rejected.append("recovery_tool_mismatch")
+            else:
+                matched.append("recovery_tool")
+            recovery_operation = pattern.applicability_operation
+            if recovery_operation is None or _normalize_action_value(
+                recovery_operation
+            ) != _normalize_action_value(planned_action.operation):
+                rejected.append("recovery_operation_mismatch")
+            else:
+                matched.append("recovery_operation")
+            trigger_actions = _completed_prefix_actions(prefix_context, planned_action)
+            if not trigger_actions:
+                rejected.append("completed_prefix_trigger_missing")
+            prefix_evidence = _completed_prefix_evidence_text(prefix_context)
+
+        trigger_decisions = tuple(
+            self._evaluate_trigger_action(
+                trigger,
+                trigger_action,
+                " ".join((diagnostic_text, prefix_evidence)),
+                task,
+            )
+            for trigger_action, diagnostic_text in trigger_actions
+        )
+        if trigger_decisions:
+            selected = next(
+                (decision for decision in trigger_decisions if decision.applicable),
+                trigger_decisions[0],
+            )
+            matched.extend(selected.matched_fields)
+            rejected.extend(selected.rejection_reasons)
+
+        _apply_runtime(environment, pattern, matched, rejected)
+        if trigger.version_sensitive:
+            compatible_versions, version_rejections = _compatible_values(
+                environment.versions,
+                pattern.environment_constraints.versions,
+                "version",
+            )
+            rejected.extend(version_rejections)
+            if not version_rejections and compatible_versions:
+                matched.append("versions")
+        else:
+            compatible_versions = {}
+        compatible_markers, marker_rejections = _compatible_values(
+            environment.markers, pattern.environment_constraints.markers, "marker"
+        )
+        rejected.extend(marker_rejections)
+        if not marker_rejections and compatible_markers:
+            matched.append("markers")
+        return ApplicabilityDecision(
+            applicable=not rejected,
+            matched_fields=tuple(matched),
+            rejection_reasons=tuple(rejected),
+            compatible_versions=compatible_versions,
+            compatible_markers=compatible_markers,
+        )
+
+    def _evaluate_trigger_action(
+        self,
+        trigger: RecoveryTrigger,
+        planned_action: PlannedAction,
+        diagnostic_text: str,
+        task: Task | None,
+    ) -> ApplicabilityDecision:
         matched: list[str] = []
         rejected: list[str] = []
         historical_intent = _planned_intent(
@@ -165,7 +249,9 @@ class RecoveryPatternApplicabilityService:
         current_intent = _planned_intent(
             planned_action.tool, planned_action.operation, planned_action.arguments
         )
-        exact_tool = _normalize_action_value(trigger.source_tool) == _normalize_action_value(
+        exact_tool = _normalize_action_value(
+            trigger.source_tool
+        ) == _normalize_action_value(
             planned_action.tool
         )
         exact_operation = _normalize_action_value(
@@ -205,7 +291,13 @@ class RecoveryPatternApplicabilityService:
                 )
             )
             current_terms = _trigger_context_terms(
-                " ".join((task.problem_statement, _argument_text(planned_action.arguments)))
+                " ".join(
+                    (
+                        task.problem_statement,
+                        _argument_text(planned_action.arguments),
+                        diagnostic_text,
+                    )
+                )
             )
             # Only historical failure-trigger text can establish subject
             # matter. Recovery guidance/title/evidence describe the repair,
@@ -216,34 +308,86 @@ class RecoveryPatternApplicabilityService:
             else:
                 matched.append("trigger_context")
 
-        _apply_runtime(environment, pattern, matched, rejected)
-        if trigger.version_sensitive:
-            compatible_versions, version_rejections = _compatible_values(
-                environment.versions,
-                pattern.environment_constraints.versions,
-                "version",
-            )
-            rejected.extend(version_rejections)
-            if not version_rejections and compatible_versions:
-                matched.append("versions")
-        else:
-            # Exact equality remains the conservative default. Only this
-            # explicit trigger flag may classify acquisition version data as
-            # non-applicability metadata.
-            compatible_versions = {}
-        compatible_markers, marker_rejections = _compatible_values(
-            environment.markers, pattern.environment_constraints.markers, "marker"
-        )
-        rejected.extend(marker_rejections)
-        if not marker_rejections and compatible_markers:
-            matched.append("markers")
         return ApplicabilityDecision(
             applicable=not rejected,
             matched_fields=tuple(matched),
             rejection_reasons=tuple(rejected),
-            compatible_versions=compatible_versions,
-            compatible_markers=compatible_markers,
         )
+
+
+def _completed_prefix_actions(
+    prefix_context: Mapping[str, object],
+    prototype: PlannedAction,
+) -> tuple[tuple[PlannedAction, str], ...]:
+    """Return only real failed actions recorded before the mutation boundary."""
+    raw_prefix = prefix_context.get("completed_prefix")
+    if not isinstance(raw_prefix, Sequence) or isinstance(raw_prefix, (str, bytes)):
+        return ()
+    actions: list[tuple[PlannedAction, str]] = []
+    for entry in cast(Sequence[object], raw_prefix):
+        if not isinstance(entry, Mapping):
+            continue
+        typed_entry = cast(Mapping[str, object], entry)
+        raw_result = typed_entry.get("result")
+        if not isinstance(raw_result, Mapping):
+            continue
+        typed_result = cast(Mapping[str, object], raw_result)
+        if typed_result.get("success") is not False:
+            continue
+        tool = typed_entry.get("tool")
+        operation = typed_entry.get("operation")
+        arguments = typed_entry.get("arguments", {})
+        if not isinstance(tool, str) or not isinstance(operation, str):
+            continue
+        if not isinstance(arguments, Mapping):
+            continue
+        action = prototype.model_copy(
+            update={
+                "tool": tool,
+                "operation": operation,
+                "arguments": {
+                    str(key): value
+                    for key, value in cast(Mapping[str, object], arguments).items()
+                },
+            }
+        )
+        diagnostics = " ".join(
+            value
+            for key in ("output", "error")
+            for value in (typed_result.get(key),)
+            if isinstance(value, str) and value
+        )
+        actions.append((action, diagnostics))
+    return tuple(actions)
+
+
+def _completed_prefix_evidence_text(prefix_context: Mapping[str, object]) -> str:
+    """Collect safe prior reads and diagnostics without mutation payloads."""
+    raw_prefix = prefix_context.get("completed_prefix")
+    if not isinstance(raw_prefix, Sequence) or isinstance(raw_prefix, (str, bytes)):
+        return ""
+    evidence: list[str] = []
+    blocked = ("expected_pattern", "fail_to_pass", "gold patch", "benchmark label")
+    for entry in cast(Sequence[object], raw_prefix):
+        if not isinstance(entry, Mapping):
+            continue
+        typed_entry = cast(Mapping[str, object], entry)
+        tool = typed_entry.get("tool")
+        arguments = typed_entry.get("arguments")
+        result = typed_entry.get("result")
+        if not isinstance(result, Mapping):
+            continue
+        typed_result = cast(Mapping[str, object], result)
+        values: list[object] = [typed_result.get("output"), typed_result.get("error")]
+        if tool == "read_file" and isinstance(arguments, Mapping):
+            values.append(_argument_text(cast(Mapping[str, object], arguments)))
+        for value in values:
+            if not isinstance(value, str) or not value:
+                continue
+            if any(term in value.casefold() for term in blocked):
+                continue
+            evidence.append(value)
+    return " ".join(evidence)
 
 
 def _apply_runtime(

@@ -67,12 +67,12 @@ def test_objective_anchored_pattern_uses_real_recovery_action_key() -> None:
     )
 
     eligible = service.evaluate(action("edit_file", "edit_file"), ENVIRONMENT, pattern)
-    synthetic = service.evaluate(action("run_command", "run_command"), ENVIRONMENT, pattern)
+    non_mutation = service.evaluate(action("run_command", "run_command"), ENVIRONMENT, pattern)
     mismatched_operation = service.evaluate(action("edit_file", "write_file"), ENVIRONMENT, pattern)
 
     assert eligible.applicable is True
-    assert synthetic.applicable is False
-    assert "tool_mismatch" in synthetic.rejection_reasons
+    assert non_mutation.applicable is False
+    assert "tool_mismatch" in non_mutation.rejection_reasons
     assert mismatched_operation.applicable is False
     assert "operation_mismatch" in mismatched_operation.rejection_reasons
 
@@ -143,6 +143,56 @@ def test_recovery_action_metadata_does_not_become_failure_trigger() -> None:
 
     assert not decision.applicable
     assert "trigger_tool_mismatch" in decision.rejection_reasons
+
+
+def test_pre_mutation_uses_real_failed_prefix_and_real_edit_boundary() -> None:
+    prefix = {
+        "completed_prefix": [
+            {
+                "tool": "run_command",
+                "operation": "run_command",
+                "arguments": {
+                    "command": ["python", "-m", "pytest", "tests/test_dateadd.py"]
+                },
+                "result": {
+                    "success": False,
+                    "output": "DATE_ADD expression referenced before assignment",
+                },
+            },
+            {
+                "tool": "read_file",
+                "operation": "read_file",
+                "arguments": {"path": "src/dateadd.py"},
+                "result": {
+                    "success": True,
+                    "output": "DATE_ADD parses the expression before validating its arguments.",
+                },
+            },
+        ]
+    }
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        action("edit_file", "edit_file"),
+        ENVIRONMENT,
+        triggered_pattern(),
+        trigger_task(),
+        prefix,
+    )
+
+    assert decision.applicable
+    assert {"recovery_tool", "recovery_operation"} <= set(decision.matched_fields)
+
+
+def test_pre_mutation_rejects_without_a_completed_failed_trigger() -> None:
+    decision = RecoveryPatternApplicabilityService().evaluate(
+        action("edit_file", "edit_file"),
+        ENVIRONMENT,
+        triggered_pattern(),
+        trigger_task(),
+        {"completed_prefix": []},
+    )
+
+    assert not decision.applicable
+    assert "completed_prefix_trigger_missing" in decision.rejection_reasons
 
 
 def test_generic_run_command_does_not_match_every_recovery() -> None:
