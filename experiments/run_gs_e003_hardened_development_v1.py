@@ -374,7 +374,7 @@ def execute_hardened_runs(
                     condition=condition,
                 ),
                 execution_runtime_resolver=execution_runtime_resolver,
-                environment_resolver=v4.make_environment_resolver(environments),
+                environment_resolver=(v4.make_environment_resolver(environments) if condition is ExperimentCondition.T else None),
                 advisory_runtime=runtime if condition is ExperimentCondition.T else None,
                 settings=settings,
                 artifact_store=artifact_store,
