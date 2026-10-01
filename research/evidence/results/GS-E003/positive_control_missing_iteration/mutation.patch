@@ -1,0 +1,12 @@
+diff --git a/rich/syntax.py b/rich/syntax.py
+--- a/rich/syntax.py
++++ b/rich/syntax.py
+@@ -509,7 +509,7 @@ class Syntax(JupyterRenderable):
+                     """Split tokens to one per line."""
+                     assert lexer  # required to make MyPy happy - we know lexer is not None at this point
+ 
+-                    for token_type, token in lexer.get_tokens(code):
++                    for token_type, token in ():
+                         while token:
+                             line_token, new_line, token = token.partition("\n")
+                             yield token_type, line_token + new_line
