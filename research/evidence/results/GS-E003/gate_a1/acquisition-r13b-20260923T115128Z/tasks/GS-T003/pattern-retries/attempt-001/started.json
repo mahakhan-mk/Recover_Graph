@@ -1,8 +1,0 @@
-{
-  "coding_agent_rerun": false,
-  "original_run_id": "GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db",
-  "pattern_retry_attempt": 1,
-  "pattern_retry_policy": "single_explicit_pattern_retry_v1",
-  "pattern_retry_reason": "retry_recovery_abstraction_after_structured_output_failure",
-  "task_id": "GS-T003"
-}

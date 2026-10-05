@@ -1,8 +1,0 @@
-{
-  "chronological_index": 1,
-  "completed_at": "2026-09-20T17:28:11.320067+00:00",
-  "configuration_hash": "c224720f3af29a5b1ccf68c3adcdd052eaade940cdd605f5b5f1551945510186",
-  "run_id": "GS-E003-A1-R3-GS-T001-73219ebd0c63472aaed4aae33a70a714",
-  "status": "blocked_runtime_or_persistence_error",
-  "task_id": "GS-T001"
-}
