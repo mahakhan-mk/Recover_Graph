@@ -1,0 +1,53 @@
+{
+    "corpus_name":  "RecoverGraph paper frozen recovery corpus",
+    "pattern_count":  5,
+    "pattern_ids":  [
+                        "recovery-pattern-ad07a6a45718b848a30ad377",
+                        "recovery-pattern-f490f62ab931191c6eac6db1",
+                        "recovery-pattern-162e3999c4a2c66a1ff647ed",
+                        "recovery-pattern-fd7b65022b22dc5f2a42816f",
+                        "recovery-pattern-99a54266f940e1d4648f4698"
+                    ],
+    "paper_facing_system_name":  "RecoverGraph",
+    "internal_package_name":  "graph_swarm",
+    "acquisition_abstraction_model":  "cohere/north-mini-code:free",
+    "abstraction_model_confirmation":  "Confirmed by Gate A1 R13B closeout selected logical results",
+    "embedding_model":  "sentence-transformers/all-MiniLM-L6-v2",
+    "embedding_dimension":  384,
+    "normalized_embeddings":  true,
+    "vector_similarity":  "cosine",
+    "vector_index":  "Neo4j native vector index recovery_pattern_embedding_idx",
+    "source_acquisition_paths":  [
+                                     "research/evidence/results/GS-E003/gate_a1/GATE_A1_R13B_CLOSEOUT.json",
+                                     "research/evidence/results/GS-E003/gate_a1/GATE_A1_R13B_CLOSEOUT.md",
+                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/manifest.json",
+                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/GS-E003/gate_a1/acquisition-r13b/GS-T001/GS-E003-A1-R13b-GS-T001-d2418a3ebc4a4ea9963cb5207bd73f3f/acquisition.json",
+                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/GS-E003/gate_a1/acquisition-r13b-retry-001/GS-T002/GS-E003-A1-R13b-GS-T002-bf6b0cd4d66949a7b1c2234c031ee770/acquisition.json",
+                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/GS-E003/gate_a1/acquisition-r13b/GS-T003/GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db/acquisition.json",
+                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/GS-E003/gate_a1/acquisition-r13b-retry-001/GS-T004/GS-E003-A1-R13b-GS-T004-ac49dfcc4dd64f6c9acaaab4a5ed885e/acquisition.json",
+                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/GS-E003/gate_a1/acquisition-r13b/GS-T005/GS-E003-A1-R13b-GS-T005-ba0d94867f6944cd8341a28a44c4013b/acquisition.json"
+                                 ],
+    "treatment_configs":  [
+                              "configs/experiments/sprint3b_kilo_v4_canary_qwen3_coder.yaml",
+                              "configs/experiments/gs_e003_hardened_development_v1.yaml"
+                          ],
+    "treatment_freezes":  [
+                              "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/freeze.json",
+                              "research/evidence/results/GS-E003/sprint3b_hardened_development_v1/freeze.json"
+                          ],
+    "memory_policy":  "Fixed frozen acquisition corpus; read-only treatment memory",
+    "online_memory_writes":  false,
+    "neo4j_writes_during_selected_treatment_runs":  false,
+    "freeze_status":  "The selected run freezes designate these as development-only candidates; no selected run is classified VALID_REPORTED",
+    "export_timestamp":  "2026-10-05T13:29:53+05:00",
+    "export_git_commit_sha":  "70525a28b18f3ec8399b4eec29586d9a91dd0a64",
+    "schema_migrations":  [
+                              "migrations/neo4j/001_constraints.cypher",
+                              "migrations/neo4j/002_recovery_pattern_vector_index.cypher"
+                          ],
+    "checksums":  {
+                      "acquisition_closeout_json_sha256":  "a8a1427e04d744b5e89aea58d9fd370e5d71d85b84f2d1eca703301c8444b56d",
+                      "recovery_patterns_jsonl_sha256":  "7815328cd3fc360f7d200f7ee2561490cc50f89d2dadf1787112e81c33d42434"
+                  },
+    "export_completeness":  "Three full stored records exported from treatment advisory evidence; two records contain only supported acquisition/closeout fields and null for unavailable values. Neo4j was not configured in this checkout."
+}
