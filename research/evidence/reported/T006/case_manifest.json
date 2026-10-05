@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "paper_label": "EXP1",
+  "task_id": "GS-T006",
+  "canonical_run_ids": {
+    "B0": "GS-E003-B0-GS-T006-58d1773e4e1840128fa4a7fff92f866b",
+    "T": "GS-E003-T-GS-T006-f72adb31053f46bf8cb7930aba136e17"
+  },
+  "original_source_paths": {
+    "B0": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/runs/GS-E003/B0/GS-T006/GS-E003-B0-GS-T006-58d1773e4e1840128fa4a7fff92f866b",
+    "T": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/runs/GS-E003/T/GS-T006/GS-E003-T-GS-T006-f72adb31053f46bf8cb7930aba136e17"
+  },
+  "repository": {
+    "repository_name": "tornadoweb__tornado.d5ac65c1",
+    "clone_url": "https://github.com/swesmith/tornadoweb__tornado.d5ac65c1.git",
+    "revision": "3a49fcc4520192175e1549dad76a8cf827630582",
+    "revision_source": "benchmark/manifests/repositories.json"
+  },
+  "config_source": "configs/experiments/sprint3b_kilo_v4_canary_qwen3_coder.yaml",
+  "reported_config": "configs/experiments/reported/exp1_exp3_qwen.yaml",
+  "freeze_path": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/freeze.json",
+  "case_definition": "benchmark/reported_cases/GS-T006.json",
+  "frozen_memory_path": "research/evidence/reported/frozen_memory/",
+  "research_validity_class": "VALID_DEVELOPMENT",
+  "run_validity": {
+    "B0": "valid",
+    "T": "valid"
+  },
+  "copied_artifact_sha256": {
+    "B0/artifact.json": "cbe0006462f5290fc8895dca711d92825cc539a0f39adcb04ddf103b7065687b",
+    "B0/raw_evidence.json": "a4a68f7665397a0e3a5798e38fa0cb62904a6672ad490dd9dadfc19be49be802",
+    "B0/run_metadata.json": "02c91b8058e9f29ed3ce95d0b4fd800c15dd1bfa6435420938528b8fb6d02b62",
+    "B0/steps.sqlite": "fd91521ae1c624d4e915b4e9beb8c00628e63132cbd938627048c7d1331b65ec",
+    "T/artifact.json": "cddc57e5a025f2f79de5c1328ea496636e5a0ab6ea9f59f033484c843681b126",
+    "T/raw_evidence.json": "3db4e45f2df8f34050cd810960313e55c77249c1ecd3f4e083d48767d184ce00",
+    "T/run_metadata.json": "f1c73fe4d6278e4dd258a913bf5de0b4683256852e5cbcdce290190befed53be",
+    "T/steps.sqlite": "94e7bd7b4cfde7f0cf3b6e63c324454c1ea8acb1cc4668deab1771af7a94504d",
+    "T/advisory_evidence.jsonl": "3125ffd15391576c8a924866f9d4051ea1b4737f85016babd116117891a2d02c"
+  },
+  "copied_config_sha256": "907068ee4a07e22a7ef17f7d71a4c7ffd74c105b420903ad4204a149b6d84c78"
+}

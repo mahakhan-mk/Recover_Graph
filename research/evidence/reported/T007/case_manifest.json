@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "paper_label": "EXP2",
+  "task_id": "GS-T007",
+  "canonical_run_ids": {
+    "B0": "GS-E003-B0-GS-T007-3476d50492ca4dc1a8d3c8d24992fea8",
+    "T": "GS-E003-T-GS-T007-709f825d8c5740f3b7bf452434f763d4"
+  },
+  "original_source_paths": {
+    "B0": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/runs/GS-E003/B0/GS-T007/GS-E003-B0-GS-T007-3476d50492ca4dc1a8d3c8d24992fea8",
+    "T": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/runs/GS-E003/T/GS-T007/GS-E003-T-GS-T007-709f825d8c5740f3b7bf452434f763d4"
+  },
+  "repository": {
+    "repository_name": "pallets__jinja.ada0a9a6",
+    "clone_url": "https://github.com/swesmith/pallets__jinja.ada0a9a6.git",
+    "revision": "83b73140ca308ee1c65870c78d11ebdff5a13d68",
+    "revision_source": "benchmark/manifests/repositories.json"
+  },
+  "config_source": "configs/experiments/sprint3b_kilo_v4_canary_qwen3_coder.yaml",
+  "reported_config": "configs/experiments/reported/exp1_exp3_qwen.yaml",
+  "freeze_path": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/freeze.json",
+  "case_definition": "benchmark/reported_cases/GS-T007.json",
+  "frozen_memory_path": "research/evidence/reported/frozen_memory/",
+  "research_validity_class": "VALID_DEVELOPMENT",
+  "run_validity": {
+    "B0": "valid",
+    "T": "valid"
+  },
+  "copied_artifact_sha256": {
+    "B0/artifact.json": "bac39a897ee306d850d04367c50b7935d3c94c28518ccd480f1b19f3e9b858b3",
+    "B0/raw_evidence.json": "5721a013628af937ae971d84bc502af5f7f2a2bacd48dc5d0fa6d43b20c61955",
+    "B0/run_metadata.json": "c697c8aec61dd76d0b3edf2b9a9b02391bab0e5e22e0bfc07815042e0392d91c",
+    "B0/steps.sqlite": "b647679254771e12b870ce3a30c0ea7166ab891f3f58dabdcd8bb64e66fec5b6",
+    "T/artifact.json": "e36e5fd14bdfa75e1b26a8501c2cb62edd4b94ee0e7993da87776fd890fc199b",
+    "T/raw_evidence.json": "17e11c3c8eec75dfa9235b55cc813c131dbfaa508cda6a97f5c7d0df6beae925",
+    "T/run_metadata.json": "06a3aff4b160e60c9730cff30a705429e8cadbc044e89bff7d50375ec30c122c",
+    "T/steps.sqlite": "a0b9d3026ca005547317e295177baaf3fdfe25756f1e24282f34769687b76872"
+  },
+  "copied_config_sha256": "907068ee4a07e22a7ef17f7d71a4c7ffd74c105b420903ad4204a149b6d84c78"
+}

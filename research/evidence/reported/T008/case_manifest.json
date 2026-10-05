@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "paper_label": "EXP3",
+  "task_id": "GS-T008",
+  "canonical_run_ids": {
+    "B0": "GS-E003-B0-GS-T008-779fa5a17f7a4dafaf5d45815babe399",
+    "T": "GS-E003-T-GS-T008-0c5215d948a74fc4bb1b2796777f366c"
+  },
+  "original_source_paths": {
+    "B0": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/runs/GS-E003/B0/GS-T008/GS-E003-B0-GS-T008-779fa5a17f7a4dafaf5d45815babe399",
+    "T": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/runs/GS-E003/T/GS-T008/GS-E003-T-GS-T008-0c5215d948a74fc4bb1b2796777f366c"
+  },
+  "repository": {
+    "repository_name": "tobymao__sqlglot.036601ba",
+    "clone_url": "https://github.com/swesmith/tobymao__sqlglot.036601ba.git",
+    "revision": "11710cc8e44a685969087a8b1f24a5a06fde0161",
+    "revision_source": "benchmark/manifests/repositories.json"
+  },
+  "config_source": "configs/experiments/sprint3b_kilo_v4_canary_qwen3_coder.yaml",
+  "reported_config": "configs/experiments/reported/exp1_exp3_qwen.yaml",
+  "freeze_path": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/freeze.json",
+  "case_definition": "benchmark/reported_cases/GS-T008.json",
+  "frozen_memory_path": "research/evidence/reported/frozen_memory/",
+  "research_validity_class": "VALID_DEVELOPMENT",
+  "run_validity": {
+    "B0": "valid",
+    "T": "valid"
+  },
+  "copied_artifact_sha256": {
+    "B0/artifact.json": "b6914d8b81c3ffcfa07a0c584122fce5642010d43774620f77bb0cd5244a318f",
+    "B0/raw_evidence.json": "a44f10490ae46e6ddcc32e5be2c8a1382928a67bf7ce3972df28d8c74d762d1b",
+    "B0/run_metadata.json": "dbf98889117a4eef2d431662220218bbd3a0159bb61c470c7bc36cabef0a5e30",
+    "B0/steps.sqlite": "7d4d6154ee7a3c6f925eec0cb9be31a72a298de1d0f1c1966b199d3508f515e1",
+    "T/artifact.json": "3185f48d2f942056e8f8b412a79152315a8f1d254073fed3cc57e7e23a1541cb",
+    "T/raw_evidence.json": "e0016479e25c9289a9fa00c333bf99c1368b617a93272868c451cbee1e0bd4cb",
+    "T/run_metadata.json": "c5f2d1229f92cc68887ded5750fd67c5d8376ad37dd6913b9849b4f58e08c261",
+    "T/steps.sqlite": "ca172e70a99f2a5d1d97d6ba2bde26dff3d073ed661c44c239bb046e91c5c977",
+    "T/advisory_evidence.jsonl": "189d30f5d3702732173656f96ceef885c7a380c10bde84acf0e1a39f8170de27"
+  },
+  "copied_config_sha256": "907068ee4a07e22a7ef17f7d71a4c7ffd74c105b420903ad4204a149b6d84c78"
+}

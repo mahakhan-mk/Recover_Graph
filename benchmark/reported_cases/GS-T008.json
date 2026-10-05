@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "task_id": "GS-T008",
+  "paper_label": "EXP3",
+  "source_dataset": "SWE-bench/SWE-smith-py",
+  "review_id": "GS-R022",
+  "instance_id": "tobymao__sqlglot.036601ba.func_pm_ctrl_shuffle__cgh8hlrv",
+  "repository": {
+    "repository_name": "tobymao__sqlglot.036601ba",
+    "clone_url": "https://github.com/swesmith/tobymao__sqlglot.036601ba.git",
+    "revision": "11710cc8e44a685969087a8b1f24a5a06fde0161",
+    "revision_source": "benchmark/manifests/repositories.json"
+  },
+  "task_problem_statement": "DATE_ADD function with 3 arguments causes UnboundLocalError\n\n#### Description\n\nWhen using the DATE_ADD function with 3 arguments (unit, value, expression) in Spark dialect, an UnboundLocalError is raised due to a variable being referenced before assignment.\n\n#### Steps/Code to Reproduce\n\n```python\nimport sqlglot\n\n# This should work but raises UnboundLocalError\nsql = \"SELECT DATE_ADD(MONTH, 20, col)\"\nresult = sqlglot.transpile(sql, read=\"spark\", write=\"spark\")\nprint(result)\n```\n\nThe error occurs when parsing DATE_ADD/DATEADD/TIMESTAMPADD functions with the signature `(unit, value integer, expr)` as documented in the Databricks SQL reference.\n\n#### Expected Behavior\n\nThe function should parse correctly and return the expected SQL output without errors.\n\n#### Actual Behavior\n\n```\nUnboundLocalError: cannot access local variable 'expression' where it is not defined\n```\n\nThis happens because the variable `expression` is being used before it's assigned when processing the 3-argument form of DATE_ADD.",
+  "objective_evaluator": {
+    "name": "frozen_swesmith_fail_to_pass",
+    "version": "frozen_swesmith_objective_v1",
+    "fail_to_pass": [
+      "tests/dialects/test_spark.py::TestSpark::test_spark"
+    ],
+    "pass_to_pass": [
+      "tests/dialects/test_spark.py::TestSpark::test_analyze",
+      "tests/dialects/test_spark.py::TestSpark::test_bool_or",
+      "tests/dialects/test_spark.py::TestSpark::test_current_user",
+      "tests/dialects/test_spark.py::TestSpark::test_ddl",
+      "tests/dialects/test_spark.py::TestSpark::test_explode_projection_to_unnest",
+      "tests/dialects/test_spark.py::TestSpark::test_hint",
+      "tests/dialects/test_spark.py::TestSpark::test_insert_cte",
+      "tests/dialects/test_spark.py::TestSpark::test_minus",
+      "tests/dialects/test_spark.py::TestSpark::test_schema_binding_options",
+      "tests/dialects/test_spark.py::TestSpark::test_string",
+      "tests/dialects/test_spark.py::TestSpark::test_strip_modifiers",
+      "tests/dialects/test_spark.py::TestSpark::test_to_date",
+      "tests/dialects/test_spark.py::TestSpark::test_transform_query",
+      "tests/dialects/test_spark.py::TestSpark::test_transpile_annotated_exploded_column"
+    ],
+    "test_source": "benchmark/annotations/recurrence_evidence.jsonl"
+  },
+  "environment": {
+    "runtime_type": "docker",
+    "python_version": "3.12.1",
+    "network_during_execution": false,
+    "workspace_policy": "manifest_container_required; workspace and dependencies from pinned SWE-smith repository",
+    "container_policy": "validated prepared Docker image; task network disabled",
+    "upstream_image": "swebench/swesmith.x86_64.tobymao_1776_sqlglot.036601ba",
+    "upstream_image_digest": "sha256:08bbf9a13106425b251b10cb7b77fe469c228d59d665a53086aab545b76c8b1f",
+    "prepared_image": "graph-swarm/sprint3b-gs-t008:41e9dd1b233b4a7f",
+    "prepared_image_fingerprint": "41e9dd1b233b4a7f",
+    "prepared_image_digest": null,
+    "validation_marker": "research/evidence/workspaces/sprint3-task-environments/GS-T008/41e9dd1b233b4a7f/environment.json",
+    "validation_marker_validated": true,
+    "environment_policy_path": "configs/research/benchmark_environments.toml",
+    "requirements_from": "repository",
+    "required_extras": [
+      "dev"
+    ]
+  },
+  "recurrence_metadata": {
+    "evaluator_version": "frozen_recurrence_matcher_v2_structured_pytest",
+    "occurrence_index": 2,
+    "chronological_index": 8,
+    "family_id": "GS-F003",
+    "source_task_id": null
+  },
+  "frozen_memory_path": "research/evidence/reported/frozen_memory/",
+  "config_source": "configs/experiments/sprint3b_kilo_v4_canary_qwen3_coder.yaml",
+  "reported_config": "configs/experiments/reported/exp1_exp3_qwen.yaml",
+  "research_validity_class": "VALID_DEVELOPMENT"
+}

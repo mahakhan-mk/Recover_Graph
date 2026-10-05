@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "task_id": "GS-T017",
+  "paper_label": "EXP4",
+  "source_dataset": "SWE-bench/SWE-smith-py",
+  "review_id": "GS-R036",
+  "instance_id": "textualize__rich.9d8f9a37.gs_t017",
+  "repository": {
+    "repository_name": "Textualize__rich.9d8f9a37",
+    "clone_url": "https://github.com/Textualize/rich.git",
+    "revision": "9d8f9a372cc5916fd4781fec207ced7ddac2f08f",
+    "revision_source": "local SWE-smith checkout origin remote; HEAD matches manifest base_revision"
+  },
+  "task_problem_statement": "Rich syntax highlighting omits the token stream for a requested line range. Syntax.highlight() must iterate the Pygments lexer token sequence and preserve line-range token fragments so highlighted source remains visible.",
+  "objective_evaluator": {
+    "name": "frozen_swesmith_fail_to_pass",
+    "version": "frozen_swesmith_objective_v1",
+    "fail_to_pass": [
+      "tests/test_syntax.py::test_python_render_line_range_indent_guides"
+    ],
+    "pass_to_pass": [
+      "tests/test_syntax.py::test_pygments_syntax_theme",
+      "tests/test_highlighter.py::test_highlight_json_with_indent"
+    ],
+    "test_source": "benchmark/manifests/gs_e003_hardened_development_v1.jsonl"
+  },
+  "environment": {
+    "runtime_type": "docker",
+    "python_version": "3.12.1",
+    "network_during_execution": false,
+    "workspace_policy": "manifest_container_required; repository and dependencies from pinned source repository",
+    "container_policy": "frozen task-manifest image",
+    "upstream_image": "swebench/swesmith.x86_64.textualize_1776_rich.9d8f9a37:latest",
+    "upstream_image_digest": null,
+    "prepared_image": null,
+    "prepared_image_fingerprint": null,
+    "dockerfile_path": "research/evidence/workspaces/GS-E003/positive_control_missing_iteration/GS-T017/Dockerfile",
+    "dockerfile_path_is_ignored_local_evidence": true,
+    "environment_policy_path": "configs/research/gs_e003_hardened_development_v1_environments.toml"
+  },
+  "recurrence_metadata": {
+    "evaluator_version": "frozen_recurrence_matcher_v2_structured_pytest",
+    "occurrence_index": 4,
+    "chronological_index": 17,
+    "family_id": "missing_iteration",
+    "source_task_id": "GS-T005"
+  },
+  "frozen_memory_path": "research/evidence/reported/frozen_memory/",
+  "config_source": "configs/experiments/gs_e003_hardened_development_v1.yaml",
+  "reported_config": "configs/experiments/reported/exp4_qwen.yaml",
+  "research_validity_class": "VALID_DEVELOPMENT"
+}
