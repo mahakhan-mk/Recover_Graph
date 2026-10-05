@@ -1,0 +1,70 @@
+{
+  "status": "offline_validated",
+  "revision": "generic_completed_prefix_probe_v1",
+  "model_calls": 0,
+  "neo4j_writes": 0,
+  "execution_slots_run": [],
+  "candidate": "GS-T018",
+  "historical_t018_replay": {
+    "source": "sprint3b_hardened_development_v3 T artifact, read-only",
+    "first_source_mutation_action_id": "2f234c0a-9f38-4b46-908b-bcb8d264737a",
+    "last_completed_prefix_action_id": "92b6c6bf-cb36-40bf-8dc1-36c15b7d4179",
+    "first_advisory_boundary": "creation of the planned edit_file/write_file action, after completed prefix evidence is recorded and before the controlled mutation executes",
+    "eligible_pattern_ids": ["recovery-pattern-fd7b65022b22dc5f2a42816f"],
+    "selected_pattern_id": "recovery-pattern-fd7b65022b22dc5f2a42816f",
+    "advice_fires": true,
+    "before_or_after_repair": "before repair",
+    "reason": "the probe presents the unchanged historical test-execution shape to the existing gates while its prefix contains lexer/token/highlighting evidence; the actual edit action remains the recorded action and has not executed"
+  },
+  "safety_matrix": [
+    {
+      "task_id": "GS-T006",
+      "eligible_pattern_ids": ["recovery-pattern-ad07a6a45718b848a30ad377"],
+      "selected_pattern_id": "recovery-pattern-ad07a6a45718b848a30ad377",
+      "advice_fires": true,
+      "boundary": "pre-mutation probe only",
+      "reason": "historical read-only retrieval evidence shows the related UTF-8/BOM recovery; no unrelated pattern is admitted by the hardened trigger context"
+    },
+    {
+      "task_id": "GS-T007",
+      "eligible_pattern_ids": [],
+      "selected_pattern_id": null,
+      "advice_fires": false,
+      "boundary": "pre-mutation probe",
+      "reason": "no non-generic trigger-context anchor is present; unsupported task remains silent"
+    },
+    {
+      "task_id": "GS-T008",
+      "eligible_pattern_ids": ["recovery-pattern-f490f62ab931191c6eac6db1"],
+      "selected_pattern_id": "recovery-pattern-f490f62ab931191c6eac6db1",
+      "advice_fires": true,
+      "boundary": "pre-mutation probe only",
+      "reason": "the known variable-initialization recovery remains the only semantically related historical match; no unrelated pattern is admitted"
+    },
+    {
+      "task_id": "GS-T017",
+      "eligible_pattern_ids": ["recovery-pattern-fd7b65022b22dc5f2a42816f"],
+      "selected_pattern_id": "recovery-pattern-fd7b65022b22dc5f2a42816f",
+      "advice_fires": true,
+      "boundary": "pre-mutation probe only",
+      "reason": "the existing historical advisory evidence and hardened replay identify fd7 as the related syntax/token recovery; no unrelated pattern is admitted"
+    },
+    {
+      "task_id": "GS-T018",
+      "eligible_pattern_ids": ["recovery-pattern-fd7b65022b22dc5f2a42816f"],
+      "selected_pattern_id": "recovery-pattern-fd7b65022b22dc5f2a42816f",
+      "advice_fires": true,
+      "boundary": "pre-mutation probe",
+      "reason": "the completed prefix supplies genuine lexer/token/highlighting anchors and the synthetic test intent is evaluated through the unchanged hardened applicability path"
+    }
+  ],
+  "contract": {
+    "future_outcome_data_used": false,
+    "benchmark_metadata_used_for_lookup": false,
+    "current_edit_contents_used_for_lookup": false,
+    "retrieval_changed": false,
+    "applicability_changed": false,
+    "ranking_changed": false,
+    "repair_executed": false
+  }
+}

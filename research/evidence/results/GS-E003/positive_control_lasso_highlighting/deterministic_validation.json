@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "status": "READY_FOR_EXECUTION_PREP",
+  "task_id": "GS-T018",
+  "source": "SWE-bench/SWE-smith-py",
+  "repository": "swesmith/pygments__pygments.27649ebb@d53d06ab2c467be43d32f68881422698ee33adf6",
+  "docker_image": "swebench/swesmith.x86_64.pygments_1776_pygments.27649ebb:latest",
+  "python": "3.12.1",
+  "network": "disabled",
+  "checks": {
+    "A_deterministic_fail_to_pass_boundary_declared": true,
+    "B_deterministic_pass_to_pass_boundary_declared": true,
+    "C_docker_python_gate": true,
+    "D_expected_pattern_eligible_offline": true,
+    "E_no_unrelated_pattern_eligible_offline": true,
+    "F_shared_anchor_is_semantic_dataflow": true,
+    "G_no_b0_or_t_run": true,
+    "H_actual_mutation_applied_and_reversed": true,
+    "I_deterministic_repeated_boundaries": true
+  },
+  "boundary": {
+    "fail_to_pass": ["tests/examplefiles/lasso/json.lasso9::", "tests/examplefiles/lasso/json.lasso::"],
+    "pass_to_pass": ["tests/test_token.py::test_tokentype", "tests/test_token.py::test_functions"]
+  },
+  "runtime_validation": {
+    "image": "graph-swarm/gs-t018-python312:prepared",
+    "upstream_digest": "sha256:ba403c3f4f52fb6ed76c0809b541f2a78ff7147a978a665c962ae11313002dd9",
+    "python": "3.12.1",
+    "network": "none",
+    "broken_f2p": {"exit_code": 1, "runs": 2, "failed_targets": 2},
+    "repaired_f2p": {"exit_code": 0, "runs": 2, "passed_targets": 2},
+    "p2p": {"exit_code": 0, "runs": 2, "passed_targets": 2},
+    "commands_valid": true,
+    "mutation_patch_applied": true,
+    "known_repair": "reverse of frozen mutation.patch",
+    "workspace_final_state": "clean base revision"
+  },
+  "applicability_replay": {
+    "boundary": {"tool": "run_command", "operation": "run_command", "intent": "test_execution"},
+    "expected_eligible_pattern_ids": ["recovery-pattern-fd7b65022b22dc5f2a42816f"],
+    "expected_unrelated_eligible_pattern_ids": [],
+    "generic_execution_terms_used_as_anchor": false,
+    "method": "offline replay through current hardened applicability implementation; no Neo4j write or model call",
+    "expected_pattern_unique": true,
+    "expected_pattern_id": "recovery-pattern-fd7b65022b22dc5f2a42816f",
+    "unrelated_eligible_pattern_ids": []
+  },
+  "semantic_dataflow_evidence": {
+    "file": "pygments/lexers/javascript.py",
+    "symbol": "LassoLexer.get_tokens_unprocessed",
+    "relationship": "RegexLexer emits a token stream; the Lasso hook selects lexer state and converts matching Name.Other/Name.Other.Member values into Name.Builtin tokens"
+  },
+  "advisory_timing": {
+    "first_boundary": "pre_tool action planning for the first eligible run_command pytest action",
+    "architecture_evidence": "prepare_tool_action records the planned action, evaluates the advisory, and raises ModelRetry before controlled_run_command executes",
+    "pre_repair": true,
+    "failure_observation_boundary": "the completed failing pytest action follows the first advisory opportunity and precedes source inspection/edit"
+  },
+  "execution_observation": "B0/T not executed"
+}

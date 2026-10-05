@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "status": "UNSUITABLE_POSITIVE_CONTROL",
+  "candidate_task_id": "GS-T016",
+  "validation_mode": "deterministic_only",
+  "agent_or_model_calls": 0,
+  "docker": {
+    "image": "swebench/swesmith.x86_64.pydata_1776_patsy.a5d16484:latest",
+    "runtime": "docker",
+    "python_version": "3.12.1",
+    "version_command_passed": true
+  },
+  "baseline_and_repair": {
+    "broken_workspace": {
+      "workspace": "research/evidence/workspaces/GS-E003/positive_control_missing_initialization/GS-T016/broken",
+      "fail_to_pass": {
+        "test": "patsy/parse_formula.py::test__tokenize_formula",
+        "passed_expectedly": false,
+        "observed_error": "NameError: name 'token_strings' is not defined"
+      }
+    },
+    "repaired_workspace": {
+      "workspace": "research/evidence/workspaces/GS-E003/positive_control_missing_initialization/GS-T016/repaired",
+      "fail_to_pass": {
+        "test": "patsy/parse_formula.py::test__tokenize_formula",
+        "passed_expectedly": true
+      }
+    },
+    "pass_to_pass": {
+      "tests": [
+        "patsy/tokens.py::test_pretty_untokenize_and_normalize_token_spacing",
+        "patsy/origin.py::test_Origin"
+      ],
+      "broken_workspace_passed": true,
+      "repaired_workspace_passed": true
+    },
+    "pytest_boundary_note": "The locally cached Patsy image does not contain pytest/numpy, so the exact test function bodies were executed in the Docker Python 3.12.1 process with only the minimal module stubs needed to avoid importing optional benchmark dependencies. The preregistered trusted boundary remains structured pytest, but the candidate was stopped before registration."
+  },
+  "applicability_offline": {
+    "service": "graph_swarm.retrieval.applicability.RecoveryPatternApplicabilityService",
+    "expected_pattern_id": "recovery-pattern-162e3999c4a2c66a1ff647ed",
+    "expected_boundary": {
+      "tool": "run_command",
+      "operation": "run_command",
+      "intent": "test_execution",
+      "runtime": "docker",
+      "python": "3.12.1"
+    },
+    "expected_pattern": {
+      "applicable": true,
+      "matched_fields": [
+        "trigger_tool",
+        "trigger_operation",
+        "trigger_intent",
+        "trigger_context",
+        "runtime",
+        "versions"
+      ],
+      "rejection_reasons": []
+    },
+    "genuine_anchor_assessment": {
+      "human_anchor": "lexical/text analysis and token accumulation",
+      "policy_match_is_clean": false,
+      "reason": "The current exact-term gate obtains its shared context from the generic command token present in the historical test-failure signature and the structured command arguments. That is not a genuine subject/dataflow anchor."
+    },
+    "other_pattern_evaluations": [
+      {
+        "pattern_id": "recovery-pattern-ad07a6a45718b848a30ad377",
+        "applicable": true,
+        "rejection_reasons": []
+      },
+      {
+        "pattern_id": "recovery-pattern-162e3999c4a2c66a1ff647ed",
+        "applicable": true,
+        "rejection_reasons": []
+      },
+      {
+        "pattern_id": "recovery-pattern-f490f62ab931191c6eac6db1",
+        "applicable": false,
+        "rejection_reasons": [
+          "trigger_tool_mismatch",
+          "trigger_operation_mismatch",
+          "trigger_intent_missing"
+        ]
+      },
+      {
+        "pattern_id": "recovery-pattern-99a54266f940e1d4648f4698",
+        "applicable": true,
+        "rejection_reasons": []
+      },
+      {
+        "pattern_id": "recovery-pattern-fd7b65022b22dc5f2a42816f",
+        "applicable": true,
+        "rejection_reasons": []
+      }
+    ],
+    "E_expected_pattern_eligible": true,
+    "F_no_other_pattern_preferred": false,
+    "stop_required": true
+  },
+  "source_or_experiment_changes": false,
+  "manifest_or_annotation_changes": false,
+  "project_validation": {
+    "json_reports_parse": true,
+    "ruff": {
+      "command": ".\\.venv\\Scripts\\ruff.exe check src tests",
+      "passed": true
+    },
+    "pyright": {
+      "command": ".\\.venv\\Scripts\\pyright.exe",
+      "passed": true,
+      "errors": 0,
+      "warnings": 0
+    },
+    "focused_applicability_tests": {
+      "command": ".\\.venv\\Scripts\\python.exe -m pytest tests/unit/retrieval/test_r13_applicability.py -q",
+      "passed": true,
+      "tests_passed": 8
+    }
+  }
+}

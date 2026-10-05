@@ -1,0 +1,15 @@
+[benchmark]
+name = "gs-e003-hardened-development-v2"
+task_order = ["GS-T018"]
+network_during_execution = false
+container_image_source = "frozen_task_manifest"
+docker_build_timeout_seconds = 7200
+
+[tasks."GS-T018"]
+runtime = "manifest_container_required"
+python_source = "repository"
+dependency_source = "repository"
+network_during_execution = false
+require_validated_environment = true
+python_constraint_assertion = "==3.12.1"
+rationale = "Reuse the Gate-A1 validated Pygments SWE-smith image and exact Python 3.12.1 environment; no network is permitted during execution."

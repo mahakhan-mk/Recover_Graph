@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "status": "READY_FOR_NEW_B0_T",
+  "registration_status": "preregistered_not_run",
+  "task_id": "GS-T018",
+  "review_id": "GS-R037",
+  "repository": "swesmith/pygments__pygments.27649ebb",
+  "repository_path": "benchmark/workspaces/swesmith/pygments__pygments.27649ebb",
+  "base_revision": "d53d06ab2c467be43d32f68881422698ee33adf6",
+  "image_name": "swebench/swesmith.x86_64.pygments_1776_pygments.27649ebb:latest",
+  "source_historical_task": "GS-T005",
+  "source_recovery_pattern": "recovery-pattern-fd7b65022b22dc5f2a42816f",
+  "family": "syntax_token_classification",
+  "dataset_mutation_family": "func_pm_remove_cond",
+  "problem_statement": "LassoLexer no longer highlights built-in functions and member variables. Built-in keywords that should be highlighted as Name.Builtin are instead treated as regular Name.Other tokens. The failure is exercised by the Lasso example fixtures json.lasso9 and json.lasso; restore the lexer behavior while preserving unrelated token and formatter behavior.",
+  "related_but_nonidentical": {
+    "different_repository_from_development_cases": true,
+    "different_problem": true,
+    "different_concrete_code": true,
+    "different_test_ids": true,
+    "repair_not_exposed_as_treatment": true,
+    "shared_semantic_anchor": "lexer token stream feeding syntax-highlighting classification"
+  },
+  "runtime": "docker",
+  "python_version": "3.12.1",
+  "network_during_execution": false,
+  "recurrence_annotation": "benchmark/annotations/gs_e003_hardened_development_v2_recurrence.csv",
+  "environment_policy": "configs/research/gs_e003_hardened_development_v2_environments.toml",
+  "prepared_dockerfile": "research/evidence/results/GS-E003/positive_control_lasso_highlighting/Dockerfile",
+  "mutation_patch": "research/evidence/results/GS-E003/positive_control_lasso_highlighting/mutation.patch",
+  "fail_to_pass": [
+    "tests/examplefiles/lasso/json.lasso9::",
+    "tests/examplefiles/lasso/json.lasso::"
+  ],
+  "pass_to_pass": [
+    "tests/test_token.py::test_tokentype",
+    "tests/test_token.py::test_functions"
+  ],
+  "expected_first_legitimate_trigger_boundary": {
+    "tool": "run_command",
+    "operation": "run_command",
+    "intent": "test_execution",
+    "command": ["python", "-m", "pytest", "tests/examplefiles/lasso/json.lasso9::", "tests/examplefiles/lasso/json.lasso::", "-q"],
+    "architecture_boundary": "pre_tool planning, before controlled test execution"
+  },
+  "expected_recovery_operation": {"tool": "edit_file", "operation": "edit_file"},
+  "genuine_shared_semantic_anchors": ["syntax highlighting", "lexer token stream", "token classification"],
+  "applicability_gate": {
+    "revision": "hardened_trigger_context_applicability",
+    "expected_eligible_pattern_ids": ["recovery-pattern-fd7b65022b22dc5f2a42816f"],
+    "expected_unrelated_eligible_pattern_ids": [],
+    "generic_execution_terms_used_as_anchor": false,
+    "offline_replay": true
+  },
+  "agent_treatment_result_observed_before_freeze": false,
+  "actual_validation_status": "broken_and_repaired_boundaries_reproduced_without_agent_execution",
+  "model_provider_calls": 0,
+  "benchmark_agent_runs": 0,
+  "b0_t_execution": false
+}

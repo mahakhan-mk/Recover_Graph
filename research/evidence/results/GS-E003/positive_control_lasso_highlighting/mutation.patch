@@ -1,0 +1,22 @@
+diff --git a/pygments/lexers/javascript.py b/pygments/lexers/javascript.py
+index 891e48e..52c654e 100644
+--- a/pygments/lexers/javascript.py
++++ b/pygments/lexers/javascript.py
+@@ -767,17 +767,9 @@ class LassoLexer(RegexLexer):
+ 
+     def get_tokens_unprocessed(self, text):
+         stack = ['root']
+-        if self.requiredelimiters:
+-            stack.append('delimiters')
+         for index, token, value in \
+                 RegexLexer.get_tokens_unprocessed(self, text, stack):
+-            if (token is Name.Other and value.lower() in self._builtins or
+-                    token is Name.Other.Member and
+-                    value.lower().rstrip('=') in self._members):
+-                yield index, Name.Builtin, value
+-                continue
+             yield index, token, value
+-
+     def analyse_text(text):
+         rv = 0.0
+         if 'bin/lasso9' in text:

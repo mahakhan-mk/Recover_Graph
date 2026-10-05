@@ -1,0 +1,123 @@
+{
+  "status": "READY",
+  "freeze_type": "development_canary_package_no_results",
+  "experiment_id": "GS-E003",
+  "protocol_revision": "sprint3b-kilo-reduced-b0-t-v4-prompt-canary",
+  "config_version": "sprint3b-kilo-v4-prompt-canary",
+  "config_path": "configs/experiments/sprint3b_kilo_v4_canary.yaml",
+  "config_sha256": "cc3bdd5fd4dd90eeada0e0bab1f1c11c61d967b19dcc855f67ee20ff45193110",
+  "freeze_input_hashes": {
+    "configs/experiments/sprint3b_kilo_v4_canary.yaml": "cc3bdd5fd4dd90eeada0e0bab1f1c11c61d967b19dcc855f67ee20ff45193110",
+    "experiments/run_sprint3b_kilo_v4_canary.py": "f04cd42fc6f1c393907ab7142b3482c6d801087476cc7c4bc83cab864424cfb6",
+    "experiments/run_sprint3b_kilo_v3.py": "69a9e8aa81ca17bad3c1ba8cf93632c2d8cfea05f25f457902731acc76b07cd9",
+    "experiments/run_sprint3b_reduced_b0_t.py": "adf248eb0116803a1aaef3b2222e8d8cdef8bdca70cb3d864eefc67eec5b7186",
+    "experiments/sprint3.py": "071eac033039c2b4b6d64fc14d2ca2499d9550238c4bdb9eb4a2bec8279c53b7",
+    "experiments/sprint3a.py": "87633f95c4860a3d3d2b6de53e3d57cb42f8d0d314f8726ebfad4e8bd55df26b",
+    "benchmark/manifests/pilot.jsonl": "a697f9db5ea2febd6caf07432ae96b12066aaeee046719dfe6e5b832d5b8d3d4",
+    "benchmark/annotations/recurrence_validation.csv": "df598fffafe583f9bd6b4678f5959b62adaaf4f43c5c87b17d7e7316380cade1",
+    "configs/models/kilo_coding.yaml": "01c7be7c463b375ea28adc54c53d681940692e39f9678e6023b940300f7f5696",
+    "src/graph_swarm/agent/prompts.py": "2e44824f81a9c5367395fb607ac65bf3dc27493a8851dccbac989bd4059c7953",
+    "src/graph_swarm/agent/coding_agent.py": "2132421915f5f76dc399ec3b163fd2e69040c4d3ce4658e05b2f1e5e80896ae2",
+    "src/graph_swarm/agent/advisory.py": "66ac815e07fc8771d0f2fb8b389c547419d77710cae546720b75c7a05de24d13",
+    "src/graph_swarm/agent/dependencies.py": "f3d843fc2b2bf2ad1337b838eb4b06e4ae7c682b4f4474d232113c194d38cfef",
+    "src/graph_swarm/agent/hooks.py": "29008f95147b46a1fc05c052fc72c1d3783b2ca77efa255b54b7af3d73473cf7",
+    "src/graph_swarm/agent/model_output.py": "a6c7d49bb19767f6b201575cf94f487148671ca3302e6143d04877817c1a4f41",
+    "src/graph_swarm/agent/pacing.py": "4f1b873f4efb050308ce57df68668408c89ce14ed058aad198876caa766741b6",
+    "src/graph_swarm/agent/stagnation.py": "b31de7a19cb907625710fc84d5634917392c105c883cfd604cb8a87e54562f97",
+    "src/graph_swarm/agent/tools/edit_file.py": "d5cd2b3f3fc2de71606a06ed0257ca2c83089752199490b9d9c0a2f56cb66d05",
+    "src/graph_swarm/agent/tools/read_file.py": "6e251b78762dd4175ca2143e65a88550b6d14682b6c851641cb696c3b199af01",
+    "src/graph_swarm/agent/tools/run_command.py": "36041beb88ffc8a7ee89a217cb13689b697690d71ea3d991b4cc0f47ae9587e6",
+    "src/graph_swarm/agent/tools/run_tests.py": "697bae7a0fba25259a943e947f6192794c6454e6b2b776ce3b0bd72d340e2cc9",
+    "src/graph_swarm/agent/tools/write_file.py": "af0ee0cbf7ea3ca4e3d593094d8ef713939526751edc6245527d0f78a0a14826",
+    "src/graph_swarm/advisory/formatting.py": "627a12dbb70540292d3456246751541c7d7602ed66bcd1359766c2382d0dd6df",
+    "src/graph_swarm/advisory/service.py": "2f1c9564999834c79f001a9855e8af808af5901d301cc20659fc7bbda313900e",
+    "src/graph_swarm/graph/_validation.py": "8807bfe7324e3a8c10b5c54da3b08a3e2e45c9a1d1705013fcd0ba188d14dc5b",
+    "src/graph_swarm/graph/neo4j_repository.py": "9741acbf8766465dacb988a46c504307a581cfcb7054580497584b8f3e97334d",
+    "src/graph_swarm/graph/queries.py": "e4938e18e261f3391998b6845b6e92cd38405950327de88781aeb23d58969f4e",
+    "src/graph_swarm/graph/read_models.py": "2c1890800408d4fb9932cd7d7f678096d24ee00c47b3f073c56a15c5181b8775",
+    "src/graph_swarm/graph/repository.py": "3f732afe902860d2c2c192ed6ff32be10aa077378bb79db77df4250b4f0e8969",
+    "src/graph_swarm/research/runner.py": "89b94206bc2505d305973d6c7a93884bcd6fd34fd32b5966059142299402edd9",
+    "src/graph_swarm/research/contracts.py": "6d577f2ba7f28aa02b1abbb95bb68ba75dc3cfaefb214c029af2de07aaf2bfcb",
+    "src/graph_swarm/research/artifacts.py": "874716d8be39174168484a708e4f49fe06260cfebb9d8d9202da87c445017229",
+    "src/graph_swarm/research/benchmark_environments.py": "9643cb4a50e6a671b437ac3d64a62216d9c630802849f77482e6a5df190997e4",
+    "src/graph_swarm/research/benchmark_runtime_smoke.py": "889494cbabd5e9c0b489174601873c167867b3b6b9b97ff063d5c8e981b3e633",
+    "src/graph_swarm/retrieval/applicability.py": "63f9d13d9998ab4784865c418639c6c7c09f3eb590321d075999e6e07d2c13e9",
+    "src/graph_swarm/retrieval/candidates.py": "da4716dc1888220e27a0bf9a4606ab976b02763affb5fa5d60c05538c6835f54",
+    "src/graph_swarm/retrieval/query.py": "88ae26157c58a7aca1ccbb7d44b28f59a4b5aec0cce46df8694cd20a5beca1df",
+    "src/graph_swarm/retrieval/scorer.py": "2b08dca78a6e183df99daaed18a0816c0802f01a48c96dac99e75ad99eb8445f",
+    "src/graph_swarm/retrieval/service.py": "fb43deaf1a4848eb53dcc9e32313134d7137137990af6e7b0cb94d17ffac20a0",
+    "src/graph_swarm/integration/advisory_runtime.py": "099495e43bad834d05b903dcede5df067790ac59cfc533bf82f33d6b74392a8e",
+    "src/graph_swarm/memory/recovery_evidence.py": "91ee5e0f4c72a2adaee7d60fad53b5f02563ff4f37884767f0487e4fab382901",
+    "src/graph_swarm/domain/environment.py": "111c77d7d23e8cbb4c31c542608733354e7c96ef0a03d6c0d9e856452de47f1c",
+    "src/graph_swarm/domain/action.py": "150e3e08ccceacfdc142053d2c8e680ac0e57c39b214f33295afa1fdc005a7fe",
+    "src/graph_swarm/domain/actions.py": "63417e38f101bbd0813e37dedc2ba148ce5dc5df66931b22b476eacf75ab9e2a",
+    "src/graph_swarm/domain/advice.py": "b04e7197e9b94796060fb7f8c4cda76a05346e3c9f0b58470fe9e75522850afa",
+    "src/graph_swarm/domain/behavior.py": "3973bafebb500bcbeea05321c6778949fd30fb8d4d45fc23fd77632e42c36346",
+    "src/graph_swarm/domain/events.py": "0be5104d04051188c6184524a58b8804f559e18dfc1bd3f9f7ceda2ce8e5f5a8",
+    "src/graph_swarm/domain/failures.py": "86ab596b97588ea7b3800e648f4a4f67470f6b578d4252dfed0389e8e4293058",
+    "src/graph_swarm/domain/recovery_patterns.py": "70570bc08cb2e86d0c38ecc384f24d71cfd1bf5081689a4ac46ad4d4aeaff167",
+    "src/graph_swarm/domain/tasks.py": "7a34c2ff8302adb918b6a981e2e8e497c2f2e1db55de3448a6fbe669192962cc",
+    "src/graph_swarm/memory/recovery_embeddings.py": "4418b7113e4727e5bc4ab9faff19e1459f062a050461f78d56bb927f55c93344",
+    "src/graph_swarm/settings.py": "3477847bd33d5c402fd80885f2c3487105792bf2c34dca9b3f7f3bbe779ded08",
+    "configs/research/benchmark_environments.toml": "d9aaf1caeb2c01e50bb01544ed53e009bc0d1d745ed69ce586686fd944674ba7"
+  },
+  "task_ids": [
+    "GS-T006",
+    "GS-T007",
+    "GS-T008"
+  ],
+  "task_order": [
+    "GS-T006",
+    "GS-T007",
+    "GS-T008"
+  ],
+  "conditions": [
+    "B0",
+    "T"
+  ],
+  "execution_plan": [
+    [
+      "GS-T006",
+      "B0"
+    ],
+    [
+      "GS-T006",
+      "T"
+    ],
+    [
+      "GS-T007",
+      "B0"
+    ],
+    [
+      "GS-T007",
+      "T"
+    ],
+    [
+      "GS-T008",
+      "B0"
+    ],
+    [
+      "GS-T008",
+      "T"
+    ]
+  ],
+  "planned_primary_runs": 6,
+  "model": {
+    "provider": "kilo",
+    "name": "nex-agi/nex-n2.5-pro",
+    "system_prompt_id": "R13B_SYSTEM_PROMPT",
+    "system_prompt_sha256": "f3bf4187cc9bfabcf2551aa3988e592a2d0f2d0e61ad2984d7d90ddf13d54502"
+  },
+  "limits": {
+    "max_actions": 28,
+    "max_requests": 24
+  },
+  "recurrence_evaluator": {
+    "name": "frozen_fail_to_pass_recurrence_matcher",
+    "version": "frozen_recurrence_matcher_v2_structured_pytest"
+  },
+  "artifact_destination": {
+    "run_artifact_root": "research/evidence/results/GS-E003/sprint3b_kilo_v4_canary/runs",
+    "freeze_artifact": "research/evidence/results/GS-E003/sprint3b_kilo_v4_canary/freeze.json"
+  }
+}

@@ -16,6 +16,7 @@ from experiments.sprint3 import (
     FrozenSWEsmithObjective,
     IsolatedTaskEnvironment,
     make_recurrence_matcher,
+    make_recurrence_matcher_v3_exact_pytest_outcome,
 )
 from graph_swarm.domain.action import ActionResult
 from graph_swarm.domain.actions import PlannedAction
@@ -632,6 +633,97 @@ def test_sprint3_recurrence_fail_to_pass_data_stays_evaluator_only() -> None:
     assert make_recurrence_matcher(frozen)(
         _case(2), _stream(event, action), None, Path("workspace")
     ) is True
+
+
+def test_sprint3_v3_recurrence_exact_target_fails() -> None:
+    target = "tests/test_recurrence.py::test_exact"
+    event, action = _run_command_event(
+        ["python", "-m", "pytest", target],
+        f"FAILED {target} - assertion failed",
+    )
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase("example__repo.abc12345", (target,), "")
+    }
+
+    assert make_recurrence_matcher_v3_exact_pytest_outcome(frozen)(
+        _case(2), _stream(event, action), None, Path("workspace")
+    ) is True
+
+
+def test_sprint3_v3_recurrence_target_passes_but_another_test_fails() -> None:
+    target = "tests/test_recurrence.py::test_exact"
+    event, action = _run_command_event(
+        ["python", "-m", "pytest", "tests/test_recurrence.py"],
+        f"PASSED {target}\nFAILED tests/test_recurrence.py::test_other",
+    )
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase("example__repo.abc12345", (target,), "")
+    }
+
+    assert make_recurrence_matcher_v3_exact_pytest_outcome(frozen)(
+        _case(2), _stream(event, action), None, Path("workspace")
+    ) is False
+
+
+def test_sprint3_v3_recurrence_target_appearing_in_output_is_not_enough() -> None:
+    target = "tests/test_recurrence.py::test_exact"
+    event, action = _run_command_event(
+        ["python", "-m", "pytest", "tests/test_recurrence.py"],
+        f"AssertionError: expected failure in {target}\n1 failed",
+    )
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase("example__repo.abc12345", (target,), "")
+    }
+
+    assert make_recurrence_matcher_v3_exact_pytest_outcome(frozen)(
+        _case(2), _stream(event, action), None, Path("workspace")
+    ) is False
+
+
+def test_sprint3_v3_recurrence_aggregate_run_exact_target_fails() -> None:
+    target = "tests/test_recurrence.py::test_exact"
+    event, action = _run_command_event(
+        ["python", "-m", "pytest", "tests/test_recurrence.py"],
+        f"FAILED tests/test_recurrence.py::test_other\nFAILED {target}\n2 failed",
+    )
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase("example__repo.abc12345", (target,), "")
+    }
+
+    assert make_recurrence_matcher_v3_exact_pytest_outcome(frozen)(
+        _case(2), _stream(event, action), None, Path("workspace")
+    ) is True
+
+
+def test_sprint3_v3_recurrence_dedicated_target_passes() -> None:
+    target = "tests/test_recurrence.py::test_exact"
+    event, action = _run_command_event(
+        ["python", "-m", "pytest", target],
+        f"PASSED {target}",
+        success=True,
+    )
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase("example__repo.abc12345", (target,), "")
+    }
+
+    assert make_recurrence_matcher_v3_exact_pytest_outcome(frozen)(
+        _case(2), _stream(event, action), None, Path("workspace")
+    ) is False
+
+
+def test_sprint3_v3_recurrence_unrelated_failure() -> None:
+    target = "tests/test_recurrence.py::test_exact"
+    event, action = _run_command_event(
+        ["python", "-m", "pytest", "tests/test_recurrence.py"],
+        "ERROR tests/test_recurrence.py::test_other",
+    )
+    frozen = {
+        "GS-T006": FrozenSWEsmithCase("example__repo.abc12345", (target,), "")
+    }
+
+    assert make_recurrence_matcher_v3_exact_pytest_outcome(frozen)(
+        _case(2), _stream(event, action), None, Path("workspace")
+    ) is False
 
 
 def test_benchmark_environment_manifest_rejects_non_repository_python_policy(

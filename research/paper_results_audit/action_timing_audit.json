@@ -1,0 +1,460 @@
+[
+  {
+    "task_id": "GS-T006",
+    "condition": "T",
+    "run_id": "GS-E003-T-GS-T006-f72adb31053f46bf8cb7930aba136e17",
+    "source_artifact_path": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/runs/GS-E003/T/GS-T006/GS-E003-T-GS-T006-f72adb31053f46bf8cb7930aba136e17/artifact.json",
+    "relevant_actions": [
+      {
+        "timestamp": "2026-09-30T17:59:48.814904Z",
+        "action_id": "2f5312f8-446e-4efc-8465-d4a9daec1881",
+        "tool": "edit_file",
+        "success": true,
+        "exit_code": null,
+        "output_excerpt": "Edited 1 occurrence in tornado/locale.py"
+      },
+      {
+        "timestamp": "2026-09-30T18:00:10.174590Z",
+        "action_id": "75f90ccc-3ef5-45cb-b1b9-7c9825cc289e",
+        "tool": "run_command",
+        "success": true,
+        "exit_code": 0,
+        "output_excerpt": "============================= test session starts ==============================\nplatform linux -- Python 3.12.1, pytest-9.1.1, pluggy-1.5.0 -- /opt/miniconda3/bin/python\ncachedir: .pytest_cache\nrootdir: /workspace\nconfigfile: pyproject.toml\ncollecting ... collected 8 items\n\ntorn"
+      },
+      {
+        "timestamp": "2026-09-30T18:00:18.775267Z",
+        "action_id": "f5fdc15d-e74e-480f-a86f-ead50b4e1201",
+        "tool": "write_file",
+        "success": true,
+        "exit_code": null,
+        "output_excerpt": "Wrote 610 characters to test_utf8_bom_fix.py"
+      }
+    ],
+    "advice_events": [
+      {
+        "advice": {
+          "applicability": {
+            "compatible_markers": {},
+            "compatible_versions": {
+              "python": "3.12.1"
+            },
+            "matched_fields": [
+              "trigger_tool",
+              "trigger_operation",
+              "trigger_intent",
+              "trigger_context",
+              "runtime",
+              "versions"
+            ],
+            "repository": "swesmith/tornadoweb__tornado.d5ac65c1",
+            "runtime": "docker"
+          },
+          "failed_operation": "run_command",
+          "failed_tool": "run_command",
+          "kind": "historical_recovery_found",
+          "matched_failure_episode_id": "f08263f0-bae8-5749-9ecf-6a2ec090a5f8",
+          "matched_resolution_id": "162c3161-3054-54b4-b439-3569ba9d45ba",
+          "provenance": {
+            "environment_id": "GS-E003-A1-R13b-GS-T001-d2418a3ebc4a4ea9963cb5207bd73f3f-environment",
+            "failed_action_id": "8c472eb7-3d68-5bec-aba5-bfb22c9cbe30",
+            "failure_episode_id": "f08263f0-bae8-5749-9ecf-6a2ec090a5f8",
+            "outcome_ids": [
+              "2f15f6e9-4c49-53bc-b6d3-2612a882d71c"
+            ],
+            "resolution_id": "162c3161-3054-54b4-b439-3569ba9d45ba"
+          },
+          "recovery_evidence": {
+            "failed_observations": 0,
+            "outcomes": [
+              {
+                "action_id": "5446b753-ce5e-51cc-b0a3-1b1bd3abd712",
+                "exit_code": 0,
+                "id": "2f15f6e9-4c49-53bc-b6d3-2612a882d71c",
+                "observed_at": "2026-09-23T12:04:47.137015Z",
+                "success": true,
+                "tests_failed": null,
+                "tests_passed": null
+              }
+            ],
+            "successful_observations": 1
+          },
+          "recovery_summary": "When a test failure indicates a locale incorrectly raises an error for positive deltas, locate the locale's delta handling code. Change the condition that raises the error to apply only to zero deltas, and add a fallback for other delta values (positive or negative) to select the appropriate form.",
+          "resolution_status": "observed_successful"
+        },
+        "event_id": "36e11552-8ced-4391-96c4-bf57d3ef83aa",
+        "event_type": "advice_issued",
+        "issued_at": "2026-09-30T17:59:53.701824Z",
+        "planned_action": {
+          "arguments": {},
+          "id": "8da137fc-0cb0-4949-b9ce-5375372a4284",
+          "operation": "run_tests",
+          "planned_at": "2026-09-30T17:59:51.932188Z",
+          "run_id": "GS-E003-T-GS-T006-f72adb31053f46bf8cb7930aba136e17",
+          "task_id": "GS-T006",
+          "tool": "run_tests"
+        },
+        "rendered_advice": "A comparable historical action previously failed: run_command/run_command. An observed successful recovery was: When a test failure indicates a locale incorrectly raises an error for positive deltas, locate the locale's delta handling code. Change the condition that raises the error to apply only to zero deltas, and add a fallback for other delta values (positive or negative) to select the appropriate form.. Evidence status: observed_successful; successful observations: 1; applicable by: trigger_tool, trigger_operation, trigger_intent, trigger_context, runtime, versions. Consider this before executing the planned action; the recovery is not guaranteed. Provenance: failure_episode_id=f08263f0-bae8-5749-9ecf-6a2ec090a5f8; resolution_id=162c3161-3054-54b4-b439-3569ba9d45ba.",
+        "run_id": "GS-E003-T-GS-T006-f72adb31053f46bf8cb7930aba136e17",
+        "task_id": "GS-T006"
+      }
+    ],
+    "behavior_evidence": [
+      {
+        "actual_action_after_advice": {
+          "arguments": {
+            "length": 50,
+            "offset": 100,
+            "path": "./tornado/locale.py"
+          },
+          "id": "d3904d2d-4734-44ca-b825-d1b5ece33ab1",
+          "operation": "read_file",
+          "planned_at": "2026-09-30T17:59:57.284290Z",
+          "run_id": "GS-E003-T-GS-T006-f72adb31053f46bf8cb7930aba136e17",
+          "task_id": "GS-T006",
+          "tool": "read_file"
+        },
+        "advice_event_id": "36e11552-8ced-4391-96c4-bf57d3ef83aa",
+        "behavior_changed": true,
+        "observation": "changed",
+        "observed_at": "2026-09-30T17:59:58.874503Z",
+        "planned_action_before_advice": {
+          "arguments": {},
+          "id": "8da137fc-0cb0-4949-b9ce-5375372a4284",
+          "operation": "run_tests",
+          "planned_at": "2026-09-30T17:59:51.932188Z",
+          "run_id": "GS-E003-T-GS-T006-f72adb31053f46bf8cb7930aba136e17",
+          "task_id": "GS-T006",
+          "tool": "run_tests"
+        }
+      }
+    ],
+    "advice_before_repair": "false",
+    "behavior_changed_after_advice": "True",
+    "historical_recorded_recurrence": "False",
+    "paper_admissible_recurrence": "False",
+    "reason_for_difference": "none recorded; original evaluator v2 value retained",
+    "chronology_conclusion": "The materially correct source edit preceded advice; subsequent changed action evidence does not establish advice-caused repair.",
+    "first_materially_correct_repair_action_id": "2f5312f8-446e-4efc-8465-d4a9daec1881",
+    "repair_completed_at": "2026-09-30T17:59:48.814904Z",
+    "advice_issued_at": "2026-09-30T17:59:53.701824Z",
+    "recovery_reuse": "NOT_SUPPORTED: later behavioral action is recorded, but source repair preceded advice",
+    "first_relevant_failure_or_diagnostic_action_id": "6ee71c32-2e0f-4576-b798-609a4f8b6183"
+  },
+  {
+    "task_id": "GS-T008",
+    "condition": "T",
+    "run_id": "GS-E003-T-GS-T008-0c5215d948a74fc4bb1b2796777f366c",
+    "source_artifact_path": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/runs/GS-E003/T/GS-T008/GS-E003-T-GS-T008-0c5215d948a74fc4bb1b2796777f366c/artifact.json",
+    "relevant_actions": [
+      {
+        "timestamp": "2026-09-30T18:09:22.094294Z",
+        "action_id": "ae3238d3-8221-4633-abab-fe5ad707cb9e",
+        "tool": "edit_file",
+        "success": true,
+        "exit_code": null,
+        "output_excerpt": "Edited 1 occurrence in sqlglot/dialects/spark.py"
+      },
+      {
+        "timestamp": "2026-09-30T18:09:34.730195Z",
+        "action_id": "49bcbc89-2b12-4920-aa8d-45fc25e4f392",
+        "tool": "write_file",
+        "success": true,
+        "exit_code": null,
+        "output_excerpt": "Wrote 481 characters to test_date_add.py"
+      }
+    ],
+    "advice_events": [
+      {
+        "advice": {
+          "applicability": {
+            "compatible_markers": {},
+            "compatible_versions": {
+              "python": "3.12.1"
+            },
+            "matched_fields": [
+              "trigger_tool",
+              "trigger_operation",
+              "trigger_intent",
+              "trigger_context",
+              "runtime",
+              "versions"
+            ],
+            "repository": "swesmith/tobymao__sqlglot.036601ba",
+            "runtime": "docker"
+          },
+          "failed_operation": "run_command",
+          "failed_tool": "run_command",
+          "kind": "historical_recovery_found",
+          "matched_failure_episode_id": "ec4d135c-2a26-5797-9c45-b7361966bf12",
+          "matched_resolution_id": "c518e18b-2830-5e05-8ba8-5972114f281e",
+          "provenance": {
+            "environment_id": "GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db-environment",
+            "failed_action_id": "24731330-92d4-533a-8217-bacba91cb280",
+            "failure_episode_id": "ec4d135c-2a26-5797-9c45-b7361966bf12",
+            "outcome_ids": [
+              "100e1818-1642-5aee-8940-3508d5b62202"
+            ],
+            "resolution_id": "c518e18b-2830-5e05-8ba8-5972114f281e"
+          },
+          "recovery_evidence": {
+            "failed_observations": 0,
+            "outcomes": [
+              {
+                "action_id": "a8c4ea23-2f5d-5cba-8e99-7b54132dbe41",
+                "exit_code": 0,
+                "id": "100e1818-1642-5aee-8940-3508d5b62202",
+                "observed_at": "2026-09-24T06:30:44.988295Z",
+                "success": true,
+                "tests_failed": null,
+                "tests_passed": null
+              }
+            ],
+            "successful_observations": 1
+          },
+          "recovery_summary": "When a function references a variable in a check before the variable is assigned, move the assignment before the check to ensure the variable is defined when used.",
+          "resolution_status": "observed_successful"
+        },
+        "event_id": "0cc03018-1c5a-4198-804e-3a7e1e40fa68",
+        "event_type": "advice_issued",
+        "issued_at": "2026-09-30T18:09:26.989074Z",
+        "planned_action": {
+          "arguments": {},
+          "id": "1ae846cf-f11a-4580-b1b9-c5ea67092368",
+          "operation": "run_tests",
+          "planned_at": "2026-09-30T18:09:24.940160Z",
+          "run_id": "GS-E003-T-GS-T008-0c5215d948a74fc4bb1b2796777f366c",
+          "task_id": "GS-T008",
+          "tool": "run_tests"
+        },
+        "rendered_advice": "A comparable historical action previously failed: run_command/run_command. An observed successful recovery was: When a function references a variable in a check before the variable is assigned, move the assignment before the check to ensure the variable is defined when used.. Evidence status: observed_successful; successful observations: 1; applicable by: trigger_tool, trigger_operation, trigger_intent, trigger_context, runtime, versions. Consider this before executing the planned action; the recovery is not guaranteed. Provenance: failure_episode_id=ec4d135c-2a26-5797-9c45-b7361966bf12; resolution_id=c518e18b-2830-5e05-8ba8-5972114f281e.",
+        "run_id": "GS-E003-T-GS-T008-0c5215d948a74fc4bb1b2796777f366c",
+        "task_id": "GS-T008"
+      }
+    ],
+    "behavior_evidence": [
+      {
+        "actual_action_after_advice": {
+          "arguments": {
+            "content": "import sqlglot\n\n# Test the fix for DATE_ADD function with 3 arguments\nsql = \"SELECT DATE_ADD(MONTH, 20, col)\"\ntry:\n    result = sqlglot.transpile(sql, read=\"spark\", write=\"spark\")\n    print(\"Success:\", result)\nexcept Exception as e:\n    print(\"Error:\", e)\n\n# Test the 2-argument version still works\nsql2 = \"SELECT DATE_ADD(col, 20)\"\ntry:\n    result2 = sqlglot.transpile(sql2, read=\"spark\", write=\"spark\")\n    print(\"Success:\", result2)\nexcept Exception as e:\n    print(\"Error:\", e)",
+            "path": "./test_date_add.py"
+          },
+          "id": "49bcbc89-2b12-4920-aa8d-45fc25e4f392",
+          "operation": "write_file",
+          "planned_at": "2026-09-30T18:09:30.632410Z",
+          "run_id": "GS-E003-T-GS-T008-0c5215d948a74fc4bb1b2796777f366c",
+          "task_id": "GS-T008",
+          "tool": "write_file"
+        },
+        "advice_event_id": "0cc03018-1c5a-4198-804e-3a7e1e40fa68",
+        "behavior_changed": true,
+        "observation": "changed",
+        "observed_at": "2026-09-30T18:09:34.730219Z",
+        "planned_action_before_advice": {
+          "arguments": {},
+          "id": "1ae846cf-f11a-4580-b1b9-c5ea67092368",
+          "operation": "run_tests",
+          "planned_at": "2026-09-30T18:09:24.940160Z",
+          "run_id": "GS-E003-T-GS-T008-0c5215d948a74fc4bb1b2796777f366c",
+          "task_id": "GS-T008",
+          "tool": "run_tests"
+        }
+      }
+    ],
+    "advice_before_repair": "false",
+    "behavior_changed_after_advice": "True",
+    "historical_recorded_recurrence": "False",
+    "paper_admissible_recurrence": "False",
+    "reason_for_difference": "none recorded; original evaluator v2 value retained",
+    "chronology_conclusion": "The materially correct source edit preceded advice; subsequent changed action evidence does not establish advice-caused repair.",
+    "first_materially_correct_repair_action_id": "ae3238d3-8221-4633-abab-fe5ad707cb9e",
+    "repair_completed_at": "2026-09-30T18:09:22.094294Z",
+    "advice_issued_at": "2026-09-30T18:09:26.989074Z",
+    "recovery_reuse": "NOT_SUPPORTED: later behavioral action is recorded, but source repair preceded advice",
+    "first_relevant_failure_or_diagnostic_action_id": "968d8cc9-c4c0-4f8c-8c8f-a5dafc99c316"
+  },
+  {
+    "task_id": "GS-T017",
+    "condition": "T",
+    "run_id": "GS-E003-T-GS-T017-8aff75bedefc40f3a7f192786cfe806d",
+    "source_artifact_path": "research/evidence/results/GS-E003/sprint3b_hardened_development_v1/runs/GS-E003/T/GS-T017/GS-E003-T-GS-T017-8aff75bedefc40f3a7f192786cfe806d/artifact.json",
+    "relevant_actions": [
+      {
+        "timestamp": "2026-10-01T08:14:54.520923Z",
+        "action_id": "3a5bfaa2-e929-4ce2-8cd6-c586ca8f4635",
+        "tool": "edit_file",
+        "success": true,
+        "exit_code": null,
+        "output_excerpt": "Edited 1 occurrence in rich/syntax.py"
+      },
+      {
+        "timestamp": "2026-10-01T08:15:08.857219Z",
+        "action_id": "41b5edc2-5333-443f-85c3-4647eb9a5626",
+        "tool": "run_command",
+        "success": true,
+        "exit_code": 0,
+        "output_excerpt": "============================= test session starts ==============================\nplatform linux -- Python 3.12.1, pytest-8.3.5, pluggy-1.6.0 -- /usr/local/bin/python\ncachedir: .pytest_cache\nrootdir: /workspace/tests\nconfigfile: pytest.ini\ncollecting ... collected 1 item\n\ntests/te"
+      },
+      {
+        "timestamp": "2026-10-01T08:15:18.226263Z",
+        "action_id": "8873f767-52c5-4512-987c-7f675e39b0f8",
+        "tool": "run_command",
+        "success": true,
+        "exit_code": 0,
+        "output_excerpt": "============================= test session starts ==============================\nplatform linux -- Python 3.12.1, pytest-8.3.5, pluggy-1.6.0 -- /usr/local/bin/python\ncachedir: .pytest_cache\nrootdir: /workspace/tests\nconfigfile: pytest.ini\ncollecting ... collected 1 item\n\ntests/te"
+      },
+      {
+        "timestamp": "2026-10-01T08:15:24.414348Z",
+        "action_id": "fcb1bf91-75cf-472d-85e9-877b49f257b4",
+        "tool": "run_command",
+        "success": true,
+        "exit_code": 0,
+        "output_excerpt": "============================= test session starts ==============================\nplatform linux -- Python 3.12.1, pytest-8.3.5, pluggy-1.6.0 -- /usr/local/bin/python\ncachedir: .pytest_cache\nrootdir: /workspace/tests\nconfigfile: pytest.ini\ncollecting ... collected 1 item\n\ntests/te"
+      },
+      {
+        "timestamp": "2026-10-01T08:15:32.161998Z",
+        "action_id": "7ca651d5-0ea4-4371-b0b2-84b4869a4faf",
+        "tool": "run_command",
+        "success": false,
+        "exit_code": 1,
+        "output_excerpt": "============================= test session starts ==============================\nplatform linux -- Python 3.12.1, pytest-8.3.5, pluggy-1.6.0 -- /usr/local/bin/python\ncachedir: .pytest_cache\nrootdir: /workspace/tests\nconfigfile: pytest.ini\ncollecting ... collected 25 items\n\ntests/"
+      },
+      {
+        "timestamp": "2026-10-01T08:15:55.612831Z",
+        "action_id": "c3642f76-5622-4b9c-8c7e-3c13d8c837be",
+        "tool": "edit_file",
+        "success": true,
+        "exit_code": null,
+        "output_excerpt": "Edited 1 occurrence in rich/syntax.py"
+      },
+      {
+        "timestamp": "2026-10-01T08:16:03.285210Z",
+        "action_id": "5813040d-99d8-413d-9b20-1cff0f571ea1",
+        "tool": "run_command",
+        "success": false,
+        "exit_code": 1,
+        "output_excerpt": "============================= test session starts ==============================\nplatform linux -- Python 3.12.1, pytest-8.3.5, pluggy-1.6.0 -- /usr/local/bin/python\ncachedir: .pytest_cache\nrootdir: /workspace/tests\nconfigfile: pytest.ini\ncollecting ... collected 1 item\n\ntests/te"
+      },
+      {
+        "timestamp": "2026-10-01T08:16:18.819526Z",
+        "action_id": "364d7277-1703-4e8a-a36b-4c1c8891f06e",
+        "tool": "edit_file",
+        "success": true,
+        "exit_code": null,
+        "output_excerpt": "Edited 1 occurrence in rich/syntax.py"
+      }
+    ],
+    "advice_events": [
+      {
+        "advice": {
+          "applicability": {
+            "compatible_markers": {},
+            "compatible_versions": {
+              "python": "3.12.1"
+            },
+            "matched_fields": [
+              "trigger_tool",
+              "trigger_operation",
+              "trigger_intent",
+              "trigger_context",
+              "runtime",
+              "versions"
+            ],
+            "repository": "Textualize__rich.9d8f9a37",
+            "runtime": "docker"
+          },
+          "failed_operation": "run_command",
+          "failed_tool": "run_command",
+          "kind": "historical_recovery_found",
+          "matched_failure_episode_id": "152bbad0-4057-50d3-a582-6139480225b4",
+          "matched_resolution_id": "f4affddc-7c6e-5335-8aeb-778d7dc17c75",
+          "provenance": {
+            "environment_id": "GS-E003-A1-R13b-GS-T005-ba0d94867f6944cd8341a28a44c4013b-environment",
+            "failed_action_id": "f27c9dde-3146-558e-add2-217b99b78dab",
+            "failure_episode_id": "152bbad0-4057-50d3-a582-6139480225b4",
+            "outcome_ids": [
+              "a6879e34-7ac2-5744-b915-485c47b4c76e"
+            ],
+            "resolution_id": "f4affddc-7c6e-5335-8aeb-778d7dc17c75"
+          },
+          "recovery_evidence": {
+            "failed_observations": 0,
+            "outcomes": [
+              {
+                "action_id": "c4614420-1b3b-5d1d-9291-d88936545d5a",
+                "exit_code": 0,
+                "id": "a6879e34-7ac2-5744-b915-485c47b4c76e",
+                "observed_at": "2026-09-24T09:38:02.588432Z",
+                "success": true,
+                "tests_failed": null,
+                "tests_passed": null
+              }
+            ],
+            "successful_observations": 1
+          },
+          "recovery_summary": "When a test run fails due to missing syntax highlighting, inspect the source annotation logic to confirm that source_map is populated with per‑line token regions and that line offsets are applied correctly. Update the initialization block to iterate over source lines and tokens, building region lists for each line before using the map.",
+          "resolution_status": "observed_successful"
+        },
+        "event_id": "658aad68-2c07-4292-ab32-5a777638857f",
+        "event_type": "advice_issued",
+        "issued_at": "2026-10-01T08:15:00.714518Z",
+        "planned_action": {
+          "arguments": {},
+          "id": "d2d22481-a6c3-4f5f-ac3a-a8991f2cfd25",
+          "operation": "run_tests",
+          "planned_at": "2026-10-01T08:14:58.276124Z",
+          "run_id": "GS-E003-T-GS-T017-8aff75bedefc40f3a7f192786cfe806d",
+          "task_id": "GS-T017",
+          "tool": "run_tests"
+        },
+        "rendered_advice": "A comparable historical action previously failed: run_command/run_command. An observed successful recovery was: When a test run fails due to missing syntax highlighting, inspect the source annotation logic to confirm that source_map is populated with per‑line token regions and that line offsets are applied correctly. Update the initialization block to iterate over source lines and tokens, building region lists for each line before using the map.. Evidence status: observed_successful; successful observations: 1; applicable by: trigger_tool, trigger_operation, trigger_intent, trigger_context, runtime, versions. Consider this before executing the planned action; the recovery is not guaranteed. Provenance: failure_episode_id=152bbad0-4057-50d3-a582-6139480225b4; resolution_id=f4affddc-7c6e-5335-8aeb-778d7dc17c75.",
+        "run_id": "GS-E003-T-GS-T017-8aff75bedefc40f3a7f192786cfe806d",
+        "task_id": "GS-T017"
+      }
+    ],
+    "behavior_evidence": [
+      {
+        "actual_action_after_advice": {
+          "arguments": {
+            "command": [
+              "python",
+              "-m",
+              "pytest",
+              "tests/test_syntax.py::test_python_render_simple_passing_lexer_instance",
+              "-v"
+            ]
+          },
+          "id": "41b5edc2-5333-443f-85c3-4647eb9a5626",
+          "operation": "run_command",
+          "planned_at": "2026-10-01T08:15:04.509479Z",
+          "run_id": "GS-E003-T-GS-T017-8aff75bedefc40f3a7f192786cfe806d",
+          "task_id": "GS-T017",
+          "tool": "run_command"
+        },
+        "advice_event_id": "658aad68-2c07-4292-ab32-5a777638857f",
+        "behavior_changed": true,
+        "observation": "changed",
+        "observed_at": "2026-10-01T08:15:08.857243Z",
+        "planned_action_before_advice": {
+          "arguments": {},
+          "id": "d2d22481-a6c3-4f5f-ac3a-a8991f2cfd25",
+          "operation": "run_tests",
+          "planned_at": "2026-10-01T08:14:58.276124Z",
+          "run_id": "GS-E003-T-GS-T017-8aff75bedefc40f3a7f192786cfe806d",
+          "task_id": "GS-T017",
+          "tool": "run_tests"
+        }
+      }
+    ],
+    "advice_before_repair": "false",
+    "behavior_changed_after_advice": "True",
+    "historical_recorded_recurrence": "True",
+    "paper_admissible_recurrence": "false",
+    "reason_for_difference": "v2 counted a target name in aggregate failing pytest output; separate exact target invocation PASSED; no v3 evaluator run is stored",
+    "chronology_conclusion": "The materially correct source edit preceded advice; subsequent changed action evidence does not establish advice-caused repair.",
+    "first_materially_correct_repair_action_id": "3a5bfaa2-e929-4ce2-8cd6-c586ca8f4635",
+    "repair_completed_at": "2026-10-01T08:14:54.520923Z",
+    "advice_issued_at": "2026-10-01T08:15:00.714518Z",
+    "recovery_reuse": "NOT_SUPPORTED: later behavioral action is recorded, but source repair preceded advice",
+    "first_relevant_failure_or_diagnostic_action_id": "d2d22481-a6c3-4f5f-ac3a-a8991f2cfd25"
+  }
+]

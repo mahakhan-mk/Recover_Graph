@@ -1,0 +1,116 @@
+{
+    "status":  "READY",
+    "freeze_type":  "development_hardened_revision_no_results",
+    "experiment_id":  "GS-E003",
+    "protocol_revision":  "sprint3b-kilo-hardened-development-v1",
+    "config_version":  "sprint3b-kilo-hardened-development-v1",
+    "config_path":  "configs/experiments/gs_e003_hardened_development_v1.yaml",
+    "config_sha256":  "9fa77b2c0c46e0f744dc0cc64644074fe6cd8752fda03503fd3a037e9c46e693",
+    "code_commit_sha":  "c729491266952edae2482ac1ddac1f888cc71dc0",
+    "applicability_revision":  {
+                                   "name":  "hardened_trigger_context_applicability",
+                                   "implementation":  "src/graph_swarm/retrieval/applicability.py",
+                                   "sha256":  "7cb56da919a762f6b451437e1a7367fc715612f81a056da58e1074eced69b0fa",
+                                   "requirements":  [
+                                                        "trusted structured test intent at the trigger boundary",
+                                                        "exact shared trigger-context anchor after generic/execution filtering",
+                                                        "comparable runtime and version gates",
+                                                        "generic execution terms cannot establish applicability"
+                                                    ]
+                               },
+    "model":  {
+                  "future_paid_runs":  true,
+                  "provider":  "kilo",
+                  "name":  "qwen/qwen3-coder",
+                  "system_prompt_id":  "R13B_SYSTEM_PROMPT",
+                  "system_prompt_sha256":  "f3bf4187cc9bfabcf2551aa3988e592a2d0f2d0e61ad2984d7d90ddf13d54502",
+                  "system_prompt_source":  "src/graph_swarm/agent/prompts.py"
+              },
+    "tools":  [
+                  "read_file",
+                  "write_file",
+                  "edit_file",
+                  "run_tests",
+                  "run_command"
+              ],
+    "limits":  {
+                   "max_actions":  28,
+                   "max_requests":  24,
+                   "timeout_seconds":  300,
+                   "tool_retries":  3,
+                   "task_timeout_seconds":  300,
+                   "model_request_timeout_seconds":  300,
+                   "tool_timeout_seconds":  {
+                                                "run_command":  30,
+                                                "run_tests":  120
+                                            }
+               },
+    "recurrence_evaluator":  {
+                                 "name":  "frozen_fail_to_pass_recurrence_matcher",
+                                 "version":  "frozen_recurrence_matcher_v2_structured_pytest"
+                             },
+    "objective_evaluator":  {
+                                "name":  "frozen_swesmith_fail_to_pass",
+                                "version":  "frozen_swesmith_objective_v1"
+                            },
+    "environment_version_gates":  {
+                                      "source":  "configs/research/benchmark_environments.toml",
+                                      "runtime":  "docker",
+                                      "python":  "3.12.1",
+                                      "task_workspace_network":  "disabled",
+                                      "candidate_dockerfile":  "research/evidence/workspaces/GS-E003/positive_control_missing_iteration/GS-T017/Dockerfile"
+                                  },
+    "recovery_memory":  {
+                            "policy":  "fixed frozen acquisition corpus / read-only treatment memory",
+                            "repository":  "R13bTreatmentRepository",
+                            "pattern_ids":  [
+                                                "recovery-pattern-ad07a6a45718b848a30ad377",
+                                                "recovery-pattern-f490f62ab931191c6eac6db1",
+                                                "recovery-pattern-162e3999c4a2c66a1ff647ed",
+                                                "recovery-pattern-fd7b65022b22dc5f2a42816f",
+                                                "recovery-pattern-99a54266f940e1d4648f4698"
+                                            ],
+                            "memory_writes":  "forbidden",
+                            "online_learning":  false,
+                            "neo4j_write_policy":  "forbidden"
+                        },
+    "candidate":  {
+                      "task_id":  "GS-T017",
+                      "review_id":  "GS-R036",
+                      "repository":  "Textualize/rich",
+                      "base_revision":  "9d8f9a372cc5916fd4781fec207ced7ddac2f08f",
+                      "family":  "missing_iteration",
+                      "source_task":  "GS-T005",
+                      "expected_pattern_id":  "recovery-pattern-fd7b65022b22dc5f2a42816f",
+                      "manifest":  "benchmark/manifests/gs_e003_hardened_development_v1.jsonl",
+                      "recurrence_annotation":  "benchmark/annotations/gs_e003_hardened_development_v1_recurrence.jsonl",
+                      "preregistration":  "research/evidence/results/GS-E003/positive_control_missing_iteration/preregistration.json",
+                      "deterministic_validation":  "research/evidence/results/GS-E003/positive_control_missing_iteration/deterministic_validation.json",
+                      "b0_t_runs":  0,
+                      "model_provider_calls":  0
+                  },
+    "task_input_hashes_sha256":  {
+                                     "config":  "9fa77b2c0c46e0f744dc0cc64644074fe6cd8752fda03503fd3a037e9c46e693",
+                                     "manifest":  "5740494158f1fcb6d5db1fd2a0028a9afbe34a03d170c26c836e468b2f8b0e90",
+                                     "recurrence_annotation":  "87e4543fe8f12b54bfc96b548bcfcd7f68f0a34a46693317cea529c7c035301c",
+                                     "dockerfile":  "07cbe889f72598eb108e825d191023b8951a9a51dd4e5a71f03e36bdfb993237",
+                                     "broken_rich_syntax_py":  "a84781f27b86236d934425b997e0915803b586c550c859af658227f8faf74d0a",
+                                     "repaired_rich_syntax_py":  "2a51560d582374836d2065b5a8e888d40121f75e37e6b80b3a9034ca788e41fd",
+                                     "preregistration":  "7f0231c9de05f58efbd7fba4ff5211cc11dfa47534920c46deab603b655565d0",
+                                     "deterministic_validation":  "8d511d95671368d9508bbfb52846cad33b469bb1e34b1999059a587c3201a74b"
+                                 },
+    "historical_artifact_policy":  {
+                                       "historical_freeze":  "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/freeze.json",
+                                       "unchanged_task_ids":  [
+                                                                  "GS-T006",
+                                                                  "GS-T007",
+                                                                  "GS-T008"
+                                                              ],
+                                       "historical_artifacts_modified":  false,
+                                       "new_revision_does_not_overwrite_v4_canary":  true
+                                   },
+    "artifact_destination":  {
+                                 "freeze_artifact":  "research/evidence/results/GS-E003/sprint3b_hardened_development_v1/freeze.json",
+                                 "run_artifact_root":  "research/evidence/results/GS-E003/sprint3b_hardened_development_v1/runs"
+                             }
+}

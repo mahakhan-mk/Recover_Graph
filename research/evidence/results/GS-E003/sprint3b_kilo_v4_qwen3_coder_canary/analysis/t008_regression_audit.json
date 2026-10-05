@@ -1,0 +1,231 @@
+{
+  "metadata": {
+    "experiment_id": "GS-E003",
+    "scope": "read-only T008 regression/timing audit",
+    "current_run": "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/runs/GS-E003/T/GS-T008/GS-E003-T-GS-T008-0c5215d948a74fc4bb1b2796777f366c",
+    "historical_run": "research/evidence/results/GS-E003/sprint3b_kilo_v3/runs/GS-E003/T/GS-T008/GS-E003-T-GS-T008-98eac84af516409d96e077ce83165e20",
+    "model_configuration": "qwen/qwen3-coder",
+    "kilo_called": false,
+    "model_provider_called": false,
+    "benchmark_executed": false,
+    "docker_benchmark_executed": false,
+    "neo4j_writes": false,
+    "source_or_behavior_changes": false,
+    "evidence_sources": [
+      "current run artifact.json, raw_evidence.json, advisory_evidence.jsonl, steps.sqlite",
+      "historical v3 T008 artifact.json, raw_evidence.json, advisory_evidence.jsonl, steps.sqlite",
+      "analysis/reports/gs_e003_trigger_applicability.json",
+      "src/graph_swarm/retrieval/applicability.py",
+      "src/graph_swarm/agent/advisory.py",
+      "src/graph_swarm/agent/coding_agent.py",
+      "experiments/sprint3.py"
+    ]
+  },
+  "answers": {
+    "expected_pattern_selected_current": true,
+    "expected_pattern_id": "recovery-pattern-f490f62ab931191c6eac6db1",
+    "current_non_expected_patterns_selected": [],
+    "current_source_fix_before_advice": true,
+    "current_source_fix_completed_at": "2026-09-30T18:09:22.094244Z",
+    "current_advice_issued_at": "2026-09-30T18:09:26.989074Z",
+    "historical_advice_relative_to_actual_recovery": "before",
+    "historical_actual_recovery_completed_at": "2026-09-29T17:27:42.872449Z",
+    "historical_advice_issued_at": [
+      "2026-09-29T17:25:36.689354Z",
+      "2026-09-29T17:26:14.170568Z"
+    ],
+    "historical_planned_but_intercepted_edits": [
+      "2026-09-29T17:25:31.922275Z",
+      "2026-09-29T17:26:10.890213Z"
+    ],
+    "genuine_trigger_boundary_regression": false,
+    "primary_explanation": "model trajectory change plus evidence/instrumentation timing; no implementation defect demonstrated",
+    "explicit_test_action_bridge_allows_post_recovery_advice": true,
+    "bridge_classification": "expected but weak evidence, with a behavior-evidence instrumentation limitation",
+    "generic_mechanism_bug_demonstrated": false
+  },
+  "current_qwen_t008_timeline": [
+    {
+      "model_request": 1,
+      "planned": "run_command/run_command: unsupported shell-composition search",
+      "executed": "run_command/run_command",
+      "success": false,
+      "event": "tool rejected shell composition; no source edit"
+    },
+    {
+      "model_request": 2,
+      "planned": "run_command/run_command: find Python files",
+      "executed": "run_command/run_command",
+      "success": true,
+      "event": "repository exploration"
+    },
+    {
+      "model_request": 3,
+      "planned": "read_file/read_file: sqlglot/dialects/spark.py",
+      "executed": "read_file/read_file",
+      "success": true,
+      "event": "observed broken _build_dateadd ordering"
+    },
+    {
+      "model_request": 4,
+      "planned": "edit_file/edit_file: assign expression before the 3-argument return",
+      "executed": "edit_file/edit_file",
+      "success": true,
+      "event": "relevant source edit completed at 2026-09-30T18:09:22.094244Z"
+    },
+    {
+      "model_request": 5,
+      "planned": "run_tests/run_tests",
+      "executed": "none",
+      "success": null,
+      "event": "advisory pre-tool boundary intercepted the planned action; no failed test execution occurred"
+    },
+    {
+      "model_request": 5,
+      "planned": "advice for recovery-pattern-f490f62ab931191c6eac6db1",
+      "executed": "advice_issued",
+      "success": true,
+      "event": "advice issued at 2026-09-30T18:09:26.989074Z, after the source edit"
+    },
+    {
+      "model_request": 6,
+      "planned": "write_file/write_file: create test_date_add.py",
+      "executed": "write_file/write_file",
+      "success": true,
+      "event": "behavior_change_evidence marked changed; this is a structural action change, not proof of advice causality"
+    },
+    {
+      "model_request": 7,
+      "planned": "run_command/run_command: python test_date_add.py",
+      "executed": "run_command/run_command",
+      "success": true,
+      "event": "explicit test script passed both 3-argument and 2-argument cases"
+    },
+    {
+      "model_request": 8,
+      "planned": "final response",
+      "executed": "none",
+      "success": null,
+      "event": "objective_result=true; recurrence event=false/not observed"
+    }
+  ],
+  "historical_v3_t008_timeline": [
+    {
+      "model_request": 1,
+      "planned": "run_command/run_command: git status; run_command/run_command: shell-composition listing",
+      "executed": "both run_command/run_command",
+      "success": "one true, one false",
+      "event": "repository inspection and tool-shape failure"
+    },
+    {
+      "model_request": 2,
+      "planned": "run_command/run_command: diff/grep; read_file/read_file: spark.py",
+      "executed": "same planned tools",
+      "success": true,
+      "event": "located broken source and relevant tests"
+    },
+    {
+      "model_request": 3,
+      "planned": "run_command/run_command: staged diff/status; read_file/read_file: tests and dialect source",
+      "executed": "same planned tools",
+      "success": true,
+      "event": "confirmed task workspace state and surrounding implementations"
+    },
+    {
+      "model_request": 4,
+      "planned": "run_command/run_command: targeted pytest; run_command/run_command: direct reproduction; run_command/run_command: HEAD source",
+      "executed": "same planned tools",
+      "success": "pytest/direct reproduction false; HEAD read true",
+      "event": "failed test executions occurred before actual recovery: pytest exit 1 at 2026-09-29T17:25:02.660774Z and direct reproduction failed"
+    },
+    {
+      "model_request": 5,
+      "planned": "edit_file/edit_file: move expression assignment before use",
+      "executed": "none",
+      "success": null,
+      "event": "first edit was intercepted by advice at 2026-09-29T17:25:36.689354Z; it was planned, not applied"
+    },
+    {
+      "model_request": 6,
+      "planned": "read_file/read_file; run_command/run_command: diff/reproduction/pytest",
+      "executed": "same planned tools",
+      "success": "read/diffs true; reproduction and pytest false",
+      "event": "second failed targeted pytest execution at 2026-09-29T17:25:56.029559Z; source still broken"
+    },
+    {
+      "model_request": 7,
+      "planned": "edit_file/edit_file: move assignment before the return",
+      "executed": "none",
+      "success": null,
+      "event": "second edit was intercepted by advice at 2026-09-29T17:26:14.170568Z; it was planned, not applied"
+    },
+    {
+      "model_request": 8,
+      "planned": "read_file/read_file: inspect spark.py",
+      "executed": "read_file/read_file",
+      "success": true,
+      "event": "verified the edit had not applied"
+    },
+    {
+      "model_request": 9,
+      "planned": "write_file/write_file: rewrite spark.py with corrected ordering",
+      "executed": "write_file/write_file",
+      "success": true,
+      "event": "actual relevant source recovery completed at 2026-09-29T17:27:42.872449Z"
+    },
+    {
+      "model_request": 10,
+      "planned": "read_file/read_file; run_command/run_command: diff/status",
+      "executed": "same planned tools",
+      "success": true,
+      "event": "source repair inspected; no later failed test was recorded"
+    },
+    {
+      "model_request": 11,
+      "planned": "run_command/run_command: final diff diagnostics",
+      "executed": "none",
+      "success": null,
+      "event": "run terminated by tool-call budget; objective_result=true; recurrence event=false/not observed"
+    }
+  ],
+  "eligibility_and_selection": {
+    "current": {
+      "selected_pattern": "recovery-pattern-f490f62ab931191c6eac6db1",
+      "vector_score": 0.7200925350189209,
+      "eligible": true,
+      "non_expected_selection": false,
+      "advice_count": 1,
+      "matched_fields": ["trigger_tool", "trigger_operation", "trigger_intent", "trigger_context", "runtime", "versions"]
+    },
+    "historical": {
+      "selected_pattern": "recovery-pattern-f490f62ab931191c6eac6db1",
+      "vector_score": 0.7200925350189209,
+      "eligible": true,
+      "non_expected_selection": false,
+      "advice_count": 2,
+      "matched_fields": ["tool", "operation", "runtime", "versions"]
+    },
+    "offline_corrected_replay": {
+      "t008_first_eligible_action": 15,
+      "t008_selected_pattern": "recovery-pattern-f490f62ab931191c6eac6db1",
+      "t008_non_expected_selections": 0,
+      "all_tasks_non_expected_selections": 0
+    }
+  },
+  "interpretation": {
+    "trigger_boundary": "No evidence that current code made the expected T008 trigger less applicable. The expected pattern remained eligible and selected.",
+    "model_trajectory": "The Qwen trajectory made and completed the repair at edit_file before reaching run_tests; the historical model trajectory had two intercepted edit plans and only later applied a write_file repair.",
+    "evaluator": "The explicit test-action bridge treats run_tests and structurally recognized pytest run_command actions as test_execution for trigger/replay purposes. It is also intentionally used by recurrence matching for trusted pytest-shaped run_command actions.",
+    "instrumentation": "record_post_advice_action compares the advised planned action with the next actual action. It can mark behavior_changed when advice is issued at a verification boundary after the source has already changed; it does not establish that advice caused the source edit.",
+    "implementation_defect": "Not demonstrated. The post-edit advice is redundant/weak causal evidence, but no harm, false pattern selection, or trigger-boundary regression was shown."
+  },
+  "classification": {
+    "current_qwen_gs_t006": "mechanism evidence",
+    "gs_t006_reason": "T selected the expected recovery-pattern-ad07a6a45718b848a30ad377, emitted one advice event, recorded behavior_changed=true for the post-advice action, and reached objective_result=true. This supports an expected-pattern retrieval/intervention path, but not a causal prevention claim.",
+    "current_qwen_gs_t007": "safety evidence",
+    "gs_t007_reason": "T emitted no advice and selected no pattern, including no non-expected pattern. This is bounded safety evidence for the observed trajectory, but the request budget expired during read-only exploration and the task did not reach a successful objective outcome, so it is not mechanism or prevention evidence.",
+    "current_qwen_gs_t008": "inconclusive",
+    "reason": "The expected pattern was selected and the task passed, but advice followed the source repair and no failed test execution preceded that advice. Therefore this is not prevention evidence, and it is not regression evidence.",
+    "recommendation": "C. No existing candidate is scientifically defensible; construct one new preregistered development recurrence pair before running."
+  }
+}

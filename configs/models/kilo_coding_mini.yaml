@@ -1,0 +1,5 @@
+provider: kilo
+model: nex-agi/nex-n2.5-mini
+settings:
+  temperature: 0
+prompt_version: v1
