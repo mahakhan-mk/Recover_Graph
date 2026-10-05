@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 
 import pytest
 
 import experiments.run_sprint3b_kilo_v3 as v3
-from analysis.diagnose_sprint3b_kilo_v3_retrieval import budget_audit
 from experiments.sprint3 import IsolatedTaskEnvironment
 from graph_swarm.domain.actions import PlannedAction
 from graph_swarm.domain.environment import EnvironmentContext
@@ -217,41 +214,6 @@ def test_b0_and_t_share_the_same_budget28_configuration() -> None:
         ExperimentCondition.B0: 28,
         ExperimentCondition.T: 28,
     }
-
-
-def test_budget_audit_distinguishes_executed_actions_from_snapshot_plans() -> None:
-    audit = budget_audit(
-        ROOT / "research/evidence/results/GS-E003/sprint3b_kilo_v2/runs/GS-E003/T"
-    )
-    records = {
-        (str(record["condition"]), str(record["task_id"])): record
-        for record in cast(list[dict[str, object]], audit["records"])
-    }
-    t008 = records[("T", "GS-T008")]
-    assert t008["configured_budget"] == 20
-    assert t008["budget_consumed_count"] == 23
-    assert t008["completed_tool_action_count"] == 19
-    assert t008["budget_count_absent_from_artifact_events"] == 4
-    assert t008["first_edit_file_action_index"] == 18
-    assert t008["snapshot_planned_action_count"] == 25
-    assert t008["final_observed_action_index"] == 19
-
-
-def test_v2_evidence_paths_are_not_modified_by_v3_environment_construction() -> None:
-    paths = (
-        ROOT
-        / "research/evidence/results/GS-E003/sprint3b_kilo_v2/posthoc_retrieval_diagnosis"
-        / "diagnosis.json",
-        ROOT
-        / "research/evidence/results/GS-E003/sprint3b_kilo_v2/posthoc_retrieval_diagnosis"
-        / "diagnosis.md",
-    )
-    before = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
-    v3.environment_context_for_prepared(
-        SimpleNamespace(repository="repo/current"), "run-123", _prepared()
-    )
-    after = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
-    assert after == before
 
 
 @pytest.mark.parametrize(

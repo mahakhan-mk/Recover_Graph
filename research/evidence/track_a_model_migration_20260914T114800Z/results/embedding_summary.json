@@ -1,9 +1,0 @@
-{
-  "dimension": 384,
-  "embedded_pattern_count": 0,
-  "model": "sentence-transformers/all-MiniLM-L6-v2",
-  "normalized": true,
-  "package_version": "5.7.0",
-  "status": "not_run",
-  "text_version": "v1"
-}
