@@ -1,0 +1,68 @@
+RecoverGraph: third-party attribution notice
+
+RecoverGraph's root LICENSE applies to RecoverGraph's original code. It does not replace
+the terms applicable to the third-party material identified below. Upstream license
+texts, including copyright lines contained in those files, are included under
+third_party_licenses/.
+
+1. SWE-smith-derived benchmark patches
+
+benchmark/annotations/recurrence_evidence.jsonl contains 35 dataset patch records. Each
+record's repository and changed file path are identified below. The [SWE-smith dataset
+card](https://huggingface.co/datasets/SWE-bench/SWE-smith) declares MIT. A copy of the
+SWE-smith project repository's MIT LICENSE is included as
+[SWE-bench_SWE-smith.LICENSE](third_party_licenses/SWE-bench_SWE-smith.LICENSE); that
+file is the project repository's license text, not a separate dataset copyright record.
+The dataset license declaration does not supersede the license of the upstream code
+modified by each patch.
+
+| Record and changed upstream path | Upstream project | License | Upstream license text |
+| --- | --- | --- | --- |
+| GS-R001 `moto/core/responses.py`; GS-R031 `moto/s3/models.py` | getmoto/moto | Apache-2.0 | [getmoto_moto.LICENSE](third_party_licenses/getmoto_moto.LICENSE) |
+| GS-R002 `sqlglot/dialects/dialect.py`; GS-R022 `sqlglot/dialects/spark.py`; GS-R033 `sqlglot/optimizer/qualify_columns.py` | tobymao/sqlglot | MIT | [tobymao_sqlglot.LICENSE](third_party_licenses/tobymao_sqlglot.LICENSE) |
+| GS-R003 `gspread/worksheet.py` | burnash/gspread | MIT | [burnash_gspread.LICENSE](third_party_licenses/burnash_gspread.LICENSE) |
+| GS-R004 `redbot/core/utils/chat_formatting.py`; GS-R023 `redbot/cogs/downloader/info_schemas.py` | Cog-Creators/Red-DiscordBot | GPL-3.0 | [Cog-Creators_Red-DiscordBot.LICENSE](third_party_licenses/Cog-Creators_Red-DiscordBot.LICENSE) |
+| GS-R005 `pydantic/main.py`; GS-R029 `pydantic/_internal/_known_annotated_metadata.py` | pydantic/pydantic | MIT | [pydantic_pydantic.LICENSE](third_party_licenses/pydantic_pydantic.LICENSE) |
+| GS-R006 `astroid/nodes/node_classes.py` | pylint-dev/astroid | LGPL-2.1 | [pylint-dev_astroid.LICENSE](third_party_licenses/pylint-dev_astroid.LICENSE) |
+| GS-R007 `arrow/locales.py` | arrow-py/arrow | Apache-2.0 | [arrow-py_arrow.LICENSE](third_party_licenses/arrow-py_arrow.LICENSE) |
+| GS-R008 `parso/tree.py`; GS-R013 `parso/tree.py`; GS-R028 `parso/python/diff.py` | davidhalter/parso | MIT; see license text for file exceptions | [davidhalter_parso.LICENSE](third_party_licenses/davidhalter_parso.LICENSE) |
+| GS-R009 `tornado/locale.py` | tornadoweb/tornado | Apache-2.0 | [tornadoweb_tornado.LICENSE](third_party_licenses/tornadoweb_tornado.LICENSE) |
+| GS-R010 `src/pipdeptree/_render/text.py` | tox-dev/pipdeptree | MIT | [tox-dev_pipdeptree.LICENSE](third_party_licenses/tox-dev_pipdeptree.LICENSE) |
+| GS-R011 `src/OpenSSL/crypto.py` | pyca/pyopenssl | Apache-2.0 | [pyca_pyopenssl.LICENSE](third_party_licenses/pyca_pyopenssl.LICENSE) |
+| GS-R012 `pygments/lexers/unicon.py`; GS-R017 `pygments/lexers/javascript.py` | pygments/pygments | BSD-2-Clause | [pygments_pygments.LICENSE](third_party_licenses/pygments_pygments.LICENSE) |
+| GS-R014 `src/jinja2/idtracking.py` | pallets/jinja | BSD-3-Clause | [pallets_jinja.LICENSE](third_party_licenses/pallets_jinja.LICENSE) |
+| GS-R015 and GS-R034 `dspy/retrieve/databricks_rm.py` | stanfordnlp/dspy | MIT | [stanfordnlp_dspy.LICENSE](third_party_licenses/stanfordnlp_dspy.LICENSE) |
+| GS-R016 `pandas/core/internals/construction.py` | pandas-dev/pandas | BSD-3-Clause | [pandas-dev_pandas.LICENSE](third_party_licenses/pandas-dev_pandas.LICENSE) |
+| GS-R018 `src/pydicom/valuerep.py` | pydicom/pydicom | MIT; see license text for file exceptions | [pydicom_pydicom.LICENSE](third_party_licenses/pydicom_pydicom.LICENSE) |
+| GS-R019 `dvc/repo/__init__.py` | iterative/dvc | Apache-2.0 | [iterative_dvc.LICENSE](third_party_licenses/iterative_dvc.LICENSE) |
+| GS-R020 `bleach/_vendor/html5lib/treewalkers/etree.py` | mozilla/bleach and vendored html5lib | Apache-2.0 and MIT, respectively | [mozilla_bleach.LICENSE](third_party_licenses/mozilla_bleach.LICENSE), [html5lib_html5lib-python.LICENSE](third_party_licenses/html5lib_html5lib-python.LICENSE) |
+| GS-R021 `sunpy/visualization/drawing.py` | sunpy/sunpy | BSD-2-Clause | [sunpy_sunpy.LICENSE](third_party_licenses/sunpy_sunpy.LICENSE) |
+| GS-R024 `src/marshmallow/fields.py` | marshmallow-code/marshmallow | MIT | [marshmallow-code_marshmallow.LICENSE](third_party_licenses/marshmallow-code_marshmallow.LICENSE) |
+| GS-R025 `src/pptx/text/layout.py` | scanny/python-pptx | MIT | [scanny_python-pptx.LICENSE](third_party_licenses/scanny_python-pptx.LICENSE) |
+| GS-R026 `monai/apps/detection/utils/anchor_utils.py` | Project-MONAI/MONAI | Apache-2.0 | [Project-MONAI_MONAI.LICENSE](third_party_licenses/Project-MONAI_MONAI.LICENSE) |
+| GS-R027 `patsy/mgcv_cubic_splines.py` | pydata/patsy | BSD-2-Clause | [pydata_patsy.LICENSE](third_party_licenses/pydata_patsy.LICENSE) |
+| GS-R030 `string2string/alignment/classical.py` | stanfordnlp/string2string | MIT | [stanfordnlp_string2string.LICENSE](third_party_licenses/stanfordnlp_string2string.LICENSE) |
+| GS-R032 `stackprinter/source_inspection.py` | cknd/stackprinter | MIT | [cknd_stackprinter.LICENSE](third_party_licenses/cknd_stackprinter.LICENSE) |
+| GS-R035 `deepdiff/deephash.py` | seperman/deepdiff | MIT | [seperman_deepdiff.LICENSE](third_party_licenses/seperman_deepdiff.LICENSE) |
+
+The records do not preserve a source commit or version, so the included upstream license
+texts are project-level license copies, not verification of the precise license state at
+each patch's source revision. That provenance limitation remains unresolved.
+
+2. Captured source excerpts in acquisition evidence
+
+The following tracked provenance files contain source-code excerpts captured during
+acquisition. Any source-level notices present in the captured excerpts remain unchanged;
+the matching full upstream license texts are also included under third_party_licenses/.
+
+| Tracked path | Upstream project | License text |
+| --- | --- | --- |
+| research/evidence/reported/frozen_memory/provenance/acquisition_manifest.json and research/evidence/reported/frozen_memory/provenance/acquisition_records/GS-T001/acquisition.json | arrow-py/arrow | [Apache-2.0](third_party_licenses/arrow-py_arrow.LICENSE) |
+| research/evidence/reported/frozen_memory/provenance/acquisition_manifest.json and research/evidence/reported/frozen_memory/provenance/acquisition_records/GS-T002/acquisition.json | pygments/pygments | [BSD-2-Clause](third_party_licenses/pygments_pygments.LICENSE) |
+| research/evidence/reported/frozen_memory/provenance/acquisition_manifest.json and research/evidence/reported/frozen_memory/provenance/acquisition_records/GS-T003/acquisition.json | sunpy/sunpy | [BSD-2-Clause](third_party_licenses/sunpy_sunpy.LICENSE) |
+| research/evidence/reported/frozen_memory/provenance/acquisition_manifest.json and research/evidence/reported/frozen_memory/provenance/acquisition_records/GS-T004/acquisition.json | Project-MONAI/MONAI | [Apache-2.0](third_party_licenses/Project-MONAI_MONAI.LICENSE) |
+| research/evidence/reported/frozen_memory/provenance/acquisition_manifest.json and research/evidence/reported/frozen_memory/provenance/acquisition_records/GS-T005/acquisition.json | cknd/stackprinter | [MIT](third_party_licenses/cknd_stackprinter.LICENSE) |
+
+The root Apache-2.0 license does not relicense these excerpts. No separate Apache NOTICE
+file was found at the upstream roots checked for these projects; no such upstream notice
+was identified for retention in this review.
