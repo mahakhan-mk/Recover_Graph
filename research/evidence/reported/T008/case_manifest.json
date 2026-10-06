@@ -37,5 +37,11 @@
     "T/steps.sqlite": "ca172e70a99f2a5d1d97d6ba2bde26dff3d073ed661c44c239bb046e91c5c977",
     "T/advisory_evidence.jsonl": "189d30f5d3702732173656f96ceef885c7a380c10bde84acf0e1a39f8170de27"
   },
-  "copied_config_sha256": "907068ee4a07e22a7ef17f7d71a4c7ffd74c105b420903ad4204a149b6d84c78"
+  "copied_config_sha256": "907068ee4a07e22a7ef17f7d71a4c7ffd74c105b420903ad4204a149b6d84c78",
+  "source_experiment_id": "GS-E003",
+  "source_commit_sha_by_condition": {
+    "B0": "50a4a942d305c80ef6bc8643b70827af318aa394",
+    "T": "50a4a942d305c80ef6bc8643b70827af318aa394"
+  },
+  "config_source_sha256": "907068ee4a07e22a7ef17f7d71a4c7ffd74c105b420903ad4204a149b6d84c78"
 }

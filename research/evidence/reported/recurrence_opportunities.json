@@ -1,0 +1,59 @@
+{
+  "schema_version": 2,
+  "scope": "EXP1-EXP3 aggregate reported transfer analysis",
+  "definition": "A manually validated reusable recovery pattern defines a recurrence opportunity; occurrence 2 is a possible retrieval/reuse opportunity after occurrence 1.",
+  "selection_basis": "Membership is determined only by the pre-treatment manually validated recurrence-family annotations and acquisition-to-transfer chronology. It does not depend on advice, retrieval, applicability checks, or observed B0/T outcomes.",
+  "opportunities": [
+    {
+      "task_id": "GS-T006",
+      "recurrence_family_id": "GS-F001",
+      "relation_id": "GS-R007 -> GS-R009",
+      "source_occurrence": 1,
+      "source_task_id": "GS-T001",
+      "transfer_occurrence": 2,
+      "transfer_task_id": "GS-T006",
+      "transferable": true,
+      "validated_failure_signature": "CSV translation loading mishandles a UTF-8 BOM; frozen target test test_csv_bom.",
+      "provenance_paths": [
+        "benchmark/manifests/pilot.jsonl",
+        "benchmark/annotations/recurrence_validation.csv",
+        "benchmark/annotations/recurrence_evidence.jsonl",
+        "benchmark/reported_cases/GS-T006.json"
+      ]
+    },
+    {
+      "task_id": "GS-T007",
+      "recurrence_family_id": "GS-F002",
+      "relation_id": "GS-R012 -> GS-R014",
+      "source_occurrence": 1,
+      "source_task_id": "GS-T002",
+      "transfer_occurrence": 2,
+      "transfer_task_id": "GS-T007",
+      "transferable": true,
+      "validated_failure_signature": "Conditional assignment fails to preserve the expected outer variable value when the condition is false; expected 23, observed empty output.",
+      "provenance_paths": [
+        "benchmark/manifests/pilot.jsonl",
+        "benchmark/annotations/recurrence_validation.csv",
+        "benchmark/annotations/recurrence_evidence.jsonl",
+        "benchmark/reported_cases/GS-T007.json"
+      ]
+    },
+    {
+      "task_id": "GS-T008",
+      "recurrence_family_id": "GS-F003",
+      "relation_id": "GS-R021 -> GS-R022",
+      "source_occurrence": 1,
+      "source_task_id": "GS-T003",
+      "transfer_occurrence": 2,
+      "transfer_task_id": "GS-T008",
+      "transferable": true,
+      "validated_failure_signature": "Three-argument Spark DATE_ADD triggers UnboundLocalError; frozen target test tests/dialects/test_spark.py::TestSpark::test_spark.",
+      "provenance_paths": [
+        "benchmark/manifests/pilot.jsonl",
+        "benchmark/annotations/recurrence_validation.csv",
+        "benchmark/annotations/recurrence_evidence.jsonl",
+        "benchmark/reported_cases/GS-T008.json"
+      ]
+    }
+  ]
+}

@@ -36,5 +36,11 @@
     "T/run_metadata.json": "06a3aff4b160e60c9730cff30a705429e8cadbc044e89bff7d50375ec30c122c",
     "T/steps.sqlite": "a0b9d3026ca005547317e295177baaf3fdfe25756f1e24282f34769687b76872"
   },
-  "copied_config_sha256": "907068ee4a07e22a7ef17f7d71a4c7ffd74c105b420903ad4204a149b6d84c78"
+  "copied_config_sha256": "907068ee4a07e22a7ef17f7d71a4c7ffd74c105b420903ad4204a149b6d84c78",
+  "source_experiment_id": "GS-E003",
+  "source_commit_sha_by_condition": {
+    "B0": "50a4a942d305c80ef6bc8643b70827af318aa394",
+    "T": "50a4a942d305c80ef6bc8643b70827af318aa394"
+  },
+  "config_source_sha256": "907068ee4a07e22a7ef17f7d71a4c7ffd74c105b420903ad4204a149b6d84c78"
 }

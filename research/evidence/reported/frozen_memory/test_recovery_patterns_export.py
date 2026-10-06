@@ -6,7 +6,6 @@ import hashlib
 import json
 from pathlib import Path
 
-
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
 EXPECTED_IDS = {
@@ -67,6 +66,34 @@ def test_frozen_corpus_records_and_manifest_are_consistent() -> None:
 
     digest = hashlib.sha256((HERE / "recovery_patterns.jsonl").read_bytes()).hexdigest()
     assert manifest["checksums"]["recovery_patterns_jsonl_sha256"] == digest
+    provenance_root = HERE / "provenance"
+    provenance = manifest["provenance"]
+    freeze_metadata_path = ROOT / provenance["freeze_metadata"]
+    freeze_metadata = json.loads(freeze_metadata_path.read_text(encoding="utf-8"))
+    assert manifest["checksums"]["freeze_metadata_sha256"] == hashlib.sha256(
+        freeze_metadata_path.read_bytes()
+    ).hexdigest()
+    assert freeze_metadata["abstraction_model"] == "cohere/north-mini-code:free"
+    assert set(freeze_metadata["pattern_lineage"]) == EXPECTED_IDS
+    closeout = json.loads(
+        (provenance_root / "GATE_A1_R13B_CLOSEOUT.json").read_text(encoding="utf-8")
+    )
+    closeout_lineage = {
+        item["pattern_id"]: (item["task_id"], item["selected_run_id"])
+        for item in closeout["selected_logical_tasks"]
+    }
+    for relative_path, expected_hash in provenance["files_sha256"].items():
+        path = provenance_root / relative_path
+        assert path.is_file()
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == expected_hash
+    for pattern_id, lineage in freeze_metadata["pattern_lineage"].items():
+        record_path = provenance_root / lineage["record_path"]
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        assert record["run_id"] == lineage["source_run_id"]
+        assert record["task_id"] == lineage["source_task_id"]
+        assert closeout_lineage[pattern_id] == (record["task_id"], record["run_id"])
+        if record["patterns"]:
+            assert pattern_id in {item["pattern_id"] for item in record["patterns"]}
     assert all((ROOT / path).is_file() for path in manifest["source_acquisition_paths"])
 
     forbidden_keys = {"api_key", "token", "gold_patch", "expected_solution", "future_task_metadata"}

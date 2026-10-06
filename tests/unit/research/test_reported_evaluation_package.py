@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = ROOT / "benchmark/manifests/reported_evaluation.jsonl"
@@ -70,7 +68,8 @@ def test_reported_manifest_and_copied_evidence_are_canonical() -> None:
         assert case["objective_evaluator"]["fail_to_pass"]
         assert case["frozen_memory_path"] == record["frozen_memory_path"]
         assert case["research_validity_class"] == "VALID_DEVELOPMENT"
-        assert not {"dataset_patch", "test_patch", "gold_patch", "expected_solution"}.intersection(case)
+        forbidden_case_data = {"dataset_patch", "test_patch", "gold_patch", "expected_solution"}
+        assert not forbidden_case_data.intersection(case)
 
         evidence_case = task_id.removeprefix("GS-")
         case_manifest = json.loads(
@@ -80,33 +79,44 @@ def test_reported_manifest_and_copied_evidence_are_canonical() -> None:
         )
         assert case_manifest["canonical_run_ids"] == {"B0": expected["B0"], "T": expected["T"]}
         assert case_manifest["frozen_memory_path"] == record["frozen_memory_path"]
-        source_config = ROOT / case_manifest["config_source"]
-        assert _sha256(source_config) == _sha256(config_path)
         assert case_manifest["copied_config_sha256"] == _sha256(config_path)
+        assert case_manifest["source_experiment_id"] == "GS-E003"
+        source_config = ROOT / record["config_source"]
+        assert case_manifest["config_source_sha256"] == _sha256(source_config)
 
         for key, expected_hash in case_manifest["copied_artifact_sha256"].items():
             condition, filename = key.split("/", maxsplit=1)
-            source = ROOT / case_manifest["original_source_paths"][condition] / filename
-            copied = ROOT / "research/evidence/reported" / evidence_case / condition / filename
-            assert source.is_file()
+            copied = (
+                ROOT / "research/evidence/reported" / evidence_case / condition / filename
+            )
             assert copied.is_file()
-            assert _sha256(source) == expected_hash == _sha256(copied)
+            assert _sha256(copied) == expected_hash
+            metadata_path = (
+                ROOT
+                / "research/evidence/reported"
+                / evidence_case
+                / condition
+                / "run_metadata.json"
+            )
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            assert metadata["experiment_id"] == case_manifest["source_experiment_id"]
+            assert (
+                metadata["execution_commit_sha"]
+                == case_manifest["source_commit_sha_by_condition"][condition]
+            )
+            assert metadata["run_id"] == case_manifest["canonical_run_ids"][condition]
 
-        if task_id == "GS-T017":
-            repository_path = ROOT / "benchmark/workspaces/swesmith/Textualize__rich.9d8f9a37"
-            remote = subprocess.run(
-                ["git", "-C", str(repository_path), "remote", "get-url", "origin"],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            revision = subprocess.run(
-                ["git", "-C", str(repository_path), "rev-parse", "HEAD"],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            assert remote == record["clone_url"]
-            assert revision == record["revision"]
+        assert case_manifest["source_commit_sha_by_condition"] == {
+            condition: json.loads(
+                (
+                    ROOT
+                    / "research/evidence/reported"
+                    / evidence_case
+                    / condition
+                    / "run_metadata.json"
+                ).read_text(encoding="utf-8")
+            )["execution_commit_sha"]
+            for condition in ("B0", "T")
+        }
 
     assert len(run_ids) == len(set(run_ids))

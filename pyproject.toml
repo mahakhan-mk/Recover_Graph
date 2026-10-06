@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "graph-swarm"
 version = "0.1.0"
-description = "Research prototype for Verified Failure Memory in agentic software-engineering workflows."
+description = "RecoverGraph: outcome-verified recovery experience for LLM coding agents."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 

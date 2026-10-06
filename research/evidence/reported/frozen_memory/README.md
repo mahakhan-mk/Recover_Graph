@@ -1,7 +1,7 @@
 # Frozen RecoverGraph memory
 
-This package describes the five RecoveryPatterns distilled from the earlier objectively evaluated GS-T001–GS-T005 acquisition executions. Gate A1 R13B confirms that Cohere (`cohere/north-mini-code:free`) performed acquisition abstraction. The treatment Qwen runs consumed the fixed allowlist; they did not rebuild the patterns. The allowlist was frozen before transfer execution. The retained transfer runs are marked development-only in their current artifacts.
+This package contains the fixed five-pattern recovery corpus used by treatment runs. The corpus was acquired from the objectively evaluated GS-T001–GS-T005 executions; Gate A1 R13B closeout confirms `cohere/north-mini-code:free` performed the abstraction. The treatment runs consumed this fixed allowlist and did not rebuild it.
 
-Open `recovery_patterns.jsonl` as UTF-8 JSON Lines: each line is one pattern. Stored embeddings are included for three patterns (384 values each). Two records have nulls where the available artifacts did not preserve the underlying RecoveryPattern fields. The Neo4j connection was unconfigured during this export, so this package is an offline inspection snapshot, not a full five-record Neo4j dump.
+Read `recovery_patterns.jsonl` as UTF-8 JSON Lines, with one pattern per line. Three patterns have stored 384-value embeddings. Two records preserve unavailable fields as null. The Neo4j connection was not configured during export, so this is an offline inspection snapshot rather than a complete five-record database dump.
 
-Provenance: `memory_manifest.json` lists the R13B closeout and selected acquisition artifacts, treatment configs/freezes, schema migrations, and checksums. Inspecting this export requires no LLM or provider call.
+Canonical acquisition records, closeout evidence, model/config provenance, freeze metadata, and pattern-to-execution lineage are retained in `provenance/`. `memory_manifest.json` lists their paths and SHA-256 hashes. Validation requires no provider call.

@@ -1808,7 +1808,18 @@ def _materialize_workspace(
             f"stderr: {materialized.stderr.strip()!r}"
         )
     reset = subprocess.run(
-        ["git", "-C", str(destination), "reset", "--hard", "HEAD"],
+        [
+            "git",
+            "-C",
+            str(destination),
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
+            "reset",
+            "--hard",
+            "HEAD",
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -1819,7 +1830,17 @@ def _materialize_workspace(
             f"stdout: {reset.stdout.strip()!r}; stderr: {reset.stderr.strip()!r}"
         )
     baseline_status = subprocess.run(
-        ["git", "-C", str(destination), "status", "--porcelain"],
+        [
+            "git",
+            "-C",
+            str(destination),
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
+            "status",
+            "--porcelain",
+        ],
         check=False,
         capture_output=True,
         text=True,

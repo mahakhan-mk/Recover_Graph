@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "scope": "EXP1-EXP3 reported recurrence outcomes",
+  "adjudication_basis": "The manually validated transfer-task failure signature is scored from canonical raw execution evidence, with the frozen formal recurrence matcher retained as a separate recorded result.",
+  "adjudications": [
+    {
+      "task_id": "GS-T006",
+      "B0": {
+        "recurrence": true,
+        "adjudication_method": "formal matcher supported by failed frozen target test",
+        "supporting_artifact_path": "research/evidence/reported/T006/B0/raw_evidence.json",
+        "evidence_location": "events[13]: tornado/test/locale_test.py::TranslationLoaderTest::test_csv_bom FAILED",
+        "failure_signature": "CSV translation loading mishandles a UTF-8 BOM.",
+        "formal_matcher_agreed": true,
+        "matcher_result": true,
+        "matcher_note": "The formal recurrence matcher recorded true for this run."
+      },
+      "T": {
+        "recurrence": false,
+        "adjudication_method": "formal matcher; frozen target test passed",
+        "supporting_artifact_path": "research/evidence/reported/T006/T/raw_evidence.json",
+        "evidence_location": "events[8]: tornado/test/locale_test.py::TranslationLoaderTest::test_csv_bom PASSED",
+        "failure_signature": "CSV translation loading mishandles a UTF-8 BOM.",
+        "formal_matcher_agreed": true,
+        "matcher_result": false,
+        "matcher_note": "The formal recurrence matcher recorded false; the target test passed."
+      }
+    },
+    {
+      "task_id": "GS-T007",
+      "B0": {
+        "recurrence": true,
+        "adjudication_method": "manual signature adjudication from direct raw execution reproduction",
+        "supporting_artifact_path": "research/evidence/reported/T007/B0/raw_evidence.json",
+        "evidence_location": "events[1]: direct reproduction reports Expected: '23', Got: ''; the same mismatch is repeated in events[18] and events[22]",
+        "failure_signature": "Conditional assignment fails to preserve the expected outer variable value when the condition is false; expected 23, observed empty output.",
+        "formal_matcher_agreed": false,
+        "matcher_result": false,
+        "matcher_note": "The historical matcher recorded false because the frozen target tests were not run before UsageLimitExceeded. Direct raw execution reproduces the manually validated failure signature, so manual adjudication records recurrence=true."
+      },
+      "T": {
+        "recurrence": true,
+        "adjudication_method": "manual signature adjudication from direct raw execution reproduction",
+        "supporting_artifact_path": "research/evidence/reported/T007/T/raw_evidence.json",
+        "evidence_location": "events[2]: direct reproduction reports Expected: '23', Got: ''; the same mismatch is repeated in events[19] and events[21]",
+        "failure_signature": "Conditional assignment fails to preserve the expected outer variable value when the condition is false; expected 23, observed empty output.",
+        "formal_matcher_agreed": false,
+        "matcher_result": false,
+        "matcher_note": "The historical matcher recorded false because the frozen target tests were not run before UsageLimitExceeded. Direct raw execution reproduces the manually validated failure signature, so manual adjudication records recurrence=true."
+      }
+    },
+    {
+      "task_id": "GS-T008",
+      "B0": {
+        "recurrence": false,
+        "adjudication_method": "formal matcher supported by successful frozen target test run",
+        "supporting_artifact_path": "research/evidence/reported/T008/B0/raw_evidence.json",
+        "evidence_location": "events[4]: 688 tests passed, including the tests/dialects/test_spark.py target file",
+        "failure_signature": "Three-argument Spark DATE_ADD triggers UnboundLocalError.",
+        "formal_matcher_agreed": true,
+        "matcher_result": false,
+        "matcher_note": "The formal recurrence matcher recorded false; the frozen test run completed successfully."
+      },
+      "T": {
+        "recurrence": false,
+        "adjudication_method": "formal matcher and direct successful reproduction check",
+        "supporting_artifact_path": "research/evidence/reported/T008/T/raw_evidence.json",
+        "evidence_location": "events[5]: direct three-argument and two-argument DATE_ADD checks both report Success",
+        "failure_signature": "Three-argument Spark DATE_ADD triggers UnboundLocalError.",
+        "formal_matcher_agreed": true,
+        "matcher_result": false,
+        "matcher_note": "The formal recurrence matcher recorded false, and the direct check did not reproduce the annotated failure."
+      }
+    }
+  ]
+}

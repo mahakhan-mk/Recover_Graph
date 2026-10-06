@@ -1,53 +1,116 @@
 {
-    "corpus_name":  "RecoverGraph paper frozen recovery corpus",
-    "pattern_count":  5,
-    "pattern_ids":  [
-                        "recovery-pattern-ad07a6a45718b848a30ad377",
-                        "recovery-pattern-f490f62ab931191c6eac6db1",
-                        "recovery-pattern-162e3999c4a2c66a1ff647ed",
-                        "recovery-pattern-fd7b65022b22dc5f2a42816f",
-                        "recovery-pattern-99a54266f940e1d4648f4698"
-                    ],
-    "paper_facing_system_name":  "RecoverGraph",
-    "internal_package_name":  "graph_swarm",
-    "acquisition_abstraction_model":  "cohere/north-mini-code:free",
-    "abstraction_model_confirmation":  "Confirmed by Gate A1 R13B closeout selected logical results",
-    "embedding_model":  "sentence-transformers/all-MiniLM-L6-v2",
-    "embedding_dimension":  384,
-    "normalized_embeddings":  true,
-    "vector_similarity":  "cosine",
-    "vector_index":  "Neo4j native vector index recovery_pattern_embedding_idx",
-    "source_acquisition_paths":  [
-                                     "research/evidence/results/GS-E003/gate_a1/GATE_A1_R13B_CLOSEOUT.json",
-                                     "research/evidence/results/GS-E003/gate_a1/GATE_A1_R13B_CLOSEOUT.md",
-                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/manifest.json",
-                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/GS-E003/gate_a1/acquisition-r13b/GS-T001/GS-E003-A1-R13b-GS-T001-d2418a3ebc4a4ea9963cb5207bd73f3f/acquisition.json",
-                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/GS-E003/gate_a1/acquisition-r13b-retry-001/GS-T002/GS-E003-A1-R13b-GS-T002-bf6b0cd4d66949a7b1c2234c031ee770/acquisition.json",
-                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/GS-E003/gate_a1/acquisition-r13b/GS-T003/GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db/acquisition.json",
-                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/GS-E003/gate_a1/acquisition-r13b-retry-001/GS-T004/GS-E003-A1-R13b-GS-T004-ac49dfcc4dd64f6c9acaaab4a5ed885e/acquisition.json",
-                                     "research/evidence/results/GS-E003/gate_a1/acquisition-r13b-20260923T115128Z/GS-E003/gate_a1/acquisition-r13b/GS-T005/GS-E003-A1-R13b-GS-T005-ba0d94867f6944cd8341a28a44c4013b/acquisition.json"
-                                 ],
-    "treatment_configs":  [
-                              "configs/experiments/sprint3b_kilo_v4_canary_qwen3_coder.yaml",
-                              "configs/experiments/gs_e003_hardened_development_v1.yaml"
-                          ],
-    "treatment_freezes":  [
-                              "research/evidence/results/GS-E003/sprint3b_kilo_v4_qwen3_coder_canary/freeze.json",
-                              "research/evidence/results/GS-E003/sprint3b_hardened_development_v1/freeze.json"
-                          ],
-    "memory_policy":  "Fixed frozen acquisition corpus; read-only treatment memory",
-    "online_memory_writes":  false,
-    "neo4j_writes_during_selected_treatment_runs":  false,
-    "freeze_status":  "The selected run freezes designate these as development-only candidates; no selected run is classified VALID_REPORTED",
-    "export_timestamp":  "2026-10-05T13:29:53+05:00",
-    "export_git_commit_sha":  "70525a28b18f3ec8399b4eec29586d9a91dd0a64",
-    "schema_migrations":  [
-                              "migrations/neo4j/001_constraints.cypher",
-                              "migrations/neo4j/002_recovery_pattern_vector_index.cypher"
-                          ],
-    "checksums":  {
-                      "acquisition_closeout_json_sha256":  "a8a1427e04d744b5e89aea58d9fd370e5d71d85b84f2d1eca703301c8444b56d",
-                      "recovery_patterns_jsonl_sha256":  "7815328cd3fc360f7d200f7ee2561490cc50f89d2dadf1787112e81c33d42434"
-                  },
-    "export_completeness":  "Three full stored records exported from treatment advisory evidence; two records contain only supported acquisition/closeout fields and null for unavailable values. Neo4j was not configured in this checkout."
+  "corpus_name": "RecoverGraph paper frozen recovery corpus",
+  "pattern_count": 5,
+  "pattern_ids": [
+    "recovery-pattern-ad07a6a45718b848a30ad377",
+    "recovery-pattern-f490f62ab931191c6eac6db1",
+    "recovery-pattern-162e3999c4a2c66a1ff647ed",
+    "recovery-pattern-fd7b65022b22dc5f2a42816f",
+    "recovery-pattern-99a54266f940e1d4648f4698"
+  ],
+  "paper_facing_system_name": "RecoverGraph",
+  "internal_package_name": "graph_swarm",
+  "acquisition_abstraction_model": "cohere/north-mini-code:free",
+  "abstraction_model_confirmation": "Confirmed by Gate A1 R13B closeout selected logical results",
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "embedding_dimension": 384,
+  "normalized_embeddings": true,
+  "vector_similarity": "cosine",
+  "vector_index": "Neo4j native vector index recovery_pattern_embedding_idx",
+  "source_acquisition_paths": [
+    "research/evidence/reported/frozen_memory/provenance/acquisition_manifest.json",
+    "research/evidence/reported/frozen_memory/provenance/GATE_A1_R13B_CLOSEOUT.json",
+    "research/evidence/reported/frozen_memory/provenance/GATE_A1_R13B_CLOSEOUT.md",
+    "research/evidence/reported/frozen_memory/provenance/acquisition_records/GS-T001/acquisition.json",
+    "research/evidence/reported/frozen_memory/provenance/acquisition_records/GS-T002/acquisition.json",
+    "research/evidence/reported/frozen_memory/provenance/acquisition_records/GS-T003/acquisition.json",
+    "research/evidence/reported/frozen_memory/provenance/acquisition_records/GS-T004/acquisition.json",
+    "research/evidence/reported/frozen_memory/provenance/acquisition_records/GS-T005/acquisition.json",
+    "research/evidence/reported/frozen_memory/provenance/freeze_metadata.json",
+    "research/evidence/reported/frozen_memory/provenance/configs/gate_a1_acquisition_r13b_v2.yaml",
+    "research/evidence/reported/frozen_memory/provenance/configs/openrouter_coding_r13b.yaml",
+    "research/evidence/reported/frozen_memory/provenance/freezes/exp1_exp3_freeze.json",
+    "research/evidence/reported/frozen_memory/provenance/freezes/exp4_freeze.json"
+  ],
+  "treatment_configs": [
+    "configs/experiments/sprint3b_kilo_v4_canary_qwen3_coder.yaml",
+    "configs/experiments/gs_e003_hardened_development_v1.yaml"
+  ],
+  "treatment_freezes": [
+    "research/evidence/reported/frozen_memory/provenance/freezes/exp1_exp3_freeze.json",
+    "research/evidence/reported/frozen_memory/provenance/freezes/exp4_freeze.json"
+  ],
+  "memory_policy": "Fixed frozen acquisition corpus; read-only treatment memory",
+  "online_memory_writes": false,
+  "neo4j_writes_during_selected_treatment_runs": false,
+  "freeze_status": "The selected run freezes designate these as development-only candidates; no selected run is classified VALID_REPORTED",
+  "export_timestamp": "2026-10-05T13:29:53+05:00",
+  "export_git_commit_sha": "70525a28b18f3ec8399b4eec29586d9a91dd0a64",
+  "schema_migrations": [
+    "migrations/neo4j/001_constraints.cypher",
+    "migrations/neo4j/002_recovery_pattern_vector_index.cypher"
+  ],
+  "checksums": {
+    "acquisition_closeout_json_sha256": "a8a1427e04d744b5e89aea58d9fd370e5d71d85b84f2d1eca703301c8444b56d",
+    "recovery_patterns_jsonl_sha256": "7815328cd3fc360f7d200f7ee2561490cc50f89d2dadf1787112e81c33d42434",
+    "acquisition_manifest_sha256": "28e3972afcb155d07984af6715a8263ca4dc407cd1c11ee8c8080ea17f3576a6",
+    "freeze_metadata_sha256": "16bfaca626a0543f5994cec625772e0d18901d4b105f61bd7847500df3293aa8"
+  },
+  "export_completeness": "Three full stored records exported from treatment advisory evidence; two records contain only supported acquisition/closeout fields and null for unavailable values. Neo4j was not configured in this checkout.",
+  "provenance": {
+    "root": "research/evidence/reported/frozen_memory/provenance/",
+    "freeze_metadata": "research/evidence/reported/frozen_memory/provenance/freeze_metadata.json",
+    "pattern_lineage": {
+      "recovery-pattern-ad07a6a45718b848a30ad377": {
+        "source_task_id": "GS-T001",
+        "source_run_id": "GS-E003-A1-R13b-GS-T001-d2418a3ebc4a4ea9963cb5207bd73f3f",
+        "selected_attempt": 1,
+        "record_path": "acquisition_records/GS-T001/acquisition.json",
+        "record_sha256": "78c22839b803928f1ba112110c5303695d787bd7031f5b76bbf81322d89d774b"
+      },
+      "recovery-pattern-162e3999c4a2c66a1ff647ed": {
+        "source_task_id": "GS-T002",
+        "source_run_id": "GS-E003-A1-R13b-GS-T002-bf6b0cd4d66949a7b1c2234c031ee770",
+        "selected_attempt": 2,
+        "record_path": "acquisition_records/GS-T002/acquisition.json",
+        "record_sha256": "f8e9341e060005c6c04f86bcb626f8ba0cb664489f72a3de9ec7b0710da48d2a"
+      },
+      "recovery-pattern-f490f62ab931191c6eac6db1": {
+        "source_task_id": "GS-T003",
+        "source_run_id": "GS-E003-A1-R13b-GS-T003-385aa250afca478c93f272ca58df68db",
+        "selected_attempt": 1,
+        "record_path": "acquisition_records/GS-T003/acquisition.json",
+        "record_sha256": "dbd450a97e89ba6d8053fc2b8e5412aa470120f674a65e1ce7e27b7a98da690f"
+      },
+      "recovery-pattern-99a54266f940e1d4648f4698": {
+        "source_task_id": "GS-T004",
+        "source_run_id": "GS-E003-A1-R13b-GS-T004-ac49dfcc4dd64f6c9acaaab4a5ed885e",
+        "selected_attempt": 2,
+        "record_path": "acquisition_records/GS-T004/acquisition.json",
+        "record_sha256": "5dbc7e6d3c83166910e664663eb0ab1ac147cd360c59244be8f36fe73ca09896"
+      },
+      "recovery-pattern-fd7b65022b22dc5f2a42816f": {
+        "source_task_id": "GS-T005",
+        "source_run_id": "GS-E003-A1-R13b-GS-T005-ba0d94867f6944cd8341a28a44c4013b",
+        "selected_attempt": 1,
+        "record_path": "acquisition_records/GS-T005/acquisition.json",
+        "record_sha256": "1c4f8010e99b01d5209364efafbdfae10a0d8b949541ec9ddc173a47eb83092e"
+      }
+    },
+    "files_sha256": {
+      "acquisition_manifest.json": "28e3972afcb155d07984af6715a8263ca4dc407cd1c11ee8c8080ea17f3576a6",
+      "freeze_metadata.json": "16bfaca626a0543f5994cec625772e0d18901d4b105f61bd7847500df3293aa8",
+      "GATE_A1_R13B_CLOSEOUT.json": "a8a1427e04d744b5e89aea58d9fd370e5d71d85b84f2d1eca703301c8444b56d",
+      "GATE_A1_R13B_CLOSEOUT.md": "0ddb16f9f8aeeab9b64473a628ce5b368bc4a11dbf5e6004c817dc7a4d48f26a",
+      "configs/gate_a1_acquisition_r13b_v2.yaml": "59dba4899d7ce297aa8bde409b8ed0ee35739f98fe204be531db2d01f4582447",
+      "configs/openrouter_coding_r13b.yaml": "f65ddb7726d21b6a994c4ce56723f855a729570745c65896a1b234dd40dc7370",
+      "freezes/exp1_exp3_freeze.json": "eaf6a8d47c6a1d4789b195de728c6091b7996b04831337071c23dbb7da42b9f5",
+      "freezes/exp4_freeze.json": "909c32849378324773caa542a0aef94aa3f758d27e6d92c732f819ef53428405",
+      "acquisition_records/GS-T001/acquisition.json": "78c22839b803928f1ba112110c5303695d787bd7031f5b76bbf81322d89d774b",
+      "acquisition_records/GS-T002/acquisition.json": "f8e9341e060005c6c04f86bcb626f8ba0cb664489f72a3de9ec7b0710da48d2a",
+      "acquisition_records/GS-T003/acquisition.json": "dbd450a97e89ba6d8053fc2b8e5412aa470120f674a65e1ce7e27b7a98da690f",
+      "acquisition_records/GS-T004/acquisition.json": "5dbc7e6d3c83166910e664663eb0ab1ac147cd360c59244be8f36fe73ca09896",
+      "acquisition_records/GS-T005/acquisition.json": "1c4f8010e99b01d5209364efafbdfae10a0d8b949541ec9ddc173a47eb83092e"
+    }
+  }
 }
