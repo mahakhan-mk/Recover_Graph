@@ -105,4 +105,11 @@ See [CITATION.cff](CITATION.cff) for the repository/software citation. The paper
 
 ## License
 
-No repository license decision is recorded. No license is granted by this repository until its maintainers select and add one.
+RecoverGraph is licensed under the [Apache License 2.0](LICENSE).
+Third-party components and materials remain under their respective licenses and terms;
+this project license does not relicense or grant rights to them. This includes, where
+applicable, SWE-smith benchmark data, other external datasets, task patches, and benchmark environments; upstream
+projects such as Tornado, Jinja, SQLGlot, and Rich; Python dependencies such as Neo4j,
+PydanticAI, and other dependencies; and external Qwen and Cohere models and services.
+Consult each upstream project's license and each service's terms for use or redistribution.
+See [NOTICE](NOTICE) for identified source excerpts and benchmark attribution details.

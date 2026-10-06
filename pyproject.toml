@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "RecoverGraph: outcome-verified recovery experience for LLM coding agents."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
+license = "Apache-2.0"
 
 dependencies = [
     "packaging>=24.0",
